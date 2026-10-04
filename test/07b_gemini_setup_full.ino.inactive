@@ -1,0 +1,231 @@
+// Step 7b - Gemini Live Session Setup (full)
+// Builds on step 7a's minimal setup message: adds the systemInstruction
+// (persona + COMMUNICATION_LANGUAGE + tool-use guidance) and the
+// set_board_state function schema, then confirms setupComplete. This is
+// the rest of step 7 - there is no separate 7c; once this passes, step 7
+// as a whole is done.
+//
+// Requires the "WebSockets" library by Markus Sattler (Links2004),
+// installable via the Arduino Library Manager.
+
+#include <WiFi.h>
+#include <WebSocketsClient.h>
+#include "config.h"
+
+namespace {
+const char kGeminiHost[] = "generativelanguage.googleapis.com";
+constexpr uint16_t kGeminiPort = 443;
+const char kGeminiPath[] =
+    "/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent?key=" GEMINI_API_KEY;
+
+// Google Trust Services GTS Root R1 - the root Google's TLS certs chain up
+// to. Fetched from https://pki.goog/repo/certs/gtsr1.pem.
+const char kRootCaCert[] = R"EOF(
+-----BEGIN CERTIFICATE-----
+MIIFVzCCAz+gAwIBAgINAgPlk28xsBNJiGuiFzANBgkqhkiG9w0BAQwFADBHMQsw
+CQYDVQQGEwJVUzEiMCAGA1UEChMZR29vZ2xlIFRydXN0IFNlcnZpY2VzIExMQzEU
+MBIGA1UEAxMLR1RTIFJvb3QgUjEwHhcNMTYwNjIyMDAwMDAwWhcNMzYwNjIyMDAw
+MDAwWjBHMQswCQYDVQQGEwJVUzEiMCAGA1UEChMZR29vZ2xlIFRydXN0IFNlcnZp
+Y2VzIExMQzEUMBIGA1UEAxMLR1RTIFJvb3QgUjEwggIiMA0GCSqGSIb3DQEBAQUA
+A4ICDwAwggIKAoICAQC2EQKLHuOhd5s73L+UPreVp0A8of2C+X0yBoJx9vaMf/vo
+27xqLpeXo4xL+Sv2sfnOhB2x+cWX3u+58qPpvBKJXqeqUqv4IyfLpLGcY9vXmX7w
+Cl7raKb0xlpHDU0QM+NOsROjyBhsS+z8CZDfnWQpJSMHobTSPS5g4M/SCYe7zUjw
+TcLCeoiKu7rPWRnWr4+wB7CeMfGCwcDfLqZtbBkOtdh+JhpFAz2weaSUKK0Pfybl
+qAj+lug8aJRT7oM6iCsVlgmy4HqMLnXWnOunVmSPlk9orj2XwoSPwLxAwAtcvfaH
+szVsrBhQf4TgTM2S0yDpM7xSma8ytSmzJSq0SPly4cpk9+aCEI3oncKKiPo4Zor8
+Y/kB+Xj9e1x3+naH+uzfsQ55lVe0vSbv1gHR6xYKu44LtcXFilWr06zqkUspzBmk
+MiVOKvFlRNACzqrOSbTqn3yDsEB750Orp2yjj32JgfpMpf/VjsPOS+C12LOORc92
+wO1AK/1TD7Cn1TsNsYqiA94xrcx36m97PtbfkSIS5r762DL8EGMUUXLeXdYWk70p
+aDPvOmbsB4om3xPXV2V4J95eSRQAogB/mqghtqmxlbCluQ0WEdrHbEg8QOB+DVrN
+VjzRlwW5y0vtOUucxD/SVRNuJLDWcfr0wbrM7Rv1/oFB2ACYPTrIrnqYNxgFlQID
+AQABo0IwQDAOBgNVHQ8BAf8EBAMCAYYwDwYDVR0TAQH/BAUwAwEB/zAdBgNVHQ4E
+FgQU5K8rJnEaK0gnhS9SZizv8IkTcT4wDQYJKoZIhvcNAQEMBQADggIBAJ+qQibb
+C5u+/x6Wki4+omVKapi6Ist9wTrYggoGxval3sBOh2Z5ofmmWJyq+bXmYOfg6LEe
+QkEzCzc9zolwFcq1JKjPa7XSQCGYzyI0zzvFIoTgxQ6KfF2I5DUkzps+GlQebtuy
+h6f88/qBVRRiClmpIgUxPoLW7ttXNLwzldMXG+gnoot7TiYaelpkttGsN/H9oPM4
+7HLwEXWdyzRSjeZ2axfG34arJ45JK3VmgRAhpuo+9K4l/3wV3s6MJT/KYnAK9y8J
+ZgfIPxz88NtFMN9iiMG1D53Dn0reWVlHxYciNuaCp+0KueIHoI17eko8cdLiA6Ef
+MgfdG+RCzgwARWGAtQsgWSl4vflVy2PFPEz0tv/bal8xa5meLMFrUKTX5hgUvYU/
+Z6tGn6D/Qqc6f1zLXbBwHSs09dR2CQzreExZBfMzQsNhFRAbd03OIozUhfJFfbdT
+6u9AWpQKXCBfTkBdYiJ23//OYb2MI3jSNwLgjt7RETeJ9r/tSQdirpLsQBqvFAnZ
+0E6yove+7u7Y/9waLd64NnHi/Hm3lCXRSHNboTXns5lndcEZOitHTtNCjv0xyBZm
+2tIMPNuzjsmhDYAPexZ3FL//2wmUspO8IFgV6dtxQ/PeEMMA3KgqlbbC1j+Qa3bb
+bP6MvPJwNQzcmRk13NfIRmPVNnGuV/u3gm3c
+-----END CERTIFICATE-----
+)EOF";
+
+// Google's recommended general-purpose Live API default: native audio,
+// low latency. NOTE: native-audio models auto-choose their spoken
+// language and do NOT honor an explicit speechConfig.languageCode, so
+// language here is enforced only through the systemInstruction text
+// below. If strict language enforcement ever matters more than
+// latency/voice quality, switch to a half-cascade model (e.g.
+// "models/gemini-3.1-flash-live-preview"), which does support an
+// explicit language code.
+//
+// The setup message is built as a raw JSON string (not ArduinoJson) since
+// every field is static/compile-time - only COMMUNICATION_LANGUAGE is
+// substituted in. Structured JSON parsing arrives when we actually need
+// to read function-call arguments back out (step 9).
+const char kSetupMessage[] = R"JSON({
+  "setup": {
+    "model": "models/gemini-3.8-live",
+    "generationConfig": { "responseModalities": ["AUDIO"] },
+    "systemInstruction": {
+      "parts": [ { "text": "You are a helpful voice assistant running on an ESP32 board. Always respond only in )JSON"
+    COMMUNICATION_LANGUAGE
+R"JSON(. When the board's state should change (for example turning the onboard LED on or off), call the set_board_state function in addition to giving your spoken reply." } ]
+    },
+    "tools": [
+      { "functionDeclarations": [
+        {
+          "name": "set_board_state",
+          "description": "Updates the physical state of the ESP32 board, such as the onboard LED.",
+          "parameters": {
+            "type": "OBJECT",
+            "properties": {
+              "led_on": { "type": "BOOLEAN", "description": "Whether the onboard LED should be turned on (true) or off (false)." }
+            },
+            "required": ["led_on"]
+          }
+        }
+      ] }
+    ]
+  }
+})JSON";
+
+// Exponential backoff for reconnects, modeled on Google's own documented
+// retry guidance (~1s initial delay, doubling, capped - see
+// PROJECT_OVERVIEW.md "Gotchas"). This matters because the WebSockets
+// library's own auto-reconnect defaults to a fixed 500ms interval with no
+// backoff, which is what caused the silent rapid-reconnect rejections seen
+// in earlier runs of this test.
+constexpr unsigned long kInitialBackoffMs = 1000;
+constexpr unsigned long kMaxBackoffMs = 30000;
+
+WebSocketsClient webSocket;
+bool should_send_setup = false;
+unsigned long reconnect_backoff_ms = kInitialBackoffMs;
+bool setup_complete_received = false;
+}  // namespace
+
+/** Adds up to +/-20% random jitter to a delay, so retries don't all land on the same cadence. */
+unsigned long addJitter(unsigned long base_ms) {
+  long jitter_range = static_cast<long>(base_ms) / 5;
+  long jitter = random(-jitter_range, jitter_range + 1);
+  long result = static_cast<long>(base_ms) + jitter;
+  return result < 0 ? 0 : static_cast<unsigned long>(result);
+}
+
+/** Blocks until Wi-Fi connects, logging progress and the assigned IP. */
+void connectToWifi() {
+  Serial.printf("[gemini_setup_full][Step 7b] Connecting to Wi-Fi SSID \"%s\"...\n", WIFI_SSID);
+  WiFi.mode(WIFI_STA);
+  WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
+
+  while (WiFi.status() != WL_CONNECTED) {
+    delay(300);
+    Serial.print(".");
+  }
+
+  Serial.println();
+  Serial.printf("[gemini_setup_full][Step 7b] Wi-Fi connected. IP address: %s\n", WiFi.localIP().toString().c_str());
+}
+
+/** Blocks until SNTP has set a plausible system time, required for TLS cert validation. */
+void syncSystemTime() {
+  Serial.println("[gemini_setup_full][Step 7b] Syncing time via SNTP (required for TLS cert validation)...");
+  configTime(0, 0, "pool.ntp.org", "time.nist.gov");
+
+  time_t now = time(nullptr);
+  while (now < 8 * 3600 * 2) {  // still near the 1970 epoch means time hasn't synced yet
+    delay(300);
+    Serial.print(".");
+    now = time(nullptr);
+  }
+
+  Serial.println();
+  Serial.printf("[gemini_setup_full][Step 7b] Time synced: %s", asctime(gmtime(&now)));
+}
+
+/** Prints the exact setup message we're about to send, so it can be eyeballed for JSON mistakes. */
+void logSetupMessage() {
+  Serial.println("[gemini_setup_full][Step 7b] Setup message to send:");
+  Serial.println(kSetupMessage);
+}
+
+/** Handles WebSocket lifecycle events: flags the setup message to be sent, watches for setupComplete,
+    and applies exponential backoff to reconnects that never got a reply. */
+void onWebSocketEvent(WStype_t type, uint8_t* payload, size_t length) {
+  switch (type) {
+    case WStype_CONNECTED:
+      Serial.println("[gemini_setup_full][Step 7b] WSS connected.");
+      // Deferred to loop() rather than sent here: calling sendTXT() directly
+      // inside this callback can deadlock the library, since the callback
+      // fires from within its own internal send/receive processing.
+      setup_complete_received = false;
+      should_send_setup = true;
+      break;
+    case WStype_DISCONNECTED:
+      if (setup_complete_received) {
+        // A normal, successful disconnect (e.g. the server closing an idle
+        // session after setupComplete) - no reason to penalize the next
+        // attempt, so the backoff resets.
+        Serial.println("[gemini_setup_full][Step 7b] Disconnected after a successful setup. Resetting backoff.");
+        reconnect_backoff_ms = kInitialBackoffMs;
+      } else {
+        // Never got a reply before disconnecting - this is the failure
+        // pattern seen in earlier runs (silent rapid-reconnect rejections).
+        // Back off exponentially instead of retrying instantly.
+        unsigned long wait_ms = addJitter(reconnect_backoff_ms);
+        Serial.printf("[gemini_setup_full][Step 7b] Disconnected with no reply. Backing off ~%lu ms before retrying.\n", wait_ms);
+        webSocket.setReconnectInterval(wait_ms);
+        reconnect_backoff_ms = min(reconnect_backoff_ms * 2, kMaxBackoffMs);
+      }
+      break;
+    case WStype_TEXT:
+    case WStype_BIN: {
+      // This server sends its JSON replies over binary (opcode 0x2) frames,
+      // not text frames - so both are handled identically here.
+      Serial.printf("[gemini_setup_full][Step 7b] Received (%u bytes): %.*s\n", (unsigned)length, (int)length, payload);
+      String text(reinterpret_cast<char*>(payload), length);
+      if (text.indexOf("setupComplete") >= 0) {
+        Serial.println("[gemini_setup_full][Step 7b] setupComplete received - full session setup works.");
+        setup_complete_received = true;
+      }
+      break;
+    }
+    case WStype_ERROR:
+      Serial.printf("[gemini_setup_full][Step 7b] WebSocket error: %.*s\n", (int)length, payload);
+      break;
+    default:
+      break;
+  }
+}
+
+/** One-time setup: Wi-Fi, time sync, then open the session. */
+void setup() {
+  Serial.begin(115200);
+  Serial.println("[gemini_setup_full][Step 7b] Boot.");
+  randomSeed(esp_random());  // seeds addJitter() with the ESP32's hardware RNG
+
+  connectToWifi();
+  syncSystemTime();
+  logSetupMessage();
+
+  Serial.println("[gemini_setup_full][Step 7b] Opening WSS connection to the Gemini Live API endpoint...");
+  webSocket.onEvent(onWebSocketEvent);
+  webSocket.beginSslWithCA(kGeminiHost, kGeminiPort, kGeminiPath, kRootCaCert);
+}
+
+/** Services the WebSocket connection, sending the setup message once a connection is flagged ready. */
+void loop() {
+  webSocket.loop();
+
+  if (should_send_setup) {
+    should_send_setup = false;
+    Serial.println("[gemini_setup_full][Step 7b] Sending session setup message...");
+    webSocket.sendTXT(kSetupMessage);
+    Serial.println("[gemini_setup_full][Step 7b] sendTXT() returned.");
+  }
+}

@@ -1,0 +1,357 @@
+// Step 8a - Gemini Live Text Round Trip
+// Sends one hardcoded test message via clientContent right after
+// setupComplete, and parses the serverContent reply with ArduinoJson -
+// printing the extracted text to Serial. This validates real JSON field
+// extraction and the basic send/receive turn cycle before audio's
+// binary/base64 complexity is added on top in step 8b.
+//
+// NOTE: originally this used responseModalities: ["TEXT"], which silently
+// never got a reply - native-audio Live models (gemini-3.8-live included)
+// only support AUDIO output; requesting TEXT is accepted at setup but the
+// model then has nothing it can produce, so no serverContent ever arrives.
+// Fixed by keeping AUDIO modality and adding outputAudioTranscription, so
+// the spoken reply's transcript comes back as plain text
+// (serverContent.outputTranscription.text) - the audio itself is received
+// but intentionally ignored here (that's step 8c's job).
+//
+// Requires the "WebSockets" library by Markus Sattler (Links2004) and
+// "ArduinoJson" by Benoit Blanchon (v7), both installable via the Arduino
+// Library Manager.
+
+#include <WiFi.h>
+#include <WebSocketsClient.h>
+#include <ArduinoJson.h>
+#include "config.h"
+
+namespace {
+const char kGeminiHost[] = "generativelanguage.googleapis.com";
+constexpr uint16_t kGeminiPort = 443;
+const char kGeminiPath[] =
+    "/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent?key=" GEMINI_API_KEY;
+
+// Google Trust Services GTS Root R1 - the root Google's TLS certs chain up
+// to. Fetched from https://pki.goog/repo/certs/gtsr1.pem.
+const char kRootCaCert[] = R"EOF(
+-----BEGIN CERTIFICATE-----
+MIIFVzCCAz+gAwIBAgINAgPlk28xsBNJiGuiFzANBgkqhkiG9w0BAQwFADBHMQsw
+CQYDVQQGEwJVUzEiMCAGA1UEChMZR29vZ2xlIFRydXN0IFNlcnZpY2VzIExMQzEU
+MBIGA1UEAxMLR1RTIFJvb3QgUjEwHhcNMTYwNjIyMDAwMDAwWhcNMzYwNjIyMDAw
+MDAwWjBHMQswCQYDVQQGEwJVUzEiMCAGA1UEChMZR29vZ2xlIFRydXN0IFNlcnZp
+Y2VzIExMQzEUMBIGA1UEAxMLR1RTIFJvb3QgUjEwggIiMA0GCSqGSIb3DQEBAQUA
+A4ICDwAwggIKAoICAQC2EQKLHuOhd5s73L+UPreVp0A8of2C+X0yBoJx9vaMf/vo
+27xqLpeXo4xL+Sv2sfnOhB2x+cWX3u+58qPpvBKJXqeqUqv4IyfLpLGcY9vXmX7w
+Cl7raKb0xlpHDU0QM+NOsROjyBhsS+z8CZDfnWQpJSMHobTSPS5g4M/SCYe7zUjw
+TcLCeoiKu7rPWRnWr4+wB7CeMfGCwcDfLqZtbBkOtdh+JhpFAz2weaSUKK0Pfybl
+qAj+lug8aJRT7oM6iCsVlgmy4HqMLnXWnOunVmSPlk9orj2XwoSPwLxAwAtcvfaH
+szVsrBhQf4TgTM2S0yDpM7xSma8ytSmzJSq0SPly4cpk9+aCEI3oncKKiPo4Zor8
+Y/kB+Xj9e1x3+naH+uzfsQ55lVe0vSbv1gHR6xYKu44LtcXFilWr06zqkUspzBmk
+MiVOKvFlRNACzqrOSbTqn3yDsEB750Orp2yjj32JgfpMpf/VjsPOS+C12LOORc92
+wO1AK/1TD7Cn1TsNsYqiA94xrcx36m97PtbfkSIS5r762DL8EGMUUXLeXdYWk70p
+aDPvOmbsB4om3xPXV2V4J95eSRQAogB/mqghtqmxlbCluQ0WEdrHbEg8QOB+DVrN
+VjzRlwW5y0vtOUucxD/SVRNuJLDWcfr0wbrM7Rv1/oFB2ACYPTrIrnqYNxgFlQID
+AQABo0IwQDAOBgNVHQ8BAf8EBAMCAYYwDwYDVR0TAQH/BAUwAwEB/zAdBgNVHQ4E
+FgQU5K8rJnEaK0gnhS9SZizv8IkTcT4wDQYJKoZIhvcNAQEMBQADggIBAJ+qQibb
+C5u+/x6Wki4+omVKapi6Ist9wTrYggoGxval3sBOh2Z5ofmmWJyq+bXmYOfg6LEe
+QkEzCzc9zolwFcq1JKjPa7XSQCGYzyI0zzvFIoTgxQ6KfF2I5DUkzps+GlQebtuy
+h6f88/qBVRRiClmpIgUxPoLW7ttXNLwzldMXG+gnoot7TiYaelpkttGsN/H9oPM4
+7HLwEXWdyzRSjeZ2axfG34arJ45JK3VmgRAhpuo+9K4l/3wV3s6MJT/KYnAK9y8J
+ZgfIPxz88NtFMN9iiMG1D53Dn0reWVlHxYciNuaCp+0KueIHoI17eko8cdLiA6Ef
+MgfdG+RCzgwARWGAtQsgWSl4vflVy2PFPEz0tv/bal8xa5meLMFrUKTX5hgUvYU/
+Z6tGn6D/Qqc6f1zLXbBwHSs09dR2CQzreExZBfMzQsNhFRAbd03OIozUhfJFfbdT
+6u9AWpQKXCBfTkBdYiJ23//OYb2MI3jSNwLgjt7RETeJ9r/tSQdirpLsQBqvFAnZ
+0E6yove+7u7Y/9waLd64NnHi/Hm3lCXRSHNboTXns5lndcEZOitHTtNCjv0xyBZm
+2tIMPNuzjsmhDYAPexZ3FL//2wmUspO8IFgV6dtxQ/PeEMMA3KgqlbbC1j+Qa3bb
+bP6MvPJwNQzcmRk13NfIRmPVNnGuV/u3gm3c
+-----END CERTIFICATE-----
+)EOF";
+
+// AUDIO modality (required by this model) + outputAudioTranscription so we
+// get a text transcript of the spoken reply without decoding audio yet.
+// No tools, no language instruction - isolates the send/receive/parse
+// cycle on its own.
+const char kSetupMessage[] =
+    R"JSON({"setup":{"model":"models/gemini-3.8-live","generationConfig":{"responseModalities":["AUDIO"]},"outputAudioTranscription":{}}})JSON";
+
+// "role":"user" is technically optional per the schema, but every example
+// in Google's docs includes it explicitly - added defensively since the
+// server was silently generating nothing at all without it.
+const char kTestMessage[] =
+    R"JSON({"clientContent":{"turns":[{"role":"user","parts":[{"text":"What is 2 + 2? Answer in one short sentence."}]}],"turnComplete":true}})JSON";
+
+// Same exponential backoff as step 7b - see PROJECT_OVERVIEW.md "Gotchas".
+constexpr unsigned long kInitialBackoffMs = 1000;
+constexpr unsigned long kMaxBackoffMs = 30000;
+
+WebSocketsClient webSocket;
+bool should_send_setup = false;
+bool should_send_test_message = false;
+unsigned long reconnect_backoff_ms = kInitialBackoffMs;
+bool setup_complete_received = false;
+bool test_result_logged = false;
+bool should_keep_running = true;
+uint32_t connection_cycle = 0;
+uint32_t message_number = 0;
+}  // namespace
+
+/** Logs the unambiguous PASS verdict exactly once, then stops the sketch
+    from reconnecting/retrying further - a passed test should end cleanly,
+    not keep demonstrating the same exchange forever. */
+void logTestPassed() {
+  if (test_result_logged) return;
+  test_result_logged = true;
+  should_keep_running = false;
+  Serial.println("[gemini_text_roundtrip][Step 8a] ===== TEST PASSED =====");
+  Serial.println("[gemini_text_roundtrip][Step 8a] Done - no longer sending or reconnecting.");
+}
+
+/** Logs the unambiguous FAIL verdict exactly once, then stops the sketch.
+    Reserved for genuine, non-transient problems - not an expected retry. */
+void logTestFailed(const char* reason) {
+  if (test_result_logged) return;
+  should_keep_running = false;
+  test_result_logged = true;
+  Serial.printf("[gemini_text_roundtrip][Step 8a] ===== TEST FAILED: %s =====\n", reason);
+}
+
+/** Adds up to +/-20% random jitter to a delay, so retries don't all land on the same cadence. */
+unsigned long addJitter(unsigned long base_ms) {
+  long jitter_range = static_cast<long>(base_ms) / 5;
+  long jitter = random(-jitter_range, jitter_range + 1);
+  long result = static_cast<long>(base_ms) + jitter;
+  return result < 0 ? 0 : static_cast<unsigned long>(result);
+}
+
+/** Blocks until Wi-Fi connects, logging progress and the assigned IP. */
+void connectToWifi() {
+  Serial.printf("[gemini_text_roundtrip][Step 8a] Connecting to Wi-Fi SSID \"%s\"...\n", WIFI_SSID);
+  WiFi.mode(WIFI_STA);
+  WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
+
+  while (WiFi.status() != WL_CONNECTED) {
+    delay(300);
+    Serial.print(".");
+  }
+
+  Serial.println();
+  Serial.printf("[gemini_text_roundtrip][Step 8a] Wi-Fi connected. IP address: %s\n", WiFi.localIP().toString().c_str());
+}
+
+/** Blocks until SNTP has set a plausible system time, required for TLS cert validation. */
+void syncSystemTime() {
+  Serial.println("[gemini_text_roundtrip][Step 8a] Syncing time via SNTP (required for TLS cert validation)...");
+  configTime(0, 0, "pool.ntp.org", "time.nist.gov");
+
+  time_t now = time(nullptr);
+  while (now < 8 * 3600 * 2) {  // still near the 1970 epoch means time hasn't synced yet
+    delay(300);
+    Serial.print(".");
+    now = time(nullptr);
+  }
+
+  Serial.println();
+  Serial.printf("[gemini_text_roundtrip][Step 8a] Time synced: %s", asctime(gmtime(&now)));
+}
+
+/** Prints every key of a JSON object on one line, prefixed by the given label - so nothing
+    present in a message goes unnoticed just because we didn't think to look for it. */
+void logObjectKeys(const char* label, JsonObjectConst obj) {
+  Serial.printf("[gemini_text_roundtrip][Step 8a]   %s keys:", label);
+  for (JsonPairConst kv : obj) {
+    Serial.printf(" %s", kv.key().c_str());
+  }
+  Serial.println();
+}
+
+/** Parses one server message and logs everything about its structure - top-level keys,
+    every serverContent sub-field, and each modelTurn part's type/size - then triggers the
+    test message after setupComplete and reports the transcribed reply text, if present. */
+void handleServerMessage(uint8_t* payload, size_t length) {
+  message_number++;
+  unsigned long t = millis();
+
+  JsonDocument doc;
+  DeserializationError err = deserializeJson(doc, reinterpret_cast<const char*>(payload), length);
+  if (err) {
+    Serial.printf("[gemini_text_roundtrip][Step 8a][t=%lu][cycle=%u][msg=%u] JSON parse error: %s\n",
+                  t, connection_cycle, message_number, err.c_str());
+    logTestFailed("received a message that isn't valid JSON");
+    return;
+  }
+
+  Serial.printf("[gemini_text_roundtrip][Step 8a][t=%lu][cycle=%u][msg=%u] %u bytes.\n",
+                t, connection_cycle, message_number, (unsigned)length);
+  logObjectKeys("top-level", doc.as<JsonObjectConst>());
+
+  if (!doc["setupComplete"].isNull()) {
+    Serial.println("[gemini_text_roundtrip][Step 8a]   -> setupComplete: sending test message.");
+    setup_complete_received = true;
+    should_send_test_message = true;
+    return;
+  }
+
+  if (!doc["sessionResumptionUpdate"].isNull()) {
+    Serial.println("[gemini_text_roundtrip][Step 8a]   -> sessionResumptionUpdate (housekeeping, not a reply to our message).");
+    return;
+  }
+
+  JsonObjectConst server_content = doc["serverContent"];
+  if (server_content.isNull()) {
+    return;
+  }
+  logObjectKeys("serverContent", server_content);
+
+  JsonArrayConst parts = server_content["modelTurn"]["parts"];
+  if (!parts.isNull()) {
+    uint32_t part_index = 0;
+    for (JsonObjectConst part : parts) {
+      part_index++;
+      if (!part["text"].isNull()) {
+        Serial.printf("[gemini_text_roundtrip][Step 8a]   modelTurn part #%u: text = \"%s\"\n",
+                      part_index, part["text"].as<const char*>());
+      } else if (!part["inlineData"].isNull()) {
+        const char* mime_type = part["inlineData"]["mimeType"] | "?";
+        const char* data = part["inlineData"]["data"] | "";
+        Serial.printf("[gemini_text_roundtrip][Step 8a]   modelTurn part #%u: inlineData, mimeType=%s, base64 length=%u chars\n",
+                      part_index, mime_type, (unsigned)strlen(data));
+      } else {
+        Serial.printf("[gemini_text_roundtrip][Step 8a]   modelTurn part #%u: unrecognized shape\n", part_index);
+      }
+    }
+  }
+
+  // The reply is spoken audio (this model only supports AUDIO output), but
+  // outputAudioTranscription in the setup message asks for a text
+  // transcript of it too - that's what we're actually after here. The
+  // audio itself (modelTurn.parts[].inlineData, logged above by size only)
+  // is intentionally not decoded until step 8c.
+  if (!server_content["outputTranscription"].isNull()) {
+    const char* transcription = server_content["outputTranscription"]["text"] | (const char*)nullptr;
+    if (transcription != nullptr) {
+      Serial.printf("[gemini_text_roundtrip][Step 8a]   outputTranscription.text = \"%s\"\n", transcription);
+      logTestPassed();
+    } else {
+      Serial.println("[gemini_text_roundtrip][Step 8a]   outputTranscription present but has no text field.");
+    }
+  }
+
+  if (server_content["generationComplete"] | false) {
+    Serial.println("[gemini_text_roundtrip][Step 8a]   generationComplete = true");
+  }
+  if (server_content["interrupted"] | false) {
+    Serial.println("[gemini_text_roundtrip][Step 8a]   interrupted = true");
+  }
+  if (server_content["turnComplete"] | false) {
+    Serial.println("[gemini_text_roundtrip][Step 8a]   turnComplete = true");
+  }
+  if (server_content["waitingForInput"] | false) {
+    Serial.println("[gemini_text_roundtrip][Step 8a]   waitingForInput = true");
+  }
+}
+
+// Raw payloads longer than this are logged by length only, not dumped in
+// full - a base64 audio blob can be tens of KB and would flood Serial.
+constexpr size_t kMaxRawDumpBytes = 400;
+
+/** Handles WebSocket lifecycle events: sends setup/test messages, parses replies,
+    and applies exponential backoff to reconnects that never got a reply. Every event
+    type is logged, including fragments/ping/pong, so nothing goes unnoticed. */
+void onWebSocketEvent(WStype_t type, uint8_t* payload, size_t length) {
+  unsigned long t = millis();
+  switch (type) {
+    case WStype_CONNECTED:
+      connection_cycle++;
+      Serial.printf("[gemini_text_roundtrip][Step 8a][t=%lu][cycle=%u] WSS connected.\n", t, connection_cycle);
+      // Deferred to loop() rather than sent here: calling sendTXT() directly
+      // inside this callback can deadlock the library, since the callback
+      // fires from within its own internal send/receive processing.
+      setup_complete_received = false;
+      should_send_setup = true;
+      break;
+    case WStype_DISCONNECTED:
+      if (setup_complete_received) {
+        Serial.printf("[gemini_text_roundtrip][Step 8a][t=%lu][cycle=%u] Disconnected after a successful setup. Resetting backoff.\n",
+                      t, connection_cycle);
+        reconnect_backoff_ms = kInitialBackoffMs;
+      } else {
+        unsigned long wait_ms = addJitter(reconnect_backoff_ms);
+        Serial.printf("[gemini_text_roundtrip][Step 8a][t=%lu][cycle=%u] Disconnected with no reply. Backing off ~%lu ms before retrying.\n",
+                      t, connection_cycle, wait_ms);
+        webSocket.setReconnectInterval(wait_ms);
+        reconnect_backoff_ms = min(reconnect_backoff_ms * 2, kMaxBackoffMs);
+      }
+      break;
+    case WStype_TEXT:
+    case WStype_BIN:
+      // This server sends its JSON replies over binary (opcode 0x2) frames,
+      // not text frames - so both are handled identically here.
+      if (length <= kMaxRawDumpBytes) {
+        Serial.printf("[gemini_text_roundtrip][Step 8a][t=%lu] Raw (%u bytes): %.*s\n", t, (unsigned)length, (int)length, payload);
+      } else {
+        Serial.printf("[gemini_text_roundtrip][Step 8a][t=%lu] Raw: %u bytes (too long to dump, see parsed fields below).\n",
+                      t, (unsigned)length);
+      }
+      handleServerMessage(payload, length);
+      break;
+    case WStype_ERROR:
+      Serial.printf("[gemini_text_roundtrip][Step 8a][t=%lu] WebSocket error: %.*s\n", t, (int)length, payload);
+      break;
+    case WStype_FRAGMENT_TEXT_START:
+      Serial.printf("[gemini_text_roundtrip][Step 8a][t=%lu] Fragmented TEXT started.\n", t);
+      break;
+    case WStype_FRAGMENT_BIN_START:
+      Serial.printf("[gemini_text_roundtrip][Step 8a][t=%lu] Fragmented BIN started.\n", t);
+      break;
+    case WStype_FRAGMENT:
+      Serial.printf("[gemini_text_roundtrip][Step 8a][t=%lu] Fragment, %u bytes.\n", t, (unsigned)length);
+      break;
+    case WStype_FRAGMENT_FIN:
+      Serial.printf("[gemini_text_roundtrip][Step 8a][t=%lu] Final fragment, %u bytes.\n", t, (unsigned)length);
+      break;
+    case WStype_PING:
+      Serial.printf("[gemini_text_roundtrip][Step 8a][t=%lu] Received PING.\n", t);
+      break;
+    case WStype_PONG:
+      Serial.printf("[gemini_text_roundtrip][Step 8a][t=%lu] Received PONG.\n", t);
+      break;
+    default:
+      Serial.printf("[gemini_text_roundtrip][Step 8a][t=%lu] Unhandled event type %d.\n", t, (int)type);
+      break;
+  }
+}
+
+/** One-time setup: Wi-Fi, time sync, then open the session. */
+void setup() {
+  Serial.begin(115200);
+  Serial.println("[gemini_text_roundtrip][Step 8a] Boot.");
+  randomSeed(esp_random());  // seeds addJitter() with the ESP32's hardware RNG
+
+  connectToWifi();
+  syncSystemTime();
+
+  Serial.println("[gemini_text_roundtrip][Step 8a] Opening WSS connection to the Gemini Live API endpoint...");
+  webSocket.onEvent(onWebSocketEvent);
+  webSocket.beginSslWithCA(kGeminiHost, kGeminiPort, kGeminiPath, kRootCaCert);
+}
+
+/** Services the WebSocket connection, sending the setup and test messages once flagged ready.
+    Once a verdict has been logged, this stops calling webSocket.loop() entirely - that's what
+    drives all connection/reconnection activity, so the sketch goes fully idle from here on. */
+void loop() {
+  if (!should_keep_running) {
+    return;
+  }
+
+  webSocket.loop();
+
+  if (should_send_setup) {
+    should_send_setup = false;
+    Serial.println("[gemini_text_roundtrip][Step 8a] Sending session setup message...");
+    webSocket.sendTXT(kSetupMessage);
+  }
+
+  if (should_send_test_message) {
+    should_send_test_message = false;
+    Serial.println("[gemini_text_roundtrip][Step 8a] Sending test text message...");
+    webSocket.sendTXT(kTestMessage);
+  }
+}

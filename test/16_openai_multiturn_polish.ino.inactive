@@ -1,0 +1,531 @@
+// Step 16 - Multi-turn polish
+// Builds directly on step 15 (test/15_openai_function_calling.ino.inactive):
+// LISTEN still records kRecordDurationSec of mic audio, streams it to the
+// OpenAI Realtime API, plays the spoken reply back, prints transcripts of
+// both sides, and can drive the onboard LED via the set_board_state tool.
+// None of that changes here.
+//
+// This step is about verifying the persistent session survives many LISTEN
+// cycles back-to-back, and making reconnects legible rather than adding new
+// reconnect *mechanics* - the socket-level auto-reconnect with capped
+// exponential backoff already exists (openai_realtime_utils.cpp, since step
+// 9), and a disconnect while idle already can't produce a false
+// "LISTEN #N FAILED" (markReplyFailed() is a no-op unless a cycle is
+// actually awaiting_reply). What was missing for a real soak test:
+//   1. WStype_DISCONNECTED now says whether it happened mid-turn (a real,
+//      visible problem - that cycle's reply is lost) or while idle between
+//      turns (expected/benign - most likely the server's own idle timeout,
+//      though no specific duration has been measured yet, hence this test).
+//   2. session.updated now says whether this is the session's first connect
+//      or a reconnect - and if a reconnect, warns that the model has no
+//      memory of any earlier LISTEN cycles, since OpenAI's Realtime API has
+//      no session-resumption mechanism (unlike old Gemini step 8b's handle)
+//      to carry conversation context across a new WebSocket connection.
+//   3. listen_cycle deliberately keeps counting across reconnects (never
+//      reset), so Serial output alone shows the full cycle count for a long
+//      soak test regardless of how many reconnects happened along the way.
+//
+// Full history/discoveries for this step live in PROJECT_OVERVIEW.md's step
+// 16 entry, not here. Wi-Fi/WSS plumbing, full-duplex I2S/ring buffer, and
+// raw-JSON scanning live in wifi_utils, openai_realtime_utils,
+// i2s_audio_utils, and realtime_json_utils respectively - all shared with
+// every other test sketch in this folder.
+
+#include <WebSocketsClient.h>
+#include <ArduinoJson.h>
+#include <mbedtls/base64.h>
+#include <math.h>
+#include <string.h>
+#include "config.h"
+#include "wifi_utils.h"
+#include "openai_realtime_utils.h"
+#include "i2s_audio_utils.h"
+#include "realtime_json_utils.h"
+
+namespace {
+// Unchanged from step 15: 24kHz PCM in / 8kHz mu-law out, manual turn
+// control, the set_board_state tool.
+const char kSessionUpdateMessage[] =
+    R"JSON({"type":"session.update","session":{"type":"realtime","model":")JSON"
+    OPENAI_MODEL
+    R"JSON(","instructions":"You are a helpful, concise voice assistant running on an ESP32 dev board. Keep spoken replies short. When the user asks you to turn the onboard LED on or off, call the set_board_state function with the requested led_on value - don't just say you did it.","output_modalities":["audio"],"audio":{"input":{"format":{"type":"audio/pcm","rate":24000},"turn_detection":null,"transcription":{"model":"gpt-4o-mini-transcribe"}},"output":{"format":{"type":"audio/pcmu"},"voice":"alloy"}},"tools":[{"type":"function","name":"set_board_state","description":"Turns the ESP32 dev board's onboard LED on or off.","parameters":{"type":"object","properties":{"led_on":{"type":"boolean","description":"true to turn the LED on, false to turn it off"}},"required":["led_on"]}}],"tool_choice":"auto","reasoning":{"effort":"low"}}})JSON";
+
+const char kCommitMessage[] = R"JSON({"type":"input_audio_buffer.commit"})JSON";
+const char kResponseCreateMessage[] = R"JSON({"type":"response.create"})JSON";
+
+constexpr uint32_t kSampleRateHz = 24000;   // must match kSessionUpdateMessage's input rate and i2s_audio_utils's I2S rate
+constexpr uint32_t kRecordDurationSec = 3;  // same duration old step 8b/step 12 used
+constexpr uint32_t kChunkSamples = 2400;    // ~100ms per chunk at 24kHz - same chunk duration step 12 confirmed working
+constexpr int32_t kSoftwareGain = 4;        // mic levels are otherwise quiet - see step 3 findings
+constexpr unsigned long kReplyTimeoutMs = 15000;  // max silence (no server message) while awaiting_reply, not a total-reply-duration cap - see checkReplyTimeout()
+
+constexpr uint32_t kChunkPcmBytes = kChunkSamples * sizeof(int16_t);
+constexpr uint32_t kBase64BufferSize = ((kChunkPcmBytes + 2) / 3) * 4 + 1;
+constexpr uint32_t kJsonMessageBufferSize = kBase64BufferSize + 128;
+constexpr uint32_t kToolResponseBufferSize = 256;  // function_call_output messages are tiny - no audio involved
+
+// Static, not stack-local: these would overflow the default Arduino loop
+// task stack if declared inside a function (same reasoning as old step
+// 8b/step 12).
+int32_t raw_chunk[kChunkSamples];
+int16_t pcm_chunk[kChunkSamples];
+unsigned char base64_chunk[kBase64BufferSize];
+char json_message[kJsonMessageBufferSize];
+char tool_response_message[kToolResponseBufferSize];
+
+WebSocketsClient webSocket;
+bool should_keep_running = true;   // only false if the connection itself can never be established
+bool should_send_session_update = false;
+bool session_ready = false;        // true once session.updated has been received at least once
+bool session_ever_ready = false;
+bool is_capturing = false;
+bool awaiting_reply = false;
+bool reply_received_this_cycle = false;
+bool transcript_in_progress = false;   // a response.output_audio_transcript.delta stream is currently mid-line
+bool response_fully_received = false;  // the final (post-tool-call, if any) response.done arrived - ring buffer may still be draining
+bool function_call_turn_pending = false;  // true from a finalized tool call until its function-call-only response.done is consumed
+uint32_t listen_cycle = 0;         // deliberately never reset - keeps counting across reconnects for a soak test
+uint32_t connection_count = 0;     // how many times WStype_CONNECTED has fired this run (1 = first connect, 2+ = reconnect)
+unsigned long last_reply_activity_ms = 0;  // last time ANY server message arrived while awaiting_reply - see checkReplyTimeout()
+bool ws_reads_paused_for_backpressure = false;  // see i2s_audio_utils.h's ringShouldPauseReads()
+}  // namespace
+
+/** Drives the onboard LED, respecting this board's active-high/low polarity. */
+void setLed(bool on) {
+  digitalWrite(LED_PIN, (on == LED_ACTIVE_HIGH) ? HIGH : LOW);
+}
+
+/** Marks this LISTEN cycle as having gotten a reply, logging the verdict exactly once per cycle. */
+void markReplyReceived() {
+  if (reply_received_this_cycle) return;
+  reply_received_this_cycle = true;
+  awaiting_reply = false;
+  Serial.printf("[openai_playback] ===== LISTEN #%u PASSED =====\n", listen_cycle);
+  Serial.println("[openai_playback] Type LISTEN again to continue the conversation.");
+}
+
+/** Marks this LISTEN cycle as failed, logging the verdict exactly once per cycle.
+    Reserved for a genuine problem (protocol error, failed response, timeout) - not
+    logged at all if a reply already arrived for this cycle. */
+void markReplyFailed(const char* reason) {
+  if (reply_received_this_cycle || !awaiting_reply) return;
+  reply_received_this_cycle = true;
+  awaiting_reply = false;
+  Serial.printf("[openai_playback] ===== LISTEN #%u FAILED: %s =====\n", listen_cycle, reason);
+  if (session_ready) {
+    Serial.println("[openai_playback] Type LISTEN to try again.");
+  }
+}
+
+/** Halts the sketch entirely - reserved for the connection itself never succeeding
+    (see openai_realtime_utils's attempt cap), not for a single LISTEN cycle failing. */
+void haltSketch(const char* reason) {
+  should_keep_running = false;
+  Serial.printf("[openai_playback] ===== HALTED: %s =====\n", reason);
+}
+
+/** Parses a finalized response.function_call_arguments.done event: applies the
+    requested LED state via set_board_state, sends the required function_call_output
+    back to the model, and asks for a follow-up response so the model can give its
+    spoken confirmation. Any function name other than set_board_state is logged and
+    ignored - nothing else is registered as a tool yet. */
+void handleFunctionCallArgumentsDone(JsonDocument& doc) {
+  const char* call_id = doc["call_id"] | (const char*)nullptr;
+  const char* name = doc["name"] | "(unknown)";
+  const char* arguments_json = doc["arguments"] | "{}";
+
+  if (call_id == nullptr) {
+    Serial.println("[openai_playback] response.function_call_arguments.done had no call_id - can't respond to it.");
+    return;
+  }
+
+  if (strcmp(name, "set_board_state") != 0) {
+    Serial.printf("[openai_playback] Unhandled function call: %s (no action taken, no response sent).\n", name);
+    return;
+  }
+
+  JsonDocument args_doc;
+  DeserializationError err = deserializeJson(args_doc, arguments_json);
+  if (err) {
+    Serial.printf("[openai_playback] set_board_state arguments failed to parse (%s): %s\n", err.c_str(), arguments_json);
+    return;
+  }
+  bool led_on = args_doc["led_on"] | false;
+
+  setLed(led_on);
+  Serial.printf("[openai_playback] set_board_state called -> LED %s.\n", led_on ? "ON" : "OFF");
+
+  snprintf(tool_response_message, kToolResponseBufferSize,
+           R"JSON({"type":"conversation.item.create","item":{"type":"function_call_output","call_id":"%s","output":"LED turned %s"}})JSON",
+           call_id, led_on ? "on" : "off");
+  webSocket.sendTXT(tool_response_message);
+  webSocket.sendTXT(kResponseCreateMessage);
+  function_call_turn_pending = true;
+  Serial.println("[openai_playback] Sent function_call_output - asked the model for a spoken confirmation.");
+}
+
+/** Parses one server text frame, logs its "type" and any interesting fields, and
+    drives session readiness plus the current LISTEN cycle's PASS/FAIL verdict. */
+void handleServerMessage(uint8_t* payload, size_t length) {
+  // Any server message at all, while a reply is in flight, proves the
+  // connection/response is still alive - resets the inactivity clock so a
+  // long reply (paced by playback backpressure) doesn't trip
+  // checkReplyTimeout() just for taking a while. See PROJECT_OVERVIEW.md
+  // step 16's "reply timeout fired mid-reply" discovery.
+  if (awaiting_reply) {
+    last_reply_activity_ms = millis();
+  }
+
+  char type_buf[48];
+  bool have_type = extractEventType(payload, length, type_buf, sizeof(type_buf));
+
+  if (have_type && strcmp(type_buf, "response.output_audio.delta") == 0) {
+    const uint8_t* value_start = nullptr;
+    size_t value_len = 0;
+    if (findRawStringField(payload, length, "delta", &value_start, &value_len)) {
+      decodeAndRingAudioDelta(value_start, value_len);
+    } else {
+      Serial.println("[openai_playback] Event type: response.output_audio.delta, but no delta field found.");
+    }
+    return;
+  }
+
+  if (have_type && strncmp(type_buf, "response.output_audio", 22) == 0) {
+    // Any other response.output_audio* event (e.g. .done) carries no large
+    // payload, but there's nothing this step needs from it either - just
+    // log its size for visibility.
+    Serial.printf("[openai_playback] Event type: %s (%u bytes).\n", type_buf, (unsigned)length);
+    return;
+  }
+
+  JsonDocument doc;
+  DeserializationError err = deserializeJson(doc, reinterpret_cast<const char*>(payload), length);
+  if (err) {
+    Serial.printf("[openai_playback] JSON parse error: %s\n", err.c_str());
+    markReplyFailed("received a message that isn't valid JSON");
+    return;
+  }
+
+  const char* type = doc["type"] | "(missing type)";
+
+  if (strcmp(type, "session.created") == 0) {
+    Serial.println("[openai_playback] Event type: session.created (server-initiated, before our own update).");
+    return;
+  }
+
+  if (strcmp(type, "session.updated") == 0) {
+    session_ready = true;
+    if (!session_ever_ready) {
+      session_ever_ready = true;
+      Serial.println("[openai_playback] Event type: session.updated -> ready (first connect). Type LISTEN to record and send audio.");
+      // A later mid-conversation disconnect gets its own fresh attempt
+      // budget, rather than one shared with however many retries startup
+      // itself needed.
+      resetReconnectBackoff();
+    } else {
+      Serial.printf("[openai_playback] Event type: session.updated -> ready (reconnect #%u). "
+                     "The model has NO memory of any LISTEN cycle before this point - OpenAI's "
+                     "Realtime API has no session-resumption mechanism, unlike old Gemini step "
+                     "8b's handle. LISTEN cycle count keeps incrementing from #%u regardless.\n",
+                     connection_count - 1, listen_cycle + 1);
+    }
+    return;
+  }
+
+  if (strcmp(type, "response.function_call_arguments.delta") == 0) {
+    // Arguments arrive complete in .done below - nothing to act on per-delta,
+    // and logging each chunk would just be noise.
+    return;
+  }
+
+  if (strcmp(type, "response.function_call_arguments.done") == 0) {
+    Serial.printf("[openai_playback] Event type: response.function_call_arguments.done -> %s\n",
+                  (const char*)(doc["arguments"] | "{}"));
+    handleFunctionCallArgumentsDone(doc);
+    return;
+  }
+
+  if (strcmp(type, "response.output_audio_transcript.delta") == 0) {
+    const char* delta = doc["delta"] | "";
+    if (!transcript_in_progress) {
+      transcript_in_progress = true;
+      Serial.print("[openai_playback] Event type: response.output_audio_transcript.delta -> streaming transcript: ");
+    }
+    Serial.print(delta);
+    return;
+  }
+
+  if (strcmp(type, "response.output_audio_transcript.done") == 0) {
+    if (transcript_in_progress) {
+      Serial.println();
+      transcript_in_progress = false;
+    }
+    const char* transcript = doc["transcript"] | (const char*)nullptr;
+    Serial.printf("[openai_playback] Event type: response.output_audio_transcript.done -> full transcript: \"%s\"\n",
+                  transcript != nullptr ? transcript : "(none)");
+    return;
+  }
+
+  if (strcmp(type, "conversation.item.input_audio_transcription.completed") == 0) {
+    // Best-effort: a separate ASR model, not the realtime model itself,
+    // running asynchronously - see header comment. Never affects the
+    // LISTEN cycle's verdict, which depends only on the spoken reply.
+    const char* transcript = doc["transcript"] | (const char*)nullptr;
+    Serial.printf("[openai_playback] Event type: conversation.item.input_audio_transcription.completed -> you said: \"%s\"\n",
+                  transcript != nullptr ? transcript : "(none)");
+    return;
+  }
+
+  if (strcmp(type, "conversation.item.input_audio_transcription.failed") == 0) {
+    const char* error_message = doc["error"]["message"] | "(no error detail)";
+    Serial.printf("[openai_playback] Event type: conversation.item.input_audio_transcription.failed -> %s (input transcript unavailable this cycle, reply is unaffected)\n",
+                  error_message);
+    return;
+  }
+
+  if (strcmp(type, "response.done") == 0) {
+    const char* status = doc["response"]["status"] | "(unknown)";
+    Serial.printf("[openai_playback] Event type: response.done -> status: %s\n", status);
+    if (strcmp(status, "failed") == 0) {
+      const char* error_message = doc["response"]["status_details"]["error"]["message"] | "(no error detail)";
+      markReplyFailed(error_message);
+    } else if (function_call_turn_pending) {
+      // This response.done was for the function-call-only turn (no audio) -
+      // we already sent function_call_output and a follow-up response.create
+      // in handleFunctionCallArgumentsDone(). The *next* response.done is the
+      // model's real spoken confirmation, which does count as the reply.
+      function_call_turn_pending = false;
+      Serial.println("[openai_playback] Function-call turn complete - waiting for the model's spoken confirmation.");
+    } else {
+      // The PASS verdict itself waits for the ring buffer to actually finish
+      // draining to the speaker - see checkPlaybackComplete() in loop().
+      response_fully_received = true;
+    }
+    return;
+  }
+
+  if (strcmp(type, "error") == 0) {
+    const char* message = doc["error"]["message"] | "(no message)";
+    Serial.printf("[openai_playback] Event type: error -> %s\n", message);
+    markReplyFailed(message);
+    return;
+  }
+
+  Serial.printf("[openai_playback] Event type: %s (routine protocol bookkeeping, no action needed).\n", type);
+}
+
+/** Handles WebSocket lifecycle events. CONNECTED/DISCONNECTED/TEXT get
+    explicit handling here; everything else is delegated to
+    logGenericWsEvent() so nothing goes unnoticed. */
+void onWebSocketEvent(WStype_t type, uint8_t* payload, size_t length) {
+  switch (type) {
+    case WStype_CONNECTED:
+      connection_count++;
+      Serial.printf("[openai_playback] WSS handshake succeeded - connection #%u is open.\n", connection_count);
+      session_ready = false;
+      // Deferred to loop() rather than sent here: calling sendTXT() directly
+      // inside this callback can deadlock the library (discovered in old
+      // step 7 - see PROJECT_OVERVIEW.md "Discoveries").
+      should_send_session_update = true;
+      break;
+    case WStype_DISCONNECTED:
+      // Distinguishing why matters for a soak test: mid-turn is a real,
+      // visible failure (that LISTEN cycle's reply is lost); idle is
+      // expected/benign, most likely the server's own idle timeout - no
+      // specific duration has been measured yet, which is exactly what this
+      // step is meant to find out.
+      if (is_capturing || awaiting_reply) {
+        Serial.printf("[openai_playback] Disconnected MID-TURN during LISTEN #%u - its reply is lost.\n", listen_cycle);
+      } else {
+        Serial.println("[openai_playback] Disconnected while idle between LISTEN cycles (likely a server idle timeout) - reconnecting.");
+      }
+      session_ready = false;
+      resetRingBuffer();  // any partial reply audio is now stale - don't play it
+      markReplyFailed("disconnected before a reply arrived");
+      if (registerDisconnectAndMaybeGiveUp(webSocket)) {
+        haltSketch("connection never succeeded after repeated attempts");
+      }
+      break;
+    case WStype_TEXT:
+      handleServerMessage(payload, length);
+      break;
+    default:
+      logGenericWsEvent(type, payload, length);
+      break;
+  }
+}
+
+/** Records kRecordDurationSec of mic audio, streaming each ~100ms chunk to the
+    session as it's captured. Commits the buffer and requests a response once
+    done, then starts the reply timeout. Does NOT touch the LED - the LED is
+    the model-controlled set_board_state output, not a "recording in
+    progress" indicator (see PROJECT_OVERVIEW.md step 15). */
+void captureAndStreamAudio() {
+  listen_cycle++;
+  is_capturing = true;
+  awaiting_reply = false;
+  reply_received_this_cycle = false;
+  response_fully_received = false;
+  function_call_turn_pending = false;
+  resetRingBuffer();
+  Serial.printf("[openai_playback] LISTEN #%u: recording %us and streaming to OpenAI...\n",
+                listen_cycle, kRecordDurationSec);
+
+  uint32_t total_samples = kSampleRateHz * kRecordDurationSec;
+  uint32_t samples_sent = 0;
+  uint32_t chunks_sent = 0;
+
+  // Independent of whether the model replies, this tells us whether real
+  // audio was actually captured - separates "mic/gain problem" from "server
+  // never responded" as possible explanations for a FAILED verdict.
+  int16_t level_min = INT16_MAX;
+  int16_t level_max = INT16_MIN;
+  double level_sum_of_squares = 0.0;
+
+  while (samples_sent < total_samples) {
+    uint32_t samples_wanted = min(kChunkSamples, total_samples - samples_sent);
+    uint32_t samples_read = readMicChunkGained(raw_chunk, pcm_chunk, samples_wanted, kSoftwareGain,
+                                                &level_min, &level_max, &level_sum_of_squares);
+
+    size_t base64_len = 0;
+    int b64_result = mbedtls_base64_encode(base64_chunk, sizeof(base64_chunk), &base64_len,
+                                            reinterpret_cast<const unsigned char*>(pcm_chunk),
+                                            samples_read * sizeof(int16_t));
+    if (b64_result != 0) {
+      Serial.printf("[openai_playback] base64 encode failed (code %d) - skipping this chunk.\n", b64_result);
+      samples_sent += samples_read;
+      continue;
+    }
+
+    snprintf(json_message, kJsonMessageBufferSize,
+             R"JSON({"type":"input_audio_buffer.append","audio":"%.*s"})JSON",
+             (int)base64_len, base64_chunk);
+    webSocket.sendTXT(json_message);
+
+    samples_sent += samples_read;
+    chunks_sent++;
+  }
+
+  webSocket.sendTXT(kCommitMessage);
+  webSocket.sendTXT(kResponseCreateMessage);
+  double level_rms = sqrt(level_sum_of_squares / samples_sent);
+  Serial.printf("[openai_playback] Done streaming (%u chunks). Mic level: min=%d max=%d rms=%.1f\n",
+                chunks_sent, level_min, level_max, level_rms);
+  Serial.println("[openai_playback] Waiting for the reply...");
+
+  is_capturing = false;
+  awaiting_reply = true;
+  last_reply_activity_ms = millis();
+}
+
+/** Checks Serial for a LISTEN command and starts a capture if the session is
+    ready and idle (not still capturing OR still playing back a previous reply). */
+void checkForListenCommand() {
+  if (!Serial.available()) {
+    return;
+  }
+  String command = Serial.readStringUntil('\n');
+  command.trim();
+  if (!command.equalsIgnoreCase("LISTEN")) {
+    return;
+  }
+
+  if (!session_ready) {
+    Serial.println("[openai_playback] Not ready yet - still connecting/setting up.");
+  } else if (is_capturing || awaiting_reply) {
+    Serial.println("[openai_playback] Still recording or playing back a reply - ignoring.");
+  } else {
+    captureAndStreamAudio();
+  }
+}
+
+/** Checks whether the current LISTEN cycle has gone quiet for too long - an
+    INACTIVITY timeout (no server message at all for kReplyTimeoutMs), not a
+    cap on the reply's total duration. A tool-using cycle takes two full
+    response round trips and a long spoken reply is paced by playback
+    backpressure, both of which can legitimately take well past
+    kReplyTimeoutMs from the start of the cycle - what should never happen is
+    total silence from the server for that long. (A total-duration cap fired
+    while transcript/audio was still actively arriving in a real run - see
+    PROJECT_OVERVIEW.md step 16's "reply timeout fired mid-reply" discovery.) */
+void checkReplyTimeout() {
+  if (!awaiting_reply) {
+    return;
+  }
+  if (millis() - last_reply_activity_ms < kReplyTimeoutMs) {
+    return;
+  }
+  char reason[64];
+  snprintf(reason, sizeof(reason), "no server activity for %lu ms", kReplyTimeoutMs);
+  markReplyFailed(reason);
+}
+
+/** Once the server has said the (post-tool-call, if any) response is fully done
+    AND the ring buffer has finished draining to the speaker, the reply has
+    genuinely been heard in full - that's this step's actual PASS criterion,
+    not just "bytes arrived". */
+void checkPlaybackComplete() {
+  if (!response_fully_received || !awaiting_reply) {
+    return;
+  }
+  if (ringUsedBytes() > 0) {
+    return;  // still playing
+  }
+  markReplyReceived();
+}
+
+/** One-time setup: Wi-Fi, time sync, full-duplex mic+speaker I2S, LED, then
+    open the secure WebSocket connection. */
+void setup() {
+  Serial.begin(115200);
+  Serial.println("[openai_playback] Boot.");
+  Serial.printf("[openai_playback] Free heap at boot (baseline): %u, largest free block: %u\n",
+                ESP.getFreeHeap(), ESP.getMaxAllocHeap());
+
+  initPlaybackRingBuffer();
+  pinMode(LED_PIN, OUTPUT);
+  setLed(false);
+  setupI2sFullDuplex();
+
+  connectToWifi();
+  syncSystemTime();
+
+  Serial.println("[openai_playback] Opening WSS connection to the OpenAI Realtime API endpoint...");
+  webSocket.onEvent(onWebSocketEvent);
+  beginOpenAiRealtimeConnection(webSocket);
+}
+
+/** Services the WebSocket connection (unless paused for backpressure - see
+    i2s_audio_utils.h's ringShouldPauseReads()), sends session.update once
+    flagged ready, watches for a LISTEN command, drains playback audio to the
+    speaker, and checks for a reply timeout / playback completion. This is a
+    soak-test sketch by design: it keeps running across as many LISTEN cycles
+    and reconnects as Serial keeps feeding it, and only ever stops if the
+    connection itself can never be (re-)established. */
+void loop() {
+  if (!should_keep_running) {
+    return;
+  }
+
+  bool should_pause = ringShouldPauseReads(ws_reads_paused_for_backpressure);
+  if (should_pause != ws_reads_paused_for_backpressure) {
+    Serial.println(should_pause
+                        ? "[openai_playback] Ring buffer nearly full - pausing WebSocket reads until playback catches up."
+                        : "[openai_playback] Ring buffer has room again - resuming WebSocket reads.");
+    ws_reads_paused_for_backpressure = should_pause;
+  }
+  if (!ws_reads_paused_for_backpressure) {
+    webSocket.loop();
+  }
+
+  if (should_send_session_update) {
+    should_send_session_update = false;
+    Serial.println("[openai_playback] Sending session.update...");
+    webSocket.sendTXT(kSessionUpdateMessage);
+  }
+
+  checkForListenCommand();
+  drainRingBufferToSpeaker();
+  checkPlaybackComplete();
+  checkReplyTimeout();
+}

@@ -1,0 +1,4 @@
+test/config.h
+OpenAI_Key.txt
+.obsidian/
+tools/esp32_log_*.txt

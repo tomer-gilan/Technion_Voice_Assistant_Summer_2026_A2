@@ -1,0 +1,265 @@
+// Step 11 - OpenAI Realtime API Minimal Round Trip
+// Opens the session (WSS handshake + session.update, same as step 10),
+// then sends one hardcoded text message and requests a reply, parsing the
+// server's text reply with ArduinoJson - mirroring old step 8a's role for
+// the new provider. This validates the full send/receive/parse turn cycle
+// before real mic audio (step 12) and actual audio playback (step 13) are
+// added on top.
+//
+// Requires the "WebSockets" library by Markus Sattler (Links2004) and
+// "ArduinoJson" by Benoit Blanchon (v7), both installable via the Arduino
+// Library Manager.
+//
+// Two client events are needed to trigger a reply (unlike Gemini's single
+// clientContent message): "conversation.item.create" adds the user's text
+// turn to the conversation, then a separate "response.create" actually
+// asks the model to respond. Sent back-to-back over the same connection -
+// WebSocket text frames arrive in order, so no need to wait for an ack
+// between them.
+//
+// Unlike step 10, this session requests output_modalities:["text"], not
+// ["audio"] - see the "Audio blew the heap" discovery below for why. The
+// server streams the reply as "response.output_text.delta"/".done".
+//
+// Wi-Fi and OpenAI-WSS plumbing (connect, reconnect backoff, generic event
+// logging) live in wifi_utils.h/.cpp and openai_realtime_utils.h/.cpp,
+// shared with every other test sketch in this folder.
+//
+// Audio blew the heap (first attempt, real hardware): with
+// output_modalities:["audio"] (same config as step 10), the transcript
+// streamed in fine - one run even completed the full sentence via
+// response.output_audio_transcript.delta - but the connection always
+// disconnected shortly after, every one of 5 attempts, with no
+// response.output_audio_transcript.done and no response.done ever
+// received, and critically *no* audio-related event ever logged either
+// (not even as an "unhandled" line). That silence is the tell: it points
+// at deserializeJson() itself choking on a large response.output_audio.delta
+// payload (base64-inflated 24kHz PCM, likely tens of KB per chunk) before
+// the code ever gets far enough to log the event's type - exactly the
+// naive-DynamicJsonDocument-blows-the-heap risk this project's own
+// "Gotchas" section already warned about. Fixed two ways: (1) switched to
+// output_modalities:["text"] so audio is never generated for this step at
+// all - real audio parsing is deferred to steps 12/13, which the Gotchas
+// section already says needs chunked handling, not a naive full parse;
+// (2) kept a defensive skip-parse guard below for any
+// "response.output_audio*" event anyway, since OpenAI's community forums
+// report audio sometimes leaking through even with modalities set to text.
+
+#include <WebSocketsClient.h>
+#include <ArduinoJson.h>
+#include <string.h>
+#include "config.h"
+#include "wifi_utils.h"
+#include "openai_realtime_utils.h"
+
+namespace {
+// output_modalities:["text"], not ["audio"] like step 10 - see "Audio blew
+// the heap" above. No "audio" config block needed since none is used here.
+const char kSessionUpdateMessage[] =
+    R"JSON({"type":"session.update","session":{"type":"realtime","model":")JSON"
+    OPENAI_MODEL
+    R"JSON(","instructions":"You are a helpful, concise voice assistant running on an ESP32 dev board. Keep spoken replies short.","output_modalities":["text"],"reasoning":{"effort":"low"}}})JSON";
+
+// Same test question old step 8a used against Gemini, for a like-for-like
+// comparison between providers.
+const char kConversationItemMessage[] =
+    R"JSON({"type":"conversation.item.create","item":{"type":"message","role":"user","content":[{"type":"input_text","text":"Give 3 movie recommendations. Answer shortly."}]}})JSON";
+const char kResponseCreateMessage[] = R"JSON({"type":"response.create"})JSON";
+
+WebSocketsClient webSocket;
+bool test_result_logged = false;
+bool should_keep_running = true;
+bool should_send_session_update = false;
+bool should_send_test_turn = false;
+bool reply_in_progress = false;
+}  // namespace
+
+/** Logs the unambiguous PASS verdict exactly once, then stops the sketch
+    from reconnecting/retrying further. */
+void logTestPassed() {
+  if (test_result_logged) return;
+  test_result_logged = true;
+  should_keep_running = false;
+  Serial.println("[openai_minimal_roundtrip] ===== TEST PASSED =====");
+  Serial.println("[openai_minimal_roundtrip] Done - no longer reconnecting.");
+}
+
+/** Logs the unambiguous FAIL verdict exactly once, then stops the sketch.
+    Reserved for a genuine, non-transient problem, not one expected retry. */
+void logTestFailed(const char* reason) {
+  if (test_result_logged) return;
+  test_result_logged = true;
+  should_keep_running = false;
+  Serial.printf("[openai_minimal_roundtrip] ===== TEST FAILED: %s =====\n", reason);
+}
+
+/** Cheaply extracts the "type" field's value from a raw JSON payload without a
+    full JSON parse, by scanning for the literal `"type":"..."` that every
+    event seen so far starts with. Used to triage a payload's size/cost
+    *before* committing to a full deserializeJson() on it - see "Audio blew
+    the heap" above. Returns false if not found within the first 128 bytes
+    (which "type" always is, for every event this project has observed). */
+bool extractEventType(const uint8_t* payload, size_t length, char* out, size_t out_size) {
+  constexpr char kNeedle[] = "\"type\":\"";
+  constexpr size_t kNeedleLen = sizeof(kNeedle) - 1;
+  constexpr size_t kScanWindow = 128;
+  size_t scan_limit = length < kScanWindow ? length : kScanWindow;
+
+  for (size_t i = 0; i + kNeedleLen <= scan_limit; i++) {
+    if (memcmp(payload + i, kNeedle, kNeedleLen) != 0) continue;
+    size_t start = i + kNeedleLen;
+    size_t j = start;
+    while (j < length && payload[j] != '"' && (j - start) < out_size - 1) j++;
+    memcpy(out, payload + start, j - start);
+    out[j - start] = '\0';
+    return true;
+  }
+  return false;
+}
+
+/** Parses one server text frame, logs its "type" and any interesting fields, and
+    drives the PASS/FAIL verdict off the reply text / error / failed-response events. */
+void handleServerMessage(uint8_t* payload, size_t length) {
+  char type_buf[48];
+  if (extractEventType(payload, length, type_buf, sizeof(type_buf)) &&
+      strncmp(type_buf, "response.output_audio", 22) == 0) {
+    // Defensive: shouldn't happen with output_modalities:["text"], but
+    // OpenAI's community forums report audio leaking through anyway -
+    // skip the full parse rather than risk it on a large payload.
+    Serial.printf("[openai_minimal_roundtrip] Event type: %s -> skipping parse (%u bytes, unexpected audio payload with text-only modality).\n",
+                  type_buf, (unsigned)length);
+    return;
+  }
+
+  JsonDocument doc;
+  DeserializationError err = deserializeJson(doc, reinterpret_cast<const char*>(payload), length);
+  if (err) {
+    Serial.printf("[openai_minimal_roundtrip] JSON parse error: %s\n", err.c_str());
+    logTestFailed("received a message that isn't valid JSON");
+    return;
+  }
+
+  const char* type = doc["type"] | "(missing type)";
+
+  if (strcmp(type, "session.created") == 0) {
+    Serial.println("[openai_minimal_roundtrip] Event type: session.created (server-initiated, before our own update).");
+    return;
+  }
+
+  if (strcmp(type, "session.updated") == 0) {
+    Serial.println("[openai_minimal_roundtrip] Event type: session.updated -> sending test turn.");
+    should_send_test_turn = true;
+    return;
+  }
+
+  if (strcmp(type, "response.output_text.delta") == 0) {
+    const char* delta = doc["delta"] | "";
+    if (!reply_in_progress) {
+      reply_in_progress = true;
+      Serial.print("[openai_minimal_roundtrip] Event type: response.output_text.delta -> streaming reply: ");
+    }
+    Serial.print(delta);
+    return;
+  }
+
+  if (strcmp(type, "response.output_text.done") == 0) {
+    if (reply_in_progress) {
+      Serial.println();
+      reply_in_progress = false;
+    }
+    const char* text = doc["text"] | (const char*)nullptr;
+    if (text != nullptr) {
+      Serial.printf("[openai_minimal_roundtrip] Event type: response.output_text.done -> full reply: \"%s\"\n", text);
+      logTestPassed();
+    } else {
+      Serial.println("[openai_minimal_roundtrip] Event type: response.output_text.done, but no text field present.");
+    }
+    return;
+  }
+
+  if (strcmp(type, "response.done") == 0) {
+    const char* status = doc["response"]["status"] | "(unknown)";
+    Serial.printf("[openai_minimal_roundtrip] Event type: response.done -> status: %s\n", status);
+    if (!test_result_logged && strcmp(status, "failed") == 0) {
+      const char* error_message = doc["response"]["status_details"]["error"]["message"] | "(no error detail)";
+      logTestFailed(error_message);
+    }
+    return;
+  }
+
+  if (strcmp(type, "error") == 0) {
+    const char* message = doc["error"]["message"] | "(no message)";
+    Serial.printf("[openai_minimal_roundtrip] Event type: error -> %s\n", message);
+    logTestFailed(message);
+    return;
+  }
+
+  Serial.printf("[openai_minimal_roundtrip] Event type: %s (unhandled/unexpected for this step, ignoring).\n", type);
+}
+
+/** Handles WebSocket lifecycle events. CONNECTED/DISCONNECTED/TEXT get
+    explicit handling here; everything else is delegated to
+    logGenericWsEvent() so nothing goes unnoticed. */
+void onWebSocketEvent(WStype_t type, uint8_t* payload, size_t length) {
+  switch (type) {
+    case WStype_CONNECTED:
+      Serial.println("[openai_minimal_roundtrip] WSS handshake succeeded - connection is open.");
+      // Deferred to loop() rather than sent here: calling sendTXT() directly
+      // inside this callback can deadlock the library (discovered in old
+      // step 7 - see PROJECT_OVERVIEW.md "Discoveries").
+      should_send_session_update = true;
+      break;
+    case WStype_DISCONNECTED:
+      if (test_result_logged) {
+        Serial.println("[openai_minimal_roundtrip] Disconnected (after verdict already logged).");
+        break;
+      }
+      if (registerDisconnectAndMaybeGiveUp(webSocket)) {
+        logTestFailed("handshake/session-update never succeeded after repeated attempts");
+      }
+      break;
+    case WStype_TEXT:
+      handleServerMessage(payload, length);
+      break;
+    default:
+      logGenericWsEvent(type, payload, length);
+      break;
+  }
+}
+
+/** One-time setup: Wi-Fi, time sync, then open the secure WebSocket connection. */
+void setup() {
+  Serial.begin(115200);
+  Serial.println("[openai_minimal_roundtrip] Boot.");
+
+  connectToWifi();
+  syncSystemTime();
+
+  Serial.println("[openai_minimal_roundtrip] Opening WSS connection to the OpenAI Realtime API endpoint...");
+  webSocket.onEvent(onWebSocketEvent);
+  beginOpenAiRealtimeConnection(webSocket);
+}
+
+/** Services the WebSocket connection, sending the session.update and test-turn
+    messages once flagged ready. Once a verdict has been logged, this stops
+    calling webSocket.loop() entirely, so the sketch goes fully idle from here on. */
+void loop() {
+  if (!should_keep_running) {
+    return;
+  }
+
+  webSocket.loop();
+
+  if (should_send_session_update) {
+    should_send_session_update = false;
+    Serial.println("[openai_minimal_roundtrip] Sending session.update...");
+    webSocket.sendTXT(kSessionUpdateMessage);
+  }
+
+  if (should_send_test_turn) {
+    should_send_test_turn = false;
+    Serial.println("[openai_minimal_roundtrip] Sending conversation.item.create + response.create...");
+    webSocket.sendTXT(kConversationItemMessage);
+    webSocket.sendTXT(kResponseCreateMessage);
+  }
+}

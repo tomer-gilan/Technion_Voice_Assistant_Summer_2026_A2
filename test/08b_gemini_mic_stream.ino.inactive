@@ -1,0 +1,512 @@
+// Step 8b - Gemini Live: Send Real Mic Audio
+// Extends 8a: typing LISTEN over Serial triggers a fixed-duration mic
+// capture, streamed live into the open session via realtimeInput in small
+// ~100ms chunks - never buffering the whole capture in RAM. Confirms the
+// server receives and responds to real spoken audio. The reply is parsed
+// and logged (reusing 8a's detailed message breakdown) but not played back
+// yet - that's step 8c. Onboard LED is on for the duration of the capture,
+// off once it ends.
+//
+// Requires the "WebSockets" library by Markus Sattler (Links2004) and
+// "ArduinoJson" by Benoit Blanchon (v7), both installable via the Arduino
+// Library Manager. Base64 encoding uses mbedTLS, bundled with the ESP32
+// Arduino core - no extra library needed for that.
+
+#include <WiFi.h>
+#include <WebSocketsClient.h>
+#include <ArduinoJson.h>
+#include <driver/i2s.h>
+#include <math.h>
+#include <mbedtls/base64.h>
+#include <string.h>
+#include "config.h"
+
+namespace {
+const char kGeminiHost[] = "generativelanguage.googleapis.com";
+constexpr uint16_t kGeminiPort = 443;
+const char kGeminiPath[] =
+    "/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent?key=" GEMINI_API_KEY;
+
+// Google Trust Services GTS Root R1 - the root Google's TLS certs chain up
+// to. Fetched from https://pki.goog/repo/certs/gtsr1.pem.
+const char kRootCaCert[] = R"EOF(
+-----BEGIN CERTIFICATE-----
+MIIFVzCCAz+gAwIBAgINAgPlk28xsBNJiGuiFzANBgkqhkiG9w0BAQwFADBHMQsw
+CQYDVQQGEwJVUzEiMCAGA1UEChMZR29vZ2xlIFRydXN0IFNlcnZpY2VzIExMQzEU
+MBIGA1UEAxMLR1RTIFJvb3QgUjEwHhcNMTYwNjIyMDAwMDAwWhcNMzYwNjIyMDAw
+MDAwWjBHMQswCQYDVQQGEwJVUzEiMCAGA1UEChMZR29vZ2xlIFRydXN0IFNlcnZp
+Y2VzIExMQzEUMBIGA1UEAxMLR1RTIFJvb3QgUjEwggIiMA0GCSqGSIb3DQEBAQUA
+A4ICDwAwggIKAoICAQC2EQKLHuOhd5s73L+UPreVp0A8of2C+X0yBoJx9vaMf/vo
+27xqLpeXo4xL+Sv2sfnOhB2x+cWX3u+58qPpvBKJXqeqUqv4IyfLpLGcY9vXmX7w
+Cl7raKb0xlpHDU0QM+NOsROjyBhsS+z8CZDfnWQpJSMHobTSPS5g4M/SCYe7zUjw
+TcLCeoiKu7rPWRnWr4+wB7CeMfGCwcDfLqZtbBkOtdh+JhpFAz2weaSUKK0Pfybl
+qAj+lug8aJRT7oM6iCsVlgmy4HqMLnXWnOunVmSPlk9orj2XwoSPwLxAwAtcvfaH
+szVsrBhQf4TgTM2S0yDpM7xSma8ytSmzJSq0SPly4cpk9+aCEI3oncKKiPo4Zor8
+Y/kB+Xj9e1x3+naH+uzfsQ55lVe0vSbv1gHR6xYKu44LtcXFilWr06zqkUspzBmk
+MiVOKvFlRNACzqrOSbTqn3yDsEB750Orp2yjj32JgfpMpf/VjsPOS+C12LOORc92
+wO1AK/1TD7Cn1TsNsYqiA94xrcx36m97PtbfkSIS5r762DL8EGMUUXLeXdYWk70p
+aDPvOmbsB4om3xPXV2V4J95eSRQAogB/mqghtqmxlbCluQ0WEdrHbEg8QOB+DVrN
+VjzRlwW5y0vtOUucxD/SVRNuJLDWcfr0wbrM7Rv1/oFB2ACYPTrIrnqYNxgFlQID
+AQABo0IwQDAOBgNVHQ8BAf8EBAMCAYYwDwYDVR0TAQH/BAUwAwEB/zAdBgNVHQ4E
+FgQU5K8rJnEaK0gnhS9SZizv8IkTcT4wDQYJKoZIhvcNAQEMBQADggIBAJ+qQibb
+C5u+/x6Wki4+omVKapi6Ist9wTrYggoGxval3sBOh2Z5ofmmWJyq+bXmYOfg6LEe
+QkEzCzc9zolwFcq1JKjPa7XSQCGYzyI0zzvFIoTgxQ6KfF2I5DUkzps+GlQebtuy
+h6f88/qBVRRiClmpIgUxPoLW7ttXNLwzldMXG+gnoot7TiYaelpkttGsN/H9oPM4
+7HLwEXWdyzRSjeZ2axfG34arJ45JK3VmgRAhpuo+9K4l/3wV3s6MJT/KYnAK9y8J
+ZgfIPxz88NtFMN9iiMG1D53Dn0reWVlHxYciNuaCp+0KueIHoI17eko8cdLiA6Ef
+MgfdG+RCzgwARWGAtQsgWSl4vflVy2PFPEz0tv/bal8xa5meLMFrUKTX5hgUvYU/
+Z6tGn6D/Qqc6f1zLXbBwHSs09dR2CQzreExZBfMzQsNhFRAbd03OIozUhfJFfbdT
+6u9AWpQKXCBfTkBdYiJ23//OYb2MI3jSNwLgjt7RETeJ9r/tSQdirpLsQBqvFAnZ
+0E6yove+7u7Y/9waLd64NnHi/Hm3lCXRSHNboTXns5lndcEZOitHTtNCjv0xyBZm
+2tIMPNuzjsmhDYAPexZ3FL//2wmUspO8IFgV6dtxQ/PeEMMA3KgqlbbC1j+Qa3bb
+bP6MvPJwNQzcmRk13NfIRmPVNnGuV/u3gm3c
+-----END CERTIFICATE-----
+)EOF";
+
+// Same as step 8a: AUDIO modality (required by this model) +
+// outputAudioTranscription for a text transcript of the spoken reply. No
+// tools/language yet - those arrive together in a later step.
+//
+// sessionResumption is now included too: the server appears to reset the
+// underlying WebSocket connection mid-turn on its own (see PROJECT_OVERVIEW.md
+// discovery under step 8b), well short of the documented ~10 minute
+// connection lifetime and without ever sending the documented GoAway
+// warning first. Session resumption is the mechanism the docs prescribe
+// for exactly this "server periodically resets the connection" situation -
+// reconnecting with the last known handle instead of starting fresh, so
+// the server can (in theory) continue the same logical session/context.
+// Built dynamically since the handle changes at runtime: empty
+// ("sessionResumption":{}) to opt in on the very first connection, then
+// populated with the last handle received once we have one.
+constexpr uint32_t kSetupMessageBufferSize = 512;
+char setup_message_buffer[kSetupMessageBufferSize];
+char session_handle[64] = "";
+bool have_session_handle = false;
+
+const char kAudioStreamEndMessage[] = R"JSON({"realtimeInput":{"audioStreamEnd":true}})JSON";
+
+// ----- Mic capture -----
+constexpr i2s_port_t kMicI2sPort = I2S_NUM_1;  // kept separate from I2S_NUM_0 - no speaker use in this test
+constexpr uint32_t kSampleRateHz = 16000;      // matches the Gemini Live API input rate
+constexpr uint32_t kRecordDurationSec = 3;     // TBD per PROJECT_OVERVIEW.md open items - adjust as needed
+constexpr uint32_t kChunkSamples = 1600;       // ~100ms per chunk - small enough to avoid buffering the whole capture
+// The I2S driver's internal DMA buffer length is a separate concern from
+// kChunkSamples above, and is hard-capped by ESP-IDF at 1024. i2s_read()
+// can still satisfy a single request for kChunkSamples by pulling across
+// multiple of these smaller internal buffers, so this doesn't limit how
+// much audio we gather per network send.
+constexpr uint32_t kI2sDmaBufLen = 256;
+constexpr uint32_t kI2sDmaBufCount = 8;  // 8*256 = 2048 samples of ring capacity, comfortably above kChunkSamples
+constexpr int32_t kSoftwareGain = 4;           // mic levels are otherwise quiet - see step 3 findings
+constexpr unsigned long kReplyTimeoutMs = 15000;
+
+constexpr uint32_t kChunkPcmBytes = kChunkSamples * sizeof(int16_t);
+constexpr uint32_t kBase64BufferSize = ((kChunkPcmBytes + 2) / 3) * 4 + 1;
+constexpr uint32_t kJsonMessageBufferSize = kBase64BufferSize + 128;
+
+// Exponential backoff for reconnects - see step 7b discovery in PROJECT_OVERVIEW.md.
+constexpr unsigned long kInitialBackoffMs = 1000;
+constexpr unsigned long kMaxBackoffMs = 30000;
+
+// Static, not stack-local: these buffers (~14KB total) would overflow the
+// default Arduino loop task stack if declared inside a function.
+int32_t raw_chunk[kChunkSamples];
+int16_t pcm_chunk[kChunkSamples];
+unsigned char base64_chunk[kBase64BufferSize];
+char json_message[kJsonMessageBufferSize];
+
+WebSocketsClient webSocket;
+bool should_send_setup = false;
+bool session_ready = false;       // true once setupComplete has been received
+bool is_capturing = false;
+bool awaiting_reply = false;
+bool reply_received_this_cycle = false;
+unsigned long reply_deadline_ms = 0;
+unsigned long reconnect_backoff_ms = kInitialBackoffMs;
+uint32_t listen_cycle = 0;
+uint32_t connection_cycle = 0;
+uint32_t message_number = 0;
+}  // namespace
+
+/** Drives the onboard LED, respecting this board's active-high/low polarity. */
+void setLed(bool on) {
+  digitalWrite(LED_PIN, (on == LED_ACTIVE_HIGH) ? HIGH : LOW);
+}
+
+/** Builds the setup message into setup_message_buffer, including the last known session
+    resumption handle if we have one - so a reconnect resumes instead of starting fresh. */
+void buildSetupMessage() {
+  if (have_session_handle) {
+    snprintf(setup_message_buffer, kSetupMessageBufferSize,
+             "{\"setup\":{\"model\":\"models/gemini-3.8-live\",\"generationConfig\":{\"responseModalities\":[\"AUDIO\"]},"
+             "\"outputAudioTranscription\":{},\"sessionResumption\":{\"handle\":\"%s\"}}}",
+             session_handle);
+    Serial.printf("[gemini_mic_stream][Step 8b] Setup message built WITH resumption handle %s\n", session_handle);
+  } else {
+    snprintf(setup_message_buffer, kSetupMessageBufferSize,
+             "{\"setup\":{\"model\":\"models/gemini-3.8-live\",\"generationConfig\":{\"responseModalities\":[\"AUDIO\"]},"
+             "\"outputAudioTranscription\":{},\"sessionResumption\":{}}}");
+    Serial.println("[gemini_mic_stream][Step 8b] Setup message built with no resumption handle yet (fresh session).");
+  }
+}
+
+/** Adds up to +/-20% random jitter to a delay, so retries don't all land on the same cadence. */
+unsigned long addJitter(unsigned long base_ms) {
+  long jitter_range = static_cast<long>(base_ms) / 5;
+  long jitter = random(-jitter_range, jitter_range + 1);
+  long result = static_cast<long>(base_ms) + jitter;
+  return result < 0 ? 0 : static_cast<unsigned long>(result);
+}
+
+/** Blocks until Wi-Fi connects, logging progress and the assigned IP. */
+void connectToWifi() {
+  Serial.printf("[gemini_mic_stream][Step 8b] Connecting to Wi-Fi SSID \"%s\"...\n", WIFI_SSID);
+  WiFi.mode(WIFI_STA);
+  WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
+
+  while (WiFi.status() != WL_CONNECTED) {
+    delay(300);
+    Serial.print(".");
+  }
+
+  Serial.println();
+  Serial.printf("[gemini_mic_stream][Step 8b] Wi-Fi connected. IP address: %s\n", WiFi.localIP().toString().c_str());
+}
+
+/** Blocks until SNTP has set a plausible system time, required for TLS cert validation. */
+void syncSystemTime() {
+  Serial.println("[gemini_mic_stream][Step 8b] Syncing time via SNTP (required for TLS cert validation)...");
+  configTime(0, 0, "pool.ntp.org", "time.nist.gov");
+
+  time_t now = time(nullptr);
+  while (now < 8 * 3600 * 2) {  // still near the 1970 epoch means time hasn't synced yet
+    delay(300);
+    Serial.print(".");
+    now = time(nullptr);
+  }
+
+  Serial.println();
+  Serial.printf("[gemini_mic_stream][Step 8b] Time synced: %s", asctime(gmtime(&now)));
+}
+
+/** Configures I2S1 as a mono master input wired to the INMP441 (mic-only - no speaker in this test). */
+void setupMicInput() {
+  i2s_config_t i2s_config = {
+    .mode = static_cast<i2s_mode_t>(I2S_MODE_MASTER | I2S_MODE_RX),
+    .sample_rate = kSampleRateHz,
+    .bits_per_sample = I2S_BITS_PER_SAMPLE_32BIT,  // INMP441 sends 24-bit data in a 32-bit frame
+    .channel_format = I2S_CHANNEL_FMT_ONLY_RIGHT,  // confirmed in step 3 for this board
+    .communication_format = I2S_COMM_FORMAT_STAND_I2S,
+    .intr_alloc_flags = ESP_INTR_FLAG_LEVEL1,
+    .dma_buf_count = kI2sDmaBufCount,
+    .dma_buf_len = kI2sDmaBufLen,
+    .use_apll = false,
+    .tx_desc_auto_clear = false,
+    .fixed_mclk = 0
+  };
+
+  i2s_pin_config_t pin_config = {
+    .bck_io_num = I2S_MIC_SERIAL_CLOCK,
+    .ws_io_num = I2S_MIC_LEFT_RIGHT_CLOCK,
+    .data_out_num = I2S_PIN_NO_CHANGE,
+    .data_in_num = I2S_MIC_SERIAL_DATA
+  };
+
+  esp_err_t install_result = i2s_driver_install(kMicI2sPort, &i2s_config, 0, nullptr);
+  if (install_result != ESP_OK) {
+    // Continuing to i2s_set_pin() after a failed install previously caused
+    // a Guru Meditation crash-reboot loop (see step 8b's dma_buf_len bug in
+    // PROJECT_OVERVIEW.md) - fail loudly instead of silently continuing.
+    Serial.printf("[gemini_mic_stream][Step 8b] i2s_driver_install failed (code %d) - halting.\n", (int)install_result);
+    while (true) delay(1000);
+  }
+  i2s_set_pin(kMicI2sPort, &pin_config);
+}
+
+/** Prints every key of a JSON object on one line, prefixed by the given label. */
+void logObjectKeys(const char* label, JsonObjectConst obj) {
+  Serial.printf("[gemini_mic_stream][Step 8b]   %s keys:", label);
+  for (JsonPairConst kv : obj) {
+    Serial.printf(" %s", kv.key().c_str());
+  }
+  Serial.println();
+}
+
+/** Marks this LISTEN cycle as having gotten a reply, logging the verdict exactly once per cycle. */
+void markReplyReceived() {
+  if (reply_received_this_cycle) return;
+  reply_received_this_cycle = true;
+  Serial.printf("[gemini_mic_stream][Step 8b] ===== LISTEN #%u PASSED =====\n", listen_cycle);
+}
+
+/** Parses one server message, logging its full structure (reused from step 8a's diagnostic approach).
+    Also logs free heap before/after parsing, to check whether a burst of large messages puts the
+    board under memory pressure right before a disconnect (see PROJECT_OVERVIEW.md discovery). */
+void handleServerMessage(uint8_t* payload, size_t length) {
+  message_number++;
+  unsigned long t = millis();
+  uint32_t heap_before = ESP.getFreeHeap();
+
+  JsonDocument doc;
+  DeserializationError err = deserializeJson(doc, reinterpret_cast<const char*>(payload), length);
+  uint32_t heap_after = ESP.getFreeHeap();
+  if (err) {
+    Serial.printf("[gemini_mic_stream][Step 8b][t=%lu][cycle=%u][msg=%u] JSON parse error: %s (heap %u -> %u)\n",
+                  t, connection_cycle, message_number, err.c_str(), heap_before, heap_after);
+    return;
+  }
+
+  Serial.printf("[gemini_mic_stream][Step 8b][t=%lu][cycle=%u][msg=%u] %u bytes. Free heap: %u -> %u\n",
+                t, connection_cycle, message_number, (unsigned)length, heap_before, heap_after);
+  logObjectKeys("top-level", doc.as<JsonObjectConst>());
+
+  if (!doc["setupComplete"].isNull()) {
+    Serial.println("[gemini_mic_stream][Step 8b]   -> setupComplete: ready. Type LISTEN to record and send audio.");
+    session_ready = true;
+    return;
+  }
+
+  JsonObjectConst resumption_update = doc["sessionResumptionUpdate"];
+  if (!resumption_update.isNull()) {
+    bool resumable = resumption_update["resumable"] | false;
+    const char* new_handle = resumption_update["newHandle"] | (const char*)nullptr;
+    if (resumable && new_handle != nullptr) {
+      strncpy(session_handle, new_handle, sizeof(session_handle) - 1);
+      session_handle[sizeof(session_handle) - 1] = '\0';
+      have_session_handle = true;
+      Serial.printf("[gemini_mic_stream][Step 8b]   -> sessionResumptionUpdate: stored handle %s\n", session_handle);
+    } else {
+      Serial.println("[gemini_mic_stream][Step 8b]   -> sessionResumptionUpdate: not resumable, handle unchanged.");
+    }
+    return;
+  }
+
+  JsonObjectConst server_content = doc["serverContent"];
+  if (server_content.isNull()) {
+    return;
+  }
+  logObjectKeys("serverContent", server_content);
+
+  JsonArrayConst parts = server_content["modelTurn"]["parts"];
+  if (!parts.isNull()) {
+    uint32_t part_index = 0;
+    for (JsonObjectConst part : parts) {
+      part_index++;
+      if (!part["text"].isNull()) {
+        Serial.printf("[gemini_mic_stream][Step 8b]   modelTurn part #%u: text = \"%s\"\n",
+                      part_index, part["text"].as<const char*>());
+      } else if (!part["inlineData"].isNull()) {
+        const char* mime_type = part["inlineData"]["mimeType"] | "?";
+        const char* data = part["inlineData"]["data"] | "";
+        Serial.printf("[gemini_mic_stream][Step 8b]   modelTurn part #%u: inlineData, mimeType=%s, base64 length=%u chars\n",
+                      part_index, mime_type, (unsigned)strlen(data));
+      } else {
+        Serial.printf("[gemini_mic_stream][Step 8b]   modelTurn part #%u: unrecognized shape\n", part_index);
+      }
+      if (awaiting_reply) markReplyReceived();
+    }
+  }
+
+  if (!server_content["outputTranscription"].isNull()) {
+    const char* transcription = server_content["outputTranscription"]["text"] | (const char*)nullptr;
+    if (transcription != nullptr) {
+      Serial.printf("[gemini_mic_stream][Step 8b]   outputTranscription.text = \"%s\"\n", transcription);
+      if (awaiting_reply) markReplyReceived();
+    }
+  }
+
+  if (server_content["generationComplete"] | false) {
+    Serial.println("[gemini_mic_stream][Step 8b]   generationComplete = true");
+  }
+  if (server_content["interrupted"] | false) {
+    Serial.println("[gemini_mic_stream][Step 8b]   interrupted = true");
+  }
+  if (server_content["turnComplete"] | false) {
+    Serial.println("[gemini_mic_stream][Step 8b]   turnComplete = true");
+    awaiting_reply = false;
+  }
+}
+
+/** Handles WebSocket lifecycle events: sends the setup message, parses replies,
+    and applies exponential backoff to reconnects that never got a reply. */
+void onWebSocketEvent(WStype_t type, uint8_t* payload, size_t length) {
+  unsigned long t = millis();
+  switch (type) {
+    case WStype_CONNECTED:
+      connection_cycle++;
+      Serial.printf("[gemini_mic_stream][Step 8b][t=%lu][cycle=%u] WSS connected.\n", t, connection_cycle);
+      session_ready = false;
+      should_send_setup = true;
+      break;
+    case WStype_DISCONNECTED:
+      Serial.printf("[gemini_mic_stream][Step 8b][t=%lu] Free heap at disconnect: %u\n", t, ESP.getFreeHeap());
+      if (awaiting_reply && !reply_received_this_cycle) {
+        Serial.printf("[gemini_mic_stream][Step 8b] ===== LISTEN #%u FAILED: disconnected before any reply arrived =====\n",
+                      listen_cycle);
+        awaiting_reply = false;
+      }
+      if (session_ready) {
+        Serial.printf("[gemini_mic_stream][Step 8b][t=%lu] Disconnected. Resetting backoff.\n", t);
+        reconnect_backoff_ms = kInitialBackoffMs;
+      } else {
+        unsigned long wait_ms = addJitter(reconnect_backoff_ms);
+        Serial.printf("[gemini_mic_stream][Step 8b][t=%lu] Disconnected with no reply. Backing off ~%lu ms before retrying.\n",
+                      t, wait_ms);
+        webSocket.setReconnectInterval(wait_ms);
+        reconnect_backoff_ms = min(reconnect_backoff_ms * 2, kMaxBackoffMs);
+      }
+      break;
+    case WStype_TEXT:
+    case WStype_BIN:
+      // This server sends its JSON replies over binary (opcode 0x2) frames,
+      // not text frames - so both are handled identically here.
+      handleServerMessage(payload, length);
+      break;
+    case WStype_ERROR:
+      Serial.printf("[gemini_mic_stream][Step 8b][t=%lu] WebSocket error: %.*s\n", t, (int)length, payload);
+      break;
+    default:
+      Serial.printf("[gemini_mic_stream][Step 8b][t=%lu] Unhandled event type %d.\n", t, (int)type);
+      break;
+  }
+}
+
+/** Records kRecordDurationSec of mic audio, streaming each ~100ms chunk to Gemini as it's
+    captured. LED on throughout. Sends audioStreamEnd once done, then starts the reply timeout. */
+void captureAndStreamAudio() {
+  listen_cycle++;
+  is_capturing = true;
+  awaiting_reply = false;
+  reply_received_this_cycle = false;
+  setLed(true);
+  Serial.printf("[gemini_mic_stream][Step 8b] LISTEN #%u: recording %us and streaming to Gemini...\n",
+                listen_cycle, kRecordDurationSec);
+
+  uint32_t total_samples = kSampleRateHz * kRecordDurationSec;
+  uint32_t samples_sent = 0;
+  uint32_t chunks_sent = 0;
+
+  // Independent of whether Gemini replies, this tells us whether real audio
+  // was actually captured - separates "mic/gain problem" from "server
+  // never responded" as possible explanations for a FAILED verdict.
+  int16_t level_min = INT16_MAX;
+  int16_t level_max = INT16_MIN;
+  double level_sum_of_squares = 0.0;
+
+  while (samples_sent < total_samples) {
+    uint32_t samples_wanted = min(kChunkSamples, total_samples - samples_sent);
+    size_t bytes_read = 0;
+    i2s_read(kMicI2sPort, raw_chunk, samples_wanted * sizeof(int32_t), &bytes_read, portMAX_DELAY);
+    uint32_t samples_read = bytes_read / sizeof(int32_t);
+
+    for (uint32_t i = 0; i < samples_read; i++) {
+      int16_t sample16 = static_cast<int16_t>(raw_chunk[i] >> 16);
+      int32_t scaled = static_cast<int32_t>(sample16) * kSoftwareGain;
+      if (scaled > INT16_MAX) scaled = INT16_MAX;
+      if (scaled < INT16_MIN) scaled = INT16_MIN;
+      pcm_chunk[i] = static_cast<int16_t>(scaled);
+      level_min = min(level_min, pcm_chunk[i]);
+      level_max = max(level_max, pcm_chunk[i]);
+      level_sum_of_squares += static_cast<double>(pcm_chunk[i]) * pcm_chunk[i];
+    }
+
+    size_t base64_len = 0;
+    int b64_result = mbedtls_base64_encode(base64_chunk, sizeof(base64_chunk), &base64_len,
+                                            reinterpret_cast<const unsigned char*>(pcm_chunk),
+                                            samples_read * sizeof(int16_t));
+    if (b64_result != 0) {
+      Serial.printf("[gemini_mic_stream][Step 8b] base64 encode failed (code %d) - skipping this chunk.\n", b64_result);
+      samples_sent += samples_read;
+      continue;
+    }
+
+    snprintf(json_message, kJsonMessageBufferSize,
+             "{\"realtimeInput\":{\"audio\":{\"data\":\"%.*s\",\"mimeType\":\"audio/pcm;rate=16000\"}}}",
+             (int)base64_len, base64_chunk);
+    webSocket.sendTXT(json_message);
+
+    samples_sent += samples_read;
+    chunks_sent++;
+  }
+
+  webSocket.sendTXT(kAudioStreamEndMessage);
+  setLed(false);
+  double level_rms = sqrt(level_sum_of_squares / samples_sent);
+  Serial.printf("[gemini_mic_stream][Step 8b] Done streaming (%u chunks). Mic level: min=%d max=%d rms=%.1f\n",
+                chunks_sent, level_min, level_max, level_rms);
+  Serial.println("[gemini_mic_stream][Step 8b] Waiting for Gemini's reply...");
+
+  is_capturing = false;
+  awaiting_reply = true;
+  reply_deadline_ms = millis() + kReplyTimeoutMs;
+}
+
+/** Checks Serial for a LISTEN command and starts a capture if the session is ready and idle. */
+void checkForListenCommand() {
+  if (!Serial.available()) {
+    return;
+  }
+  String command = Serial.readStringUntil('\n');
+  command.trim();
+  if (!command.equalsIgnoreCase("LISTEN")) {
+    return;
+  }
+
+  if (!session_ready) {
+    Serial.println("[gemini_mic_stream][Step 8b] Not ready yet - still connecting/setting up.");
+  } else if (is_capturing) {
+    Serial.println("[gemini_mic_stream][Step 8b] Already recording - ignoring.");
+  } else {
+    captureAndStreamAudio();
+  }
+}
+
+/** Checks whether the reply timeout for the current LISTEN cycle has expired. */
+void checkReplyTimeout() {
+  if (!awaiting_reply) {
+    return;
+  }
+  if (millis() < reply_deadline_ms) {
+    return;
+  }
+  awaiting_reply = false;
+  if (!reply_received_this_cycle) {
+    Serial.printf("[gemini_mic_stream][Step 8b] ===== LISTEN #%u FAILED: no reply within %lu ms =====\n",
+                  listen_cycle, kReplyTimeoutMs);
+  }
+}
+
+/** One-time setup: Wi-Fi, time sync, mic I2S, LED, then open the session. */
+void setup() {
+  Serial.begin(921600);
+  Serial.println("[gemini_mic_stream][Step 8b] Boot.");
+  Serial.printf("[gemini_mic_stream][Step 8b] Free heap at boot (baseline): %u\n", ESP.getFreeHeap());
+  randomSeed(esp_random());  // seeds addJitter() with the ESP32's hardware RNG
+
+  pinMode(LED_PIN, OUTPUT);
+  setLed(false);
+  setupMicInput();
+
+  connectToWifi();
+  syncSystemTime();
+
+  Serial.println("[gemini_mic_stream][Step 8b] Opening WSS connection to the Gemini Live API endpoint...");
+  webSocket.onEvent(onWebSocketEvent);
+  webSocket.beginSslWithCA(kGeminiHost, kGeminiPort, kGeminiPath, kRootCaCert);
+}
+
+/** Services the WebSocket connection, sends the setup message once flagged ready,
+    watches for a LISTEN command, and checks for a reply timeout. */
+void loop() {
+  webSocket.loop();
+
+  if (should_send_setup) {
+    should_send_setup = false;
+    buildSetupMessage();
+    Serial.println("[gemini_mic_stream][Step 8b] Sending session setup message...");
+    webSocket.sendTXT(setup_message_buffer);
+  }
+
+  checkForListenCommand();
+  checkReplyTimeout();
+}

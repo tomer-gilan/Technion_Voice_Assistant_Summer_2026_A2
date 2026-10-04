@@ -1,0 +1,715 @@
+// Step 13 - OpenAI Realtime API: Play Back the Reply
+// Extends step 12: output_modalities switches back to ["audio"] (it was
+// ["text"] in steps 11-12 to sidestep the heap risk - see below), and each
+// LISTEN cycle now decodes and plays the model's spoken reply through the
+// MAX98357A speaker, one small chunk at a time, rather than ever buffering
+// the whole reply in RAM.
+//
+// Requires the "WebSockets" library by Markus Sattler (Links2004) and
+// "ArduinoJson" by Benoit Blanchon (v7), both installable via the Arduino
+// Library Manager. Base64 encoding/decoding uses mbedTLS, bundled with the
+// ESP32 Arduino core - no extra library needed for that.
+//
+// ----- Shared I2S port, not two independent ones -----
+// This board's BCLK/LRC clock lines are physically shared between the mic
+// and the DAC (I2S_BCLK/I2S_LRC in config.h are the *same* GPIOs as
+// I2S_MIC_SERIAL_CLOCK/I2S_MIC_LEFT_RIGHT_CLOCK - 26/25). Old step 4
+// discovered that two independent I2S masters fight over those shared
+// pins, and fixed it by running ONE port in full-duplex (RX+TX) mode
+// instead. Step 12 got away with a separate RX-only I2S_NUM_1 because
+// nothing was using I2S_NUM_0/TX yet - now that playback needs TX too,
+// this switches to I2S_NUM_0 in full duplex, following step 4's proven
+// pattern rather than two ports.
+//
+// Full duplex on this driver means RX and TX share one sample rate, so
+// both directions run the peripheral at 24000Hz - the input floor step 10
+// discovered. Output audio itself now arrives at 8kHz (see "8kHz mu-law"
+// below) and gets upsampled to match before it ever reaches the ring
+// buffer/I2S, so the peripheral's single shared rate is still satisfied.
+//
+// ----- Not blocking inside the WebSocket callback -----
+// i2s_write() can block waiting for DMA buffer space - old step 8c's
+// design note (carried in every WS sketch since step 9) warns this is the
+// same category of risk as the sendTXT()-from-callback deadlock found in
+// step 7. So handleServerMessage() (called from the WS library's own
+// callback) never calls i2s_write() itself - it only decodes each
+// response.output_audio.delta chunk straight into a small ring buffer.
+// loop() (safely outside the WS library's own call stack) drains that
+// ring buffer to the speaker a chunk at a time.
+//
+// ----- Audio blew the heap, again - turned out not to be heap at all -----
+// Step 11 guessed that a full deserializeJson() on a large
+// response.output_audio.delta payload exhausted heap and killed the
+// connection. First real attempt at this step (24kHz PCM output, same as
+// the session config step 10 validated) reused that guess: findRawStringField()
+// locates the "delta" field's base64 span directly inside the WebSocket
+// library's own already-allocated payload buffer (no copy, no
+// JsonDocument), and decodeAndRingAudioDelta() base64-decodes it in small
+// fixed-size aligned slices straight into the ring buffer - the same
+// "never allocate proportionally to the delta's size" discipline as
+// before. It still disconnected, every time, before a single audio delta
+// ever arrived - and this time with hard diagnostics proving it wasn't
+// memory: free heap stayed ~150-155KB and ESP.getMaxAllocHeap() (largest
+// *contiguous* free block, the real number that matters for one big
+// allocation, not just total free bytes) stayed 59-63KB, both comfortably
+// above the ~26KB a single 24kHz-PCM audio delta frame needed. A
+// standalone Python script (tools/realtime_audio_diagnostic.py)
+// reproducing the identical session.update/conversation.item.create/
+// response.create flow against the same API succeeded cleanly every time,
+// ruling out the server too. That script's own log also revealed OpenAI
+// chunks output audio into fixed ~0.4s pieces (25600 base64 chars per
+// chunk at 24kHz PCM) sent as single, non-fragmented WS frames - and a
+// near-identical bug report in a *different* ESP32 Arduino WebSocket
+// library (github.com/gilmaimon/ArduinoWebsockets/issues/21) has its
+// maintainer concluding, after investigating, "this looks like a bug in
+// the library itself, it has nothing to do with memory restrictions."
+// Best explanation left: this WebSockets (Links2004) library has some
+// protocol-handling limit with single frames around that size, on this
+// board - not a documented one, not something we can fix inside the
+// library from here, but real all the same.
+//
+// ----- 8kHz mu-law: shrinking the frame instead of fighting the library -----
+// OpenAI's chunking is a fixed *duration* (~0.4s), not a fixed byte count,
+// so the fix is to lower the bitrate we ask for rather than touch the
+// WebSocket layer at all: session.update now requests "audio/pcmu" (G.711
+// mu-law, 8kHz, 1 byte/sample) for OUTPUT only - mic input stays 24kHz PCM
+// exactly as before. Confirmed on real hardware: chunks dropped from
+// 25600 base64 chars to 4268, and the disconnect is gone entirely -
+// deltas now arrive every time. ulawToLinearPcm16() decodes each byte with
+// the standard public-domain ITU-T G.711 bit-manipulation algorithm (not a
+// lookup table); 8kHz mu-law is telephone-quality audio, a real drop from
+// 24kHz, but plenty intelligible for a voice assistant.
+//
+// ----- Ring buffer stores compressed audio, not PCM -----
+// First attempt at playback decoded+upsampled each delta to 24kHz PCM
+// *before* ringing it (so the ring buffer would stay a simple, generic
+// byte queue) - and immediately hit a second bug: the ring filled and
+// stayed full within 3 deltas (~90ms), with a wall of "Ring buffer
+// overflow" logs after that. Root cause: OpenAI sends the whole reply's
+// audio over the network far faster than real-time playback can consume
+// it (that's normal for a data transfer, not paced to a DAC), and decoded
+// 24kHz PCM at 32KB only holds ~0.68s - nowhere near enough headroom to
+// absorb that burst for any reply longer than well under a second. Fixed
+// by ringing the raw mu-law bytes instead (decodeAndRingAudioDelta() is
+// back to a plain base64-decode-and-ringWrite, same as before mu-law was
+// added) and moving the decode+3x upsample (kOutputUpsampleFactor, 8kHz ->
+// 24kHz, simple nearest-neighbor repetition) into drainRingBufferToSpeaker()
+// instead, right before i2s_write(). Mu-law's compactness is the whole
+// win here: the same 32KB now holds ~4.1s of audio instead of ~0.68s -
+// generous headroom for a real reply, for free, just by buffering the
+// wire format instead of the decoded one.
+//
+// Wi-Fi and OpenAI-WSS plumbing (connect, reconnect backoff, generic event
+// logging) live in wifi_utils.h/.cpp and openai_realtime_utils.h/.cpp,
+// shared with every other test sketch in this folder.
+
+#include <WebSocketsClient.h>
+#include <ArduinoJson.h>
+#include <driver/i2s.h>
+#include <mbedtls/base64.h>
+#include <math.h>
+#include <string.h>
+#include "config.h"
+#include "wifi_utils.h"
+#include "openai_realtime_utils.h"
+
+namespace {
+// output_modalities:["audio"] again (see header comment). Input stays PCM
+// at 24000Hz - the floor step 10 discovered, and what the mic already
+// captures. Output switches to 8kHz mu-law ("audio/pcmu", no rate field -
+// G.711 mu-law is fixed at 8kHz) instead of 24kHz PCM - see the "8kHz
+// mu-law" header note for why. turn_detection stays off (manual control,
+// per step 12).
+const char kSessionUpdateMessage[] =
+    R"JSON({"type":"session.update","session":{"type":"realtime","model":")JSON"
+    OPENAI_MODEL
+    R"JSON(","instructions":"You are a helpful, concise voice assistant running on an ESP32 dev board. Keep spoken replies short.","output_modalities":["audio"],"audio":{"input":{"format":{"type":"audio/pcm","rate":24000},"turn_detection":null},"output":{"format":{"type":"audio/pcmu"},"voice":"alloy"}},"reasoning":{"effort":"low"}}})JSON";
+
+const char kCommitMessage[] = R"JSON({"type":"input_audio_buffer.commit"})JSON";
+const char kResponseCreateMessage[] = R"JSON({"type":"response.create"})JSON";
+
+// ----- I2S (shared full-duplex port - see header comment) -----
+constexpr i2s_port_t kI2sPort = I2S_NUM_0;
+constexpr uint32_t kSampleRateHz = 24000;
+constexpr uint32_t kRecordDurationSec = 3;  // same duration old step 8b/step 12 used
+constexpr uint32_t kChunkSamples = 2400;    // ~100ms per chunk at 24kHz - same chunk duration step 12 confirmed working
+constexpr uint32_t kI2sDmaBufLen = 300;
+constexpr uint32_t kI2sDmaBufCount = 12;  // 12*300 = 3600 samples of ring capacity, comfortably above kChunkSamples
+constexpr int32_t kSoftwareGain = 4;      // mic levels are otherwise quiet - see step 3 findings
+constexpr unsigned long kReplyTimeoutMs = 15000;
+
+constexpr uint32_t kChunkPcmBytes = kChunkSamples * sizeof(int16_t);
+constexpr uint32_t kBase64BufferSize = ((kChunkPcmBytes + 2) / 3) * 4 + 1;
+constexpr uint32_t kJsonMessageBufferSize = kBase64BufferSize + 128;
+
+// ----- Playback ring buffer -----
+// Holds raw mu-law bytes (NOT decoded PCM) - see "Ring buffer stores
+// compressed audio, not PCM" below for why. At 8kHz/1 byte-per-sample,
+// 32KB is ~4.1s of audio - bounded headroom for a real reply, not the
+// literal whole thing, but generous since the format is so compact.
+constexpr uint32_t kRingBufferBytes = 32 * 1024;
+// Per-pass base64 decode size, aligned to base64's 4-character grouping -
+// caps how much of one delta gets decoded at a time, regardless of how
+// large the delta itself is.
+constexpr uint32_t kDecodeInputChars = 1024;
+constexpr uint32_t kDecodeOutputBufBytes = 800;  // >= 1024/4*3 = 768 decoded mu-law bytes
+// mu-law is 8kHz; the shared full-duplex I2S peripheral runs at 24kHz (see
+// header comment) - repeat each decoded sample this many times.
+constexpr int kOutputUpsampleFactor = 3;
+// Drained from the ring to the speaker per loop() pass, in raw mu-law
+// bytes - 320 bytes = 40ms of source audio (960 samples once upsampled),
+// a deliberately small per-call chunk so i2s_write()'s blocking wait for
+// DMA space (see header comment on not blocking too long) stays short.
+constexpr uint32_t kTxDrainMuLawBytes = 320;
+
+// Static, not stack-local: these buffers would overflow the default
+// Arduino loop task stack if declared inside a function (same reasoning
+// as old step 8b/step 12).
+int32_t raw_chunk[kChunkSamples];
+int16_t pcm_chunk[kChunkSamples];
+unsigned char base64_chunk[kBase64BufferSize];
+char json_message[kJsonMessageBufferSize];
+uint8_t ring_buffer[kRingBufferBytes];
+uint8_t decode_scratch[kDecodeOutputBufBytes];
+uint8_t tx_mulaw_bytes[kTxDrainMuLawBytes];
+int32_t tx_i2s_words[kTxDrainMuLawBytes * kOutputUpsampleFactor];
+
+WebSocketsClient webSocket;
+bool should_keep_running = true;   // only false if the connection itself can never be established
+bool should_send_session_update = false;
+bool session_ready = false;        // true once session.updated has been received at least once
+bool session_ever_ready = false;
+bool is_capturing = false;
+bool awaiting_reply = false;
+bool reply_received_this_cycle = false;
+bool transcript_in_progress = false;  // a response.output_audio_transcript.delta stream is currently mid-line
+bool response_fully_received = false; // response.done arrived - ring buffer may still be draining
+uint32_t listen_cycle = 0;
+unsigned long reply_deadline_ms = 0;
+unsigned long reply_wait_started_ms = 0;  // diagnostic: elapsed-time-since-response-requested at disconnect
+
+uint32_t ring_write_index = 0;
+uint32_t ring_read_index = 0;
+uint32_t ring_used_bytes = 0;
+}  // namespace
+
+/** Drives the onboard LED, respecting this board's active-high/low polarity. */
+void setLed(bool on) {
+  digitalWrite(LED_PIN, (on == LED_ACTIVE_HIGH) ? HIGH : LOW);
+}
+
+/** Marks this LISTEN cycle as having gotten a reply, logging the verdict exactly once per cycle. */
+void markReplyReceived() {
+  if (reply_received_this_cycle) return;
+  reply_received_this_cycle = true;
+  awaiting_reply = false;
+  Serial.printf("[openai_playback] ===== LISTEN #%u PASSED =====\n", listen_cycle);
+}
+
+/** Marks this LISTEN cycle as failed, logging the verdict exactly once per cycle.
+    Reserved for a genuine problem (protocol error, failed response, timeout) - not
+    logged at all if a reply already arrived for this cycle. */
+void markReplyFailed(const char* reason) {
+  if (reply_received_this_cycle || !awaiting_reply) return;
+  reply_received_this_cycle = true;
+  awaiting_reply = false;
+  Serial.printf("[openai_playback] ===== LISTEN #%u FAILED: %s =====\n", listen_cycle, reason);
+}
+
+/** Halts the sketch entirely - reserved for the connection itself never succeeding
+    (see openai_realtime_utils's attempt cap), not for a single LISTEN cycle failing. */
+void haltSketch(const char* reason) {
+  should_keep_running = false;
+  Serial.printf("[openai_playback] ===== HALTED: %s =====\n", reason);
+}
+
+/** Resets the playback ring buffer to empty - called at the start of each LISTEN
+    cycle and on disconnect, so stale/partial audio from a previous cycle never
+    gets mixed into the next one. */
+void resetRingBuffer() {
+  ring_write_index = 0;
+  ring_read_index = 0;
+  ring_used_bytes = 0;
+}
+
+/** Bytes free in the ring buffer right now. */
+uint32_t ringFreeBytes() {
+  return kRingBufferBytes - ring_used_bytes;
+}
+
+/** Copies len bytes into the ring buffer, wrapping as needed. Drops (and logs) the
+    whole segment rather than partially writing or blocking if it doesn't fit -
+    a full ring means playback can't keep up with the network, which is worth
+    knowing about, not silently smoothing over. */
+void ringWrite(const uint8_t* data, uint32_t len) {
+  if (len > ringFreeBytes()) {
+    Serial.printf("[openai_playback] Ring buffer overflow - dropping %u bytes of decoded audio.\n", (unsigned)len);
+    return;
+  }
+  for (uint32_t i = 0; i < len; i++) {
+    ring_buffer[ring_write_index] = data[i];
+    ring_write_index = (ring_write_index + 1) % kRingBufferBytes;
+  }
+  ring_used_bytes += len;
+}
+
+/** Copies up to max_len bytes out of the ring buffer into out, wrapping as needed.
+    Returns how many bytes were actually available and copied. */
+uint32_t ringRead(uint8_t* out, uint32_t max_len) {
+  uint32_t n = min(max_len, ring_used_bytes);
+  for (uint32_t i = 0; i < n; i++) {
+    out[i] = ring_buffer[ring_read_index];
+    ring_read_index = (ring_read_index + 1) % kRingBufferBytes;
+  }
+  ring_used_bytes -= n;
+  return n;
+}
+
+/** Configures I2S0 as a full-duplex master: RX from the INMP441, TX to the
+    MAX98357A - one port, not two, since BCLK/LRC are physically shared
+    between them (see header comment). */
+void setupI2sFullDuplex() {
+  i2s_config_t i2s_config = {
+    .mode = static_cast<i2s_mode_t>(I2S_MODE_MASTER | I2S_MODE_TX | I2S_MODE_RX),
+    .sample_rate = kSampleRateHz,
+    .bits_per_sample = I2S_BITS_PER_SAMPLE_32BIT,  // INMP441 sends 24-bit data in a 32-bit frame; TX bus matches width
+    .channel_format = I2S_CHANNEL_FMT_ONLY_RIGHT,  // confirmed in step 3 for this board's mic
+    .communication_format = I2S_COMM_FORMAT_STAND_I2S,
+    .intr_alloc_flags = ESP_INTR_FLAG_LEVEL1,
+    .dma_buf_count = kI2sDmaBufCount,
+    .dma_buf_len = kI2sDmaBufLen,
+    .use_apll = false,
+    .tx_desc_auto_clear = true,  // auto-fills silence between writes, avoiding TX buffer underrun noise
+    .fixed_mclk = 0
+  };
+
+  i2s_pin_config_t pin_config = {
+    .bck_io_num = I2S_BCLK,             // shared clock line, also wired to the mic
+    .ws_io_num = I2S_LRC,               // shared clock line, also wired to the mic
+    .data_out_num = I2S_DOUT,           // to MAX98357A DIN
+    .data_in_num = I2S_MIC_SERIAL_DATA  // from INMP441 SD
+  };
+
+  esp_err_t install_result = i2s_driver_install(kI2sPort, &i2s_config, 0, nullptr);
+  if (install_result != ESP_OK) {
+    // Continuing to i2s_set_pin() after a failed install previously caused a
+    // Guru Meditation crash-reboot loop for this exact driver (see old step
+    // 8b's dma_buf_len bug in PROJECT_OVERVIEW.md) - fail loudly instead.
+    Serial.printf("[openai_playback] i2s_driver_install failed (code %d) - halting.\n", (int)install_result);
+    while (true) delay(1000);
+  }
+  i2s_set_pin(kI2sPort, &pin_config);
+}
+
+/** Cheaply extracts the "type" field's value from a raw JSON payload without a
+    full JSON parse, by scanning for the literal `"type":"..."` that every
+    event seen so far starts with. Returns false if not found within the
+    first 128 bytes (which "type" always is, for every event observed). */
+bool extractEventType(const uint8_t* payload, size_t length, char* out, size_t out_size) {
+  constexpr char kNeedle[] = "\"type\":\"";
+  constexpr size_t kNeedleLen = sizeof(kNeedle) - 1;
+  constexpr size_t kScanWindow = 128;
+  size_t scan_limit = length < kScanWindow ? length : kScanWindow;
+
+  for (size_t i = 0; i + kNeedleLen <= scan_limit; i++) {
+    if (memcmp(payload + i, kNeedle, kNeedleLen) != 0) continue;
+    size_t start = i + kNeedleLen;
+    size_t j = start;
+    while (j < length && payload[j] != '"' && (j - start) < out_size - 1) j++;
+    memcpy(out, payload + start, j - start);
+    out[j - start] = '\0';
+    return true;
+  }
+  return false;
+}
+
+/** Finds a `"field_name":"..."` string field anywhere in a raw JSON payload and
+    returns a pointer/length into the ORIGINAL buffer - no copy - so a large
+    value (like a base64 audio blob) is never duplicated in RAM just to read
+    it. Safe for base64 content specifically: that alphabet never contains a
+    literal `"`, so the first following quote is always the true end. */
+bool findRawStringField(const uint8_t* payload, size_t length, const char* field_name,
+                         const uint8_t** value_start, size_t* value_len) {
+  char needle[32];
+  int needle_len = snprintf(needle, sizeof(needle), "\"%s\":\"", field_name);
+  if (needle_len <= 0 || (size_t)needle_len >= sizeof(needle)) return false;
+
+  for (size_t i = 0; i + (size_t)needle_len <= length; i++) {
+    if (memcmp(payload + i, needle, needle_len) != 0) continue;
+    size_t start = i + needle_len;
+    size_t j = start;
+    while (j < length && payload[j] != '"') j++;
+    if (j >= length) return false;
+    *value_start = payload + start;
+    *value_len = j - start;
+    return true;
+  }
+  return false;
+}
+
+/** ITU-T G.711 mu-law sample -> linear PCM16. The classic public-domain
+    bit-manipulation decode (not a lookup table) - see the header comment's
+    "8kHz mu-law" note. */
+int16_t ulawToLinearPcm16(uint8_t ulaw_sample) {
+  constexpr int kBias = 0x84;
+  uint8_t inverted = ~ulaw_sample;
+  int magnitude = ((inverted & 0x0F) << 3) + kBias;
+  magnitude <<= (inverted & 0x70) >> 4;
+  return static_cast<int16_t>((inverted & 0x80) ? (kBias - magnitude) : (magnitude - kBias));
+}
+
+/** Base64-decodes a (possibly large) span of mu-law audio in small fixed-size
+    aligned slices, writing the raw mu-law bytes straight into the ring
+    buffer - decode-to-PCM and upsampling happen later, at drain time (see
+    "Ring buffer stores compressed audio, not PCM" in the header comment).
+    See the "Audio blew the heap, again" note for why this never allocates
+    proportionally to the delta's own size. */
+void decodeAndRingAudioDelta(const uint8_t* b64_data, size_t b64_len) {
+  size_t offset = 0;
+  while (offset < b64_len) {
+    size_t take = min((size_t)kDecodeInputChars, b64_len - offset);
+    take -= take % 4;  // stay aligned to base64's 4-character groups
+    if (take == 0) break;
+
+    size_t decoded_len = 0;
+    int result = mbedtls_base64_decode(decode_scratch, sizeof(decode_scratch), &decoded_len,
+                                        b64_data + offset, take);
+    if (result != 0) {
+      Serial.printf("[openai_playback] base64 decode failed (code %d) - dropping remainder of this delta.\n", result);
+      return;
+    }
+    ringWrite(decode_scratch, decoded_len);
+    offset += take;
+  }
+}
+
+/** Parses one server text frame, logs its "type" and any interesting fields, and
+    drives session readiness plus the current LISTEN cycle's PASS/FAIL verdict. */
+void handleServerMessage(uint8_t* payload, size_t length) {
+  char type_buf[48];
+  bool have_type = extractEventType(payload, length, type_buf, sizeof(type_buf));
+
+  if (have_type && strcmp(type_buf, "response.output_audio.delta") == 0) {
+    const uint8_t* value_start = nullptr;
+    size_t value_len = 0;
+    if (findRawStringField(payload, length, "delta", &value_start, &value_len)) {
+      // Diagnostic (not yet confirmed necessary): logs the raw frame size and
+      // free heap for every audio delta, so if a disconnect follows one of
+      // these we can tell whether it was the frame itself (WebSocketsClient
+      // must buffer the whole thing before this callback ever runs, so a
+      // large single frame could exhaust heap regardless of how cheaply we
+      // then parse it) versus cumulative pressure from many smaller ones.
+      Serial.printf("[openai_playback] Event type: response.output_audio.delta (%u bytes, base64 span %u). Free heap: %u, largest free block: %u\n",
+                    (unsigned)length, (unsigned)value_len, ESP.getFreeHeap(), ESP.getMaxAllocHeap());
+      decodeAndRingAudioDelta(value_start, value_len);
+    } else {
+      Serial.println("[openai_playback] Event type: response.output_audio.delta, but no delta field found.");
+    }
+    return;
+  }
+
+  if (have_type && strncmp(type_buf, "response.output_audio", 22) == 0) {
+    // Any other response.output_audio* event (e.g. .done) carries no large
+    // payload, but there's nothing this step needs from it either - just
+    // log its size for visibility.
+    Serial.printf("[openai_playback] Event type: %s (%u bytes).\n", type_buf, (unsigned)length);
+    return;
+  }
+
+  JsonDocument doc;
+  DeserializationError err = deserializeJson(doc, reinterpret_cast<const char*>(payload), length);
+  if (err) {
+    Serial.printf("[openai_playback] JSON parse error: %s\n", err.c_str());
+    markReplyFailed("received a message that isn't valid JSON");
+    return;
+  }
+
+  const char* type = doc["type"] | "(missing type)";
+
+  if (strcmp(type, "session.created") == 0) {
+    Serial.println("[openai_playback] Event type: session.created (server-initiated, before our own update).");
+    return;
+  }
+
+  if (strcmp(type, "session.updated") == 0) {
+    session_ready = true;
+    Serial.println("[openai_playback] Event type: session.updated -> ready. Type LISTEN to record and send audio.");
+    if (!session_ever_ready) {
+      session_ever_ready = true;
+      // A later mid-conversation disconnect gets its own fresh attempt
+      // budget, rather than one shared with however many retries startup
+      // itself needed.
+      resetReconnectBackoff();
+    }
+    return;
+  }
+
+  if (strcmp(type, "response.output_audio_transcript.delta") == 0) {
+    const char* delta = doc["delta"] | "";
+    if (!transcript_in_progress) {
+      transcript_in_progress = true;
+      Serial.print("[openai_playback] Event type: response.output_audio_transcript.delta -> streaming transcript: ");
+    }
+    Serial.print(delta);
+    return;
+  }
+
+  if (strcmp(type, "response.output_audio_transcript.done") == 0) {
+    if (transcript_in_progress) {
+      Serial.println();
+      transcript_in_progress = false;
+    }
+    const char* transcript = doc["transcript"] | (const char*)nullptr;
+    Serial.printf("[openai_playback] Event type: response.output_audio_transcript.done -> full transcript: \"%s\"\n",
+                  transcript != nullptr ? transcript : "(none)");
+    return;
+  }
+
+  if (strcmp(type, "response.done") == 0) {
+    const char* status = doc["response"]["status"] | "(unknown)";
+    Serial.printf("[openai_playback] Event type: response.done -> status: %s\n", status);
+    if (strcmp(status, "failed") == 0) {
+      const char* error_message = doc["response"]["status_details"]["error"]["message"] | "(no error detail)";
+      markReplyFailed(error_message);
+    } else {
+      // The PASS verdict itself waits for the ring buffer to actually finish
+      // draining to the speaker - see checkPlaybackComplete() in loop().
+      response_fully_received = true;
+    }
+    return;
+  }
+
+  if (strcmp(type, "error") == 0) {
+    const char* message = doc["error"]["message"] | "(no message)";
+    Serial.printf("[openai_playback] Event type: error -> %s\n", message);
+    markReplyFailed(message);
+    return;
+  }
+
+  Serial.printf("[openai_playback] Event type: %s (unhandled/unexpected for this step, ignoring).\n", type);
+}
+
+/** Handles WebSocket lifecycle events. CONNECTED/DISCONNECTED/TEXT get
+    explicit handling here; everything else is delegated to
+    logGenericWsEvent() so nothing goes unnoticed. */
+void onWebSocketEvent(WStype_t type, uint8_t* payload, size_t length) {
+  switch (type) {
+    case WStype_CONNECTED:
+      Serial.println("[openai_playback] WSS handshake succeeded - connection is open.");
+      session_ready = false;
+      // Deferred to loop() rather than sent here: calling sendTXT() directly
+      // inside this callback can deadlock the library (discovered in old
+      // step 7 - see PROJECT_OVERVIEW.md "Discoveries").
+      should_send_session_update = true;
+      break;
+    case WStype_DISCONNECTED:
+      Serial.printf("[openai_playback] Free heap at disconnect: %u, largest free block: %u\n",
+                    ESP.getFreeHeap(), ESP.getMaxAllocHeap());
+      if (awaiting_reply) {
+        Serial.printf("[openai_playback] Elapsed since response.create was sent: %lu ms\n",
+                      millis() - reply_wait_started_ms);
+      }
+      session_ready = false;
+      resetRingBuffer();  // any partial reply audio is now stale - don't play it
+      markReplyFailed("disconnected before a reply arrived");
+      if (registerDisconnectAndMaybeGiveUp(webSocket)) {
+        haltSketch("connection never succeeded after repeated attempts");
+      }
+      break;
+    case WStype_TEXT:
+      handleServerMessage(payload, length);
+      break;
+    default:
+      logGenericWsEvent(type, payload, length);
+      break;
+  }
+}
+
+/** Records kRecordDurationSec of mic audio, streaming each ~100ms chunk to the
+    session as it's captured. LED on throughout. Commits the buffer and
+    requests a response once done, then starts the reply timeout. */
+void captureAndStreamAudio() {
+  listen_cycle++;
+  is_capturing = true;
+  awaiting_reply = false;
+  reply_received_this_cycle = false;
+  response_fully_received = false;
+  resetRingBuffer();
+  setLed(true);
+  Serial.printf("[openai_playback] LISTEN #%u: recording %us and streaming to OpenAI...\n",
+                listen_cycle, kRecordDurationSec);
+
+  uint32_t total_samples = kSampleRateHz * kRecordDurationSec;
+  uint32_t samples_sent = 0;
+  uint32_t chunks_sent = 0;
+
+  // Independent of whether the model replies, this tells us whether real
+  // audio was actually captured - separates "mic/gain problem" from "server
+  // never responded" as possible explanations for a FAILED verdict.
+  int16_t level_min = INT16_MAX;
+  int16_t level_max = INT16_MIN;
+  double level_sum_of_squares = 0.0;
+
+  while (samples_sent < total_samples) {
+    uint32_t samples_wanted = min(kChunkSamples, total_samples - samples_sent);
+    size_t bytes_read = 0;
+    i2s_read(kI2sPort, raw_chunk, samples_wanted * sizeof(int32_t), &bytes_read, portMAX_DELAY);
+    uint32_t samples_read = bytes_read / sizeof(int32_t);
+
+    for (uint32_t i = 0; i < samples_read; i++) {
+      int16_t sample16 = static_cast<int16_t>(raw_chunk[i] >> 16);
+      int32_t scaled = static_cast<int32_t>(sample16) * kSoftwareGain;
+      if (scaled > INT16_MAX) scaled = INT16_MAX;
+      if (scaled < INT16_MIN) scaled = INT16_MIN;
+      pcm_chunk[i] = static_cast<int16_t>(scaled);
+      level_min = min(level_min, pcm_chunk[i]);
+      level_max = max(level_max, pcm_chunk[i]);
+      level_sum_of_squares += static_cast<double>(pcm_chunk[i]) * pcm_chunk[i];
+    }
+
+    size_t base64_len = 0;
+    int b64_result = mbedtls_base64_encode(base64_chunk, sizeof(base64_chunk), &base64_len,
+                                            reinterpret_cast<const unsigned char*>(pcm_chunk),
+                                            samples_read * sizeof(int16_t));
+    if (b64_result != 0) {
+      Serial.printf("[openai_playback] base64 encode failed (code %d) - skipping this chunk.\n", b64_result);
+      samples_sent += samples_read;
+      continue;
+    }
+
+    snprintf(json_message, kJsonMessageBufferSize,
+             R"JSON({"type":"input_audio_buffer.append","audio":"%.*s"})JSON",
+             (int)base64_len, base64_chunk);
+    webSocket.sendTXT(json_message);
+
+    samples_sent += samples_read;
+    chunks_sent++;
+  }
+
+  webSocket.sendTXT(kCommitMessage);
+  webSocket.sendTXT(kResponseCreateMessage);
+  setLed(false);
+  double level_rms = sqrt(level_sum_of_squares / samples_sent);
+  Serial.printf("[openai_playback] Done streaming (%u chunks). Mic level: min=%d max=%d rms=%.1f\n",
+                chunks_sent, level_min, level_max, level_rms);
+  Serial.println("[openai_playback] Waiting for the reply...");
+
+  is_capturing = false;
+  awaiting_reply = true;
+  reply_wait_started_ms = millis();
+  reply_deadline_ms = reply_wait_started_ms + kReplyTimeoutMs;
+}
+
+/** Checks Serial for a LISTEN command and starts a capture if the session is
+    ready and idle (not still capturing OR still playing back a previous reply). */
+void checkForListenCommand() {
+  if (!Serial.available()) {
+    return;
+  }
+  String command = Serial.readStringUntil('\n');
+  command.trim();
+  if (!command.equalsIgnoreCase("LISTEN")) {
+    return;
+  }
+
+  if (!session_ready) {
+    Serial.println("[openai_playback] Not ready yet - still connecting/setting up.");
+  } else if (is_capturing || awaiting_reply) {
+    Serial.println("[openai_playback] Still recording or playing back a reply - ignoring.");
+  } else {
+    captureAndStreamAudio();
+  }
+}
+
+/** Checks whether the reply timeout for the current LISTEN cycle has expired. */
+void checkReplyTimeout() {
+  if (!awaiting_reply) {
+    return;
+  }
+  if (millis() < reply_deadline_ms) {
+    return;
+  }
+  char reason[48];
+  snprintf(reason, sizeof(reason), "no reply within %lu ms", kReplyTimeoutMs);
+  markReplyFailed(reason);
+}
+
+/** Drains up to kTxDrainMuLawBytes of raw mu-law audio from the ring buffer,
+    decodes and upsamples it (see "Ring buffer stores compressed audio, not
+    PCM" in the header comment), and writes it to the speaker. Safe to call
+    every loop() pass - a no-op when the ring is empty, and only ever blocks
+    as long as i2s_write() naturally does for one small (40ms) chunk (this
+    runs outside the WebSocket library's own call stack, so blocking briefly
+    here is fine - see header comment). */
+void drainRingBufferToSpeaker() {
+  uint32_t n = ringRead(tx_mulaw_bytes, kTxDrainMuLawBytes);
+  if (n == 0) return;
+
+  uint32_t word_index = 0;
+  for (uint32_t i = 0; i < n; i++) {
+    int32_t widened = static_cast<int32_t>(ulawToLinearPcm16(tx_mulaw_bytes[i])) << 16;  // re-align for the 32-bit-wide TX bus
+    for (int rep = 0; rep < kOutputUpsampleFactor; rep++) {
+      tx_i2s_words[word_index++] = widened;
+    }
+  }
+  size_t bytes_written = 0;
+  i2s_write(kI2sPort, tx_i2s_words, word_index * sizeof(int32_t), &bytes_written, portMAX_DELAY);
+}
+
+/** Once the server has said the response is fully done AND the ring buffer has
+    finished draining to the speaker, the reply has genuinely been heard in
+    full - that's this step's actual PASS criterion, not just "bytes arrived". */
+void checkPlaybackComplete() {
+  if (!response_fully_received || !awaiting_reply) {
+    return;
+  }
+  if (ring_used_bytes > 0) {
+    return;  // still playing
+  }
+  markReplyReceived();
+}
+
+/** One-time setup: Wi-Fi, time sync, full-duplex mic+speaker I2S, LED, then
+    open the secure WebSocket connection. */
+void setup() {
+  Serial.begin(115200);
+  Serial.println("[openai_playback] Boot.");
+  Serial.printf("[openai_playback] Free heap at boot (baseline): %u, largest free block: %u\n",
+                ESP.getFreeHeap(), ESP.getMaxAllocHeap());
+
+  pinMode(LED_PIN, OUTPUT);
+  setLed(false);
+  setupI2sFullDuplex();
+
+  connectToWifi();
+  syncSystemTime();
+
+  Serial.println("[openai_playback] Opening WSS connection to the OpenAI Realtime API endpoint...");
+  webSocket.onEvent(onWebSocketEvent);
+  beginOpenAiRealtimeConnection(webSocket);
+}
+
+/** Services the WebSocket connection, sends session.update once flagged ready,
+    watches for a LISTEN command, drains playback audio to the speaker, and
+    checks for a reply timeout / playback completion. Unlike steps 9-11, this
+    keeps running across many LISTEN cycles rather than halting after one
+    verdict - it only ever stops if the connection itself can never be
+    established. */
+void loop() {
+  if (!should_keep_running) {
+    return;
+  }
+
+  webSocket.loop();
+
+  if (should_send_session_update) {
+    should_send_session_update = false;
+    Serial.println("[openai_playback] Sending session.update...");
+    webSocket.sendTXT(kSessionUpdateMessage);
+  }
+
+  checkForListenCommand();
+  drainRingBufferToSpeaker();
+  checkPlaybackComplete();
+  checkReplyTimeout();
+}

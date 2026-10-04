@@ -1,0 +1,204 @@
+// Step 9 - TLS/WSS Handshake to the OpenAI Realtime API
+// Connects to Wi-Fi, syncs time (required for TLS certificate validation),
+// then opens a secure WebSocket connection to the OpenAI Realtime API
+// endpoint. No session config is sent yet - this step only confirms the
+// handshake itself succeeds (TLS + HTTP upgrade to WebSocket + auth).
+//
+// Requires the "WebSockets" library by Markus Sattler (Links2004),
+// installable via the Arduino Library Manager.
+//
+// Unlike the old Gemini step 6, auth is NOT a URL query param - OpenAI
+// wants it as a standard "Authorization: Bearer <key>" header on the
+// handshake request. The API is GA now, so the old beta-era
+// "OpenAI-Beta: realtime=v1" header is no longer needed/sent.
+
+#include <WiFi.h>
+#include <WebSocketsClient.h>
+#include "config.h"
+
+namespace {
+const char kOpenAiHost[] = "api.openai.com";
+constexpr uint16_t kOpenAiPort = 443;
+const char kOpenAiPath[] = "/v1/realtime?model=" OPENAI_MODEL;
+const char kAuthHeader[] = "Authorization: Bearer " OPENAI_API_KEY;
+
+// GTS Root R4 - the (ECC) root api.openai.com's cert chain verifies up to
+// (leaf -> Google Trust Services "WE1" intermediate -> this root). Verified
+// directly against the live chain via `openssl s_client -connect
+// api.openai.com:443 -showcerts` and fetched from https://pki.goog/repo/certs/gtsr4.pem.
+// Note this is a different root than the GTS Root R1 (RSA) used for the old
+// Gemini handshake in step 6 - don't reuse that one here.
+const char kRootCaCert[] = R"EOF(
+-----BEGIN CERTIFICATE-----
+MIICCTCCAY6gAwIBAgINAgPlwGjvYxqccpBQUjAKBggqhkjOPQQDAzBHMQswCQYD
+VQQGEwJVUzEiMCAGA1UEChMZR29vZ2xlIFRydXN0IFNlcnZpY2VzIExMQzEUMBIG
+A1UEAxMLR1RTIFJvb3QgUjQwHhcNMTYwNjIyMDAwMDAwWhcNMzYwNjIyMDAwMDAw
+WjBHMQswCQYDVQQGEwJVUzEiMCAGA1UEChMZR29vZ2xlIFRydXN0IFNlcnZpY2Vz
+IExMQzEUMBIGA1UEAxMLR1RTIFJvb3QgUjQwdjAQBgcqhkjOPQIBBgUrgQQAIgNi
+AATzdHOnaItgrkO4NcWBMHtLSZ37wWHO5t5GvWvVYRg1rkDdc/eJkTBa6zzuhXyi
+QHY7qca4R9gq55KRanPpsXI5nymfopjTX15YhmUPoYRlBtHci8nHc8iMai/lxKvR
+HYqjQjBAMA4GA1UdDwEB/wQEAwIBhjAPBgNVHRMBAf8EBTADAQH/MB0GA1UdDgQW
+BBSATNbrdP9JNqPV2Py1PsVq8JQdjDAKBggqhkjOPQQDAwNpADBmAjEA6ED/g94D
+9J+uHXqnLrmvT/aDHQ4thQEd0dlq7A/Cr8deVl5c1RxYIigL9zC2L7F8AjEA8GE8
+p/SgguMh1YQdc4acLa/KNJvxn7kjNuK8YAOdgLOaVsjh4rsUecrNIdSUtUlD
+-----END CERTIFICATE-----
+)EOF";
+
+// A closed/refused connection could be one transient blip (Wi-Fi hiccup,
+// a dropped SYN) - only declare failure once it's happened enough times in
+// a row that it looks like a genuine, non-transient problem (bad API key,
+// wrong host/path, TLS rejection), per Tomer's Guidelines #4.
+constexpr uint32_t kMaxConnectAttempts = 5;
+constexpr unsigned long kInitialBackoffMs = 1000;
+constexpr unsigned long kMaxBackoffMs = 30000;
+
+WebSocketsClient webSocket;
+bool test_result_logged = false;
+bool should_keep_running = true;
+uint32_t connect_attempts = 0;
+unsigned long reconnect_backoff_ms = kInitialBackoffMs;
+}  // namespace
+
+/** Logs the unambiguous PASS verdict exactly once, then stops the sketch
+    from reconnecting/retrying further - a passed test should end cleanly,
+    not keep demonstrating the same handshake forever. */
+void logTestPassed() {
+  if (test_result_logged) return;
+  test_result_logged = true;
+  should_keep_running = false;
+  Serial.println("[openai_tls_handshake][Step 9] ===== TEST PASSED =====");
+  Serial.println("[openai_tls_handshake][Step 9] Done - no longer reconnecting.");
+}
+
+/** Logs the unambiguous FAIL verdict exactly once, then stops the sketch.
+    Reserved for a genuine, non-transient problem (see kMaxConnectAttempts),
+    not a single expected retry. */
+void logTestFailed(const char* reason) {
+  if (test_result_logged) return;
+  test_result_logged = true;
+  should_keep_running = false;
+  Serial.printf("[openai_tls_handshake][Step 9] ===== TEST FAILED: %s =====\n", reason);
+}
+
+/** Adds up to +/-20% random jitter to a delay, so retries don't all land on the same cadence. */
+unsigned long addJitter(unsigned long base_ms) {
+  long jitter_range = static_cast<long>(base_ms) / 5;
+  long jitter = random(-jitter_range, jitter_range + 1);
+  long result = static_cast<long>(base_ms) + jitter;
+  return result < 0 ? 0 : static_cast<unsigned long>(result);
+}
+
+/** Blocks until Wi-Fi connects, logging progress and the assigned IP. */
+void connectToWifi() {
+  Serial.printf("[openai_tls_handshake][Step 9] Connecting to Wi-Fi SSID \"%s\"...\n", WIFI_SSID);
+  WiFi.mode(WIFI_STA);
+  WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
+
+  while (WiFi.status() != WL_CONNECTED) {
+    delay(300);
+    Serial.print(".");
+  }
+
+  Serial.println();
+  Serial.printf("[openai_tls_handshake][Step 9] Wi-Fi connected. IP address: %s\n", WiFi.localIP().toString().c_str());
+}
+
+/** Blocks until SNTP has set a plausible system time, required for TLS cert validation. */
+void syncSystemTime() {
+  Serial.println("[openai_tls_handshake][Step 9] Syncing time via SNTP (required for TLS cert validation)...");
+  configTime(0, 0, "pool.ntp.org", "time.nist.gov");
+
+  time_t now = time(nullptr);
+  while (now < 8 * 3600 * 2) {  // still near the 1970 epoch means time hasn't synced yet
+    delay(300);
+    Serial.print(".");
+    now = time(nullptr);
+  }
+
+  Serial.println();
+  Serial.printf("[openai_tls_handshake][Step 9] Time synced: %s", asctime(gmtime(&now)));
+}
+
+/** Handles WebSocket lifecycle events, logs every one (including fragments/ping/pong,
+    so nothing goes unnoticed), and drives the PASS/FAIL verdict. */
+void onWebSocketEvent(WStype_t type, uint8_t* payload, size_t length) {
+  switch (type) {
+    case WStype_CONNECTED:
+      Serial.println("[openai_tls_handshake][Step 9] WSS handshake succeeded - connection is open.");
+      logTestPassed();
+      break;
+    case WStype_DISCONNECTED:
+      if (test_result_logged) {
+        Serial.println("[openai_tls_handshake][Step 9] Disconnected (after verdict already logged).");
+        break;
+      }
+      connect_attempts++;
+      if (connect_attempts >= kMaxConnectAttempts) {
+        logTestFailed("handshake never succeeded after repeated attempts - check API key, host/path, or network");
+        break;
+      }
+      {
+        unsigned long wait_ms = addJitter(reconnect_backoff_ms);
+        Serial.printf("[openai_tls_handshake][Step 9] Disconnected before handshake completed (attempt %u/%u). Backing off ~%lu ms before retrying.\n",
+                      connect_attempts, kMaxConnectAttempts, wait_ms);
+        webSocket.setReconnectInterval(wait_ms);
+        reconnect_backoff_ms = min(reconnect_backoff_ms * 2, kMaxBackoffMs);
+      }
+      break;
+    case WStype_TEXT:
+      Serial.printf("[openai_tls_handshake][Step 9] Received text frame: %.*s\n", (int)length, payload);
+      break;
+    case WStype_BIN:
+      Serial.printf("[openai_tls_handshake][Step 9] Received binary frame: %u bytes.\n", (unsigned)length);
+      break;
+    case WStype_ERROR:
+      Serial.printf("[openai_tls_handshake][Step 9] WebSocket error: %.*s\n", (int)length, payload);
+      break;
+    case WStype_FRAGMENT_TEXT_START:
+      Serial.println("[openai_tls_handshake][Step 9] Fragmented TEXT started.");
+      break;
+    case WStype_FRAGMENT_BIN_START:
+      Serial.println("[openai_tls_handshake][Step 9] Fragmented BIN started.");
+      break;
+    case WStype_FRAGMENT:
+      Serial.printf("[openai_tls_handshake][Step 9] Fragment, %u bytes.\n", (unsigned)length);
+      break;
+    case WStype_FRAGMENT_FIN:
+      Serial.printf("[openai_tls_handshake][Step 9] Final fragment, %u bytes.\n", (unsigned)length);
+      break;
+    case WStype_PING:
+      Serial.println("[openai_tls_handshake][Step 9] Received PING.");
+      break;
+    case WStype_PONG:
+      Serial.println("[openai_tls_handshake][Step 9] Received PONG.");
+      break;
+    default:
+      Serial.printf("[openai_tls_handshake][Step 9] Unhandled event type %d.\n", (int)type);
+      break;
+  }
+}
+
+/** One-time setup: Wi-Fi, time sync, then open the secure WebSocket connection. */
+void setup() {
+  Serial.begin(115200);
+  Serial.println("[openai_tls_handshake][Step 9] Boot.");
+
+  connectToWifi();
+  syncSystemTime();
+
+  Serial.println("[openai_tls_handshake][Step 9] Opening WSS connection to the OpenAI Realtime API endpoint...");
+  webSocket.onEvent(onWebSocketEvent);
+  webSocket.setExtraHeaders(kAuthHeader);
+  webSocket.beginSslWithCA(kOpenAiHost, kOpenAiPort, kOpenAiPath, kRootCaCert);
+}
+
+/** Services the WebSocket connection. Once a verdict has been logged, this stops
+    calling webSocket.loop() entirely - that's what drives all connection/reconnection
+    activity, so the sketch goes fully idle from here on. */
+void loop() {
+  if (!should_keep_running) {
+    return;
+  }
+
+  webSocket.loop();
+}

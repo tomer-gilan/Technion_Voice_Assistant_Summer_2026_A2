@@ -1,0 +1,166 @@
+// Step 10 - OpenAI Realtime API Session Setup
+// Opens the same WSS connection as step 9, then sends a session.update
+// client event (model, instructions, input/output audio format+rate,
+// voice, reasoning.effort) and waits for the session.updated server event
+// that confirms the session is configured and ready. Still no audio sent -
+// pure protocol plumbing, mirroring old step 7's role for the new provider.
+//
+// Requires the "WebSockets" library by Markus Sattler (Links2004) and
+// "ArduinoJson" by Benoit Blanchon (v7), both installable via the Arduino
+// Library Manager.
+//
+// GA schema note: session.update's audio config is nested
+// (session.audio.input.format / session.audio.output.format+voice), not
+// the old beta's flat "input_audio_format":"pcm16" shape - confirmed
+// against OpenAI's current Realtime API client-events reference rather
+// than assumed.
+//
+// Rate discovery: first attempt used rate=16000 for input, matching the
+// project's existing 16kHz mic capture (steps 3/4) - the server rejected
+// it: "Invalid 'session.audio.input.format.rate': integer below minimum
+// value. Expected a value >= 24000, but got 16000 instead." So 24000 is
+// actually the floor for *both* directions here, not just a documented
+// default - the earlier doc research calling 16000 valid was wrong/stale.
+// This means step 12 will need to either capture the mic at 24kHz directly
+// or resample 16kHz->24kHz before streaming - deferred to that step.
+//
+// Wi-Fi and OpenAI-WSS plumbing (connect, reconnect backoff, generic event
+// logging) live in wifi_utils.h/.cpp and openai_realtime_utils.h/.cpp,
+// shared with every other test sketch in this folder.
+
+#include <WebSocketsClient.h>
+#include <ArduinoJson.h>
+#include <string.h>
+#include "config.h"
+#include "wifi_utils.h"
+#include "openai_realtime_utils.h"
+
+namespace {
+// Deliberately minimal - no tools, no board-state language yet (that's
+// step 15's job). This just proves the protocol round trip.
+const char kSessionUpdateMessage[] =
+    R"JSON({"type":"session.update","session":{"type":"realtime","model":")JSON"
+    OPENAI_MODEL
+    R"JSON(","instructions":"You are a helpful, concise voice assistant running on an ESP32 dev board. Keep spoken replies short.","output_modalities":["audio"],"audio":{"input":{"format":{"type":"audio/pcm","rate":24000}},"output":{"format":{"type":"audio/pcm","rate":24000},"voice":"alloy"}},"reasoning":{"effort":"low"}}})JSON";
+
+WebSocketsClient webSocket;
+bool test_result_logged = false;
+bool should_keep_running = true;
+bool should_send_session_update = false;
+}  // namespace
+
+/** Logs the unambiguous PASS verdict exactly once, then stops the sketch
+    from reconnecting/retrying further. */
+void logTestPassed() {
+  if (test_result_logged) return;
+  test_result_logged = true;
+  should_keep_running = false;
+  Serial.println("[openai_session_setup] ===== TEST PASSED =====");
+  Serial.println("[openai_session_setup] Done - no longer reconnecting.");
+}
+
+/** Logs the unambiguous FAIL verdict exactly once, then stops the sketch.
+    Reserved for a genuine, non-transient problem, not one expected retry. */
+void logTestFailed(const char* reason) {
+  if (test_result_logged) return;
+  test_result_logged = true;
+  should_keep_running = false;
+  Serial.printf("[openai_session_setup] ===== TEST FAILED: %s =====\n", reason);
+}
+
+/** Parses one server text frame, logs its "type" and any interesting fields, and
+    drives the PASS/FAIL verdict off session.updated / error events. */
+void handleServerMessage(uint8_t* payload, size_t length) {
+  JsonDocument doc;
+  DeserializationError err = deserializeJson(doc, reinterpret_cast<const char*>(payload), length);
+  if (err) {
+    Serial.printf("[openai_session_setup] JSON parse error: %s\n", err.c_str());
+    logTestFailed("received a message that isn't valid JSON");
+    return;
+  }
+
+  const char* type = doc["type"] | "(missing type)";
+  Serial.printf("[openai_session_setup] Event type: %s\n", type);
+
+  if (strcmp(type, "session.created") == 0) {
+    Serial.println("[openai_session_setup]   -> session.created (server-initiated, before our own update).");
+    return;
+  }
+
+  if (strcmp(type, "session.updated") == 0) {
+    const char* model = doc["session"]["model"] | "(unknown)";
+    const char* voice = doc["session"]["audio"]["output"]["voice"] | "(unknown)";
+    Serial.printf("[openai_session_setup]   -> session.updated: model=%s, voice=%s\n", model, voice);
+    logTestPassed();
+    return;
+  }
+
+  if (strcmp(type, "error") == 0) {
+    const char* message = doc["error"]["message"] | "(no message)";
+    Serial.printf("[openai_session_setup]   -> error: %s\n", message);
+    logTestFailed(message);
+    return;
+  }
+
+  Serial.println("[openai_session_setup]   -> unhandled/unexpected event type for this step, ignoring.");
+}
+
+/** Handles WebSocket lifecycle events. CONNECTED/DISCONNECTED/TEXT get
+    explicit handling here; everything else is delegated to
+    logGenericWsEvent() so nothing goes unnoticed. */
+void onWebSocketEvent(WStype_t type, uint8_t* payload, size_t length) {
+  switch (type) {
+    case WStype_CONNECTED:
+      Serial.println("[openai_session_setup] WSS handshake succeeded - connection is open.");
+      // Deferred to loop() rather than sent here: calling sendTXT() directly
+      // inside this callback can deadlock the library (discovered in old
+      // step 7 - see PROJECT_OVERVIEW.md "Discoveries").
+      should_send_session_update = true;
+      break;
+    case WStype_DISCONNECTED:
+      if (test_result_logged) {
+        Serial.println("[openai_session_setup] Disconnected (after verdict already logged).");
+        break;
+      }
+      if (registerDisconnectAndMaybeGiveUp(webSocket)) {
+        logTestFailed("handshake/session-update never succeeded after repeated attempts");
+      }
+      break;
+    case WStype_TEXT:
+      handleServerMessage(payload, length);
+      break;
+    default:
+      logGenericWsEvent(type, payload, length);
+      break;
+  }
+}
+
+/** One-time setup: Wi-Fi, time sync, then open the secure WebSocket connection. */
+void setup() {
+  Serial.begin(115200);
+  Serial.println("[openai_session_setup] Boot.");
+
+  connectToWifi();
+  syncSystemTime();
+
+  Serial.println("[openai_session_setup] Opening WSS connection to the OpenAI Realtime API endpoint...");
+  webSocket.onEvent(onWebSocketEvent);
+  beginOpenAiRealtimeConnection(webSocket);
+}
+
+/** Services the WebSocket connection and sends the session.update message once
+    flagged ready. Once a verdict has been logged, this stops calling
+    webSocket.loop() entirely, so the sketch goes fully idle from here on. */
+void loop() {
+  if (!should_keep_running) {
+    return;
+  }
+
+  webSocket.loop();
+
+  if (should_send_session_update) {
+    should_send_session_update = false;
+    Serial.println("[openai_session_setup] Sending session.update...");
+    webSocket.sendTXT(kSessionUpdateMessage);
+  }
+}
