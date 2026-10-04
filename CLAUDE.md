@@ -94,6 +94,10 @@ or left inline in `test.ino`:
   below).
 - `board_state_utils.h`/`.cpp` — the onboard LED and `set_board_state`
   tool-call handling.
+- `light_sensor_utils.h`/`.cpp` — the light-level global
+  (`esp32va_light_sensor::g_light_sensor_value`), its day/evening/night
+  thresholds, the `LIGHT <value>` Serial command that simulates the sensor,
+  and `get_time_of_day` tool-call handling.
 
 `test.ino` itself should keep only what's actually under test: Wi-Fi/session
 wiring, the LISTEN cycle's mechanics, the server-event-driven state machine,

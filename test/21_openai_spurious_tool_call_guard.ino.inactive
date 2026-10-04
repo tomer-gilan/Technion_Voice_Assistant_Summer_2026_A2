@@ -1,25 +1,28 @@
-// Step 23 - Time of day from a (simulated) light sensor
-// Builds directly on step 21 (test/21_openai_spurious_tool_call_guard.ino.inactive):
+// Step 21 - Guard against spurious tool calls on empty/silent input
+// Builds directly on step 22 (test/22_openai_opening_greeting.ino.inactive):
 // no change to the audio/protocol/opening-greeting/LISTEN-cycle mechanics.
-// Adds a second tool, get_time_of_day, which the model calls when asked what
-// part of the day it is. The board answers from
-// esp32va_light_sensor::g_light_sensor_value - the global the real light
-// sensor (analogRead(pin) * 1.5, so 0-6142) will eventually write - mapped
-// to day / evening / night by placeholder thresholds in
-// light_sensor_utils.cpp. Until that sensor is wired up, the value is set by
-// hand over Serial:
-//   LIGHT <0-6142>  - set the simulated reading
-//   LIGHT           - show the current reading and its part of the day
+// One change: kSessionUpdateMessage's instructions gained a second STRICT
+// RULE telling the model to only call set_board_state when THIS turn
+// contains a clear, explicit request - never inferred from earlier turns,
+// a repeated pattern, or silence.
 //
-// PASS criterion: for each of day / evening / night, set LIGHT to a value
-// in that band, LISTEN, ask e.g. "what part of the day is it?", and confirm
-// the spoken reply matches the "Time of day asked - ..." line logged just
-// before it.
+// Bug being fixed (found during step 20a's verification, tracked since as
+// step 21): "turn LED on" -> works. "turn OFF" -> works. Then saying nothing
+// at all, repeatedly - each empty LISTEN cycle (`You said: ""` in the log)
+// still toggled the LED again, narrating a state change nobody asked for in
+// that turn. The model was evidently inferring/continuing a pattern from
+// conversation history rather than treating each turn's actual (lack of)
+// content as the only basis for acting.
 //
-// New shared module: light_sensor_utils (the global, the LIGHT command, and
-// the get_time_of_day tool handler). Wi-Fi/WSS plumbing, full-duplex
-// I2S/ring buffer, raw-JSON scanning, leveled logging, onboard
-// LED/set_board_state, and the opening greeting stay in wifi_utils,
+// PASS criterion: repeat the exact repro (ask for LED on, then off, then say
+// nothing several times in a row) and confirm the LED stops changing and
+// set_board_state stops being called on the silent turns - see
+// PROJECT_OVERVIEW.md step 21's "What to expect?" section for the full
+// procedure and what to watch for.
+//
+// No new shared module this step - just the instructions text. Wi-Fi/WSS
+// plumbing, full-duplex I2S/ring buffer, raw-JSON scanning, leveled logging,
+// onboard LED/set_board_state, and the opening greeting stay in wifi_utils,
 // openai_realtime_utils, i2s_audio_utils, realtime_json_utils, log_utils,
 // board_state_utils, and greeting_utils, unchanged.
 
@@ -36,16 +39,14 @@
 #include "realtime_json_utils.h"
 #include "board_state_utils.h"
 #include "greeting_utils.h"
-#include "light_sensor_utils.h"
 
 namespace {
-// Unchanged from step 21 except for the get_time_of_day tool and its
-// instructions sentence: 24kHz PCM in / 8kHz mu-law out, manual turn
+// Unchanged from step 18/19: 24kHz PCM in / 8kHz mu-law out, manual turn
 // control, the set_board_state tool, and the one-short-sentence instructions.
 const char kSessionUpdateMessage[] =
     R"JSON({"type":"session.update","session":{"type":"realtime","model":")JSON"
     OPENAI_MODEL
-    R"JSON(","instructions":"You are a voice assistant on an ESP32 dev board. STRICT RULE: reply in exactly ONE short sentence, no more than about 12 words - never two sentences, never a list, no exceptions even for complex questions. If the full answer would need more than that, say only the single most important part of it and drop the rest - a short incomplete answer is correct, a longer complete one is not. When the user asks you to turn the onboard LED on or off, call the set_board_state function with the requested led_on value - don't just say you did it. STRICT RULE: only call set_board_state if THIS specific message clearly and explicitly asks for a board state change - never call it because of an earlier request, a repeated pattern from the conversation so far, or silence/unclear audio; if you did not clearly hear a specific request in this turn, do not call the function and do not assume one was intended. When the user asks about the current time of day - for example what part of the day it is, or whether it is day, evening or night - call the get_time_of_day function and answer from its result, e.g. 'It is currently evening.' Never guess the time of day and never reuse an earlier get_time_of_day result: call it again for every such question, because the light level it is based on changes over time. It only tells day, evening or night, not the clock time.","output_modalities":["audio"],"audio":{"input":{"format":{"type":"audio/pcm","rate":24000},"turn_detection":null,"transcription":{"model":"gpt-4o-mini-transcribe"}},"output":{"format":{"type":"audio/pcmu"},"voice":"alloy"}},"tools":[{"type":"function","name":"set_board_state","description":"Turns the ESP32 dev board's onboard LED on or off.","parameters":{"type":"object","properties":{"led_on":{"type":"boolean","description":"true to turn the LED on, false to turn it off"}},"required":["led_on"]}},{"type":"function","name":"get_time_of_day","description":"Returns the current part of the day - day, evening or night - judged from the board's ambient light sensor. Not a clock time.","parameters":{"type":"object","properties":{}}}],"tool_choice":"auto","reasoning":{"effort":"low"}}})JSON";
+    R"JSON(","instructions":"You are a voice assistant on an ESP32 dev board. STRICT RULE: reply in exactly ONE short sentence, no more than about 12 words - never two sentences, never a list, no exceptions even for complex questions. If the full answer would need more than that, say only the single most important part of it and drop the rest - a short incomplete answer is correct, a longer complete one is not. When the user asks you to turn the onboard LED on or off, call the set_board_state function with the requested led_on value - don't just say you did it. STRICT RULE: only call set_board_state if THIS specific message clearly and explicitly asks for a board state change - never call it because of an earlier request, a repeated pattern from the conversation so far, or silence/unclear audio; if you did not clearly hear a specific request in this turn, do not call the function and do not assume one was intended.","output_modalities":["audio"],"audio":{"input":{"format":{"type":"audio/pcm","rate":24000},"turn_detection":null,"transcription":{"model":"gpt-4o-mini-transcribe"}},"output":{"format":{"type":"audio/pcmu"},"voice":"alloy"}},"tools":[{"type":"function","name":"set_board_state","description":"Turns the ESP32 dev board's onboard LED on or off.","parameters":{"type":"object","properties":{"led_on":{"type":"boolean","description":"true to turn the LED on, false to turn it off"}},"required":["led_on"]}}],"tool_choice":"auto","reasoning":{"effort":"low"}}})JSON";
 
 const char kCommitMessage[] = R"JSON({"type":"input_audio_buffer.commit"})JSON";
 const char kResponseCreateMessage[] = R"JSON({"type":"response.create"})JSON";
@@ -199,18 +200,9 @@ void handleServerMessage(uint8_t* payload, size_t length) {
   }
 
   if (strcmp(type, "response.function_call_arguments.done") == 0) {
-    const char* function_name = doc["name"] | "(unknown)";
-    LOG_DEBUG("Event type: response.function_call_arguments.done -> %s(%s)\n",
-              function_name, (const char*)(doc["arguments"] | "{}"));
-    bool handled = false;
-    if (strcmp(function_name, "set_board_state") == 0) {
-      handled = handleSetBoardStateCall(doc, webSocket);
-    } else if (strcmp(function_name, "get_time_of_day") == 0) {
-      handled = esp32va_light_sensor::handleGetTimeOfDayCall(doc, webSocket);
-    } else {
-      LOG_ERROR("Unhandled function call: %s\n", function_name);
-    }
-    if (handled) {
+    LOG_DEBUG("Event type: response.function_call_arguments.done -> %s\n",
+              (const char*)(doc["arguments"] | "{}"));
+    if (handleSetBoardStateCall(doc, webSocket)) {
       function_call_turn_pending = true;
     }
     return;
@@ -398,25 +390,15 @@ void captureAndStreamAudio() {
   last_reply_activity_ms = millis();
 }
 
-/** Checks Serial for a typed command. LIGHT [<value>] sets/shows the
-    simulated light sensor at any time (see light_sensor_utils.h). LISTEN
-    starts a capture if the session is ready and idle; otherwise logs why
-    not, without starting one. Anything else is logged and ignored. */
-void checkForSerialCommand() {
+/** Checks Serial for a typed LISTEN command and starts a capture if the
+    session is ready and idle; otherwise logs why not, without starting one. */
+void checkForListenCommand() {
   if (!Serial.available()) {
     return;
   }
   String command = Serial.readStringUntil('\n');
   command.trim();
-  if (command.length() == 0) {
-    return;
-  }
-  if (esp32va_light_sensor::handleLightCommand(command.c_str())) {
-    return;
-  }
   if (!command.equalsIgnoreCase("LISTEN")) {
-    LOG_INFO("Unknown command \"%s\" - expected LISTEN or LIGHT <0-%d>.\n",
-             command.c_str(), esp32va_light_sensor::kMaxLightSensorValue);
     return;
   }
 
@@ -465,7 +447,7 @@ void checkPlaybackComplete() {
 }
 
 /** One-time setup: Wi-Fi, time sync, full-duplex mic+speaker I2S, onboard
-    LED, (simulated) light sensor, then open the secure WebSocket connection. */
+    LED, then open the secure WebSocket connection. */
 void setup() {
   Serial.begin(115200);
   LOG_INFO("Boot.\n");
@@ -474,7 +456,6 @@ void setup() {
 
   initPlaybackRingBuffer();
   setupBoardState();
-  esp32va_light_sensor::setupLightSensor();
   setupI2sFullDuplex();
 
   connectToWifi();
@@ -488,7 +469,7 @@ void setup() {
 /** Services the WebSocket connection (unless paused for backpressure - see
     i2s_audio_utils.h's ringShouldPauseReads()), sends session.update once
     flagged ready, sends the one-time opening greeting once flagged ready,
-    watches for a typed LISTEN/LIGHT command, drains playback audio to the
+    watches for a typed LISTEN command, drains playback audio to the
     speaker, and checks for a reply timeout / playback completion. This is a
     soak-test sketch by design: it keeps running across as many LISTEN
     cycles and reconnects as it keeps getting fed, and only ever stops if the
@@ -528,7 +509,7 @@ void loop() {
     esp32va_greeting::sendOpeningGreeting(webSocket);
   }
 
-  checkForSerialCommand();
+  checkForListenCommand();
   drainRingBufferToSpeaker();
   checkPlaybackComplete();
   checkReplyTimeout();
