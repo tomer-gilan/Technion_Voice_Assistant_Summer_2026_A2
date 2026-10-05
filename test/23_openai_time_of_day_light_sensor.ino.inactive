@@ -1,33 +1,27 @@
-// Step 25 - Record each reply to the SD card + serial LIST/GET for the laptop
-// Builds directly on step 24 (test/24_sd_card_heap_budget.ino.inactive): no
-// change to the audio/protocol/greeting/LISTEN-cycle/tool mechanics, and the
-// playback ring buffer stays 32KB. Adds:
-// - Recording: every spoken reply (the opening greeting included) is saved
-//   as /replies/reply_NNNN.ulaw - raw 8kHz mu-law, exactly as OpenAI sent
-//   it - through a second read cursor on the playback ring buffer, so no
-//   extra audio buffer. SD writes happen in loop(), never in the WebSocket
-//   callback. Only the newest 5 are kept (kMaxKeptRecordings): each save
-//   deletes the oldest beyond that, and so does boot.
-// - LIST / GET <name> / DELETE <name> / DELETE_ALL serial commands, answered with "@@" lines
-//   and a CRC-checked binary transfer (see sd_file_transfer_utils.h), for
-//   the laptop web app tools/reply_audio_app.html. Refused with @@BUSY while
-//   a reply is in progress, playing, or being saved. Still answered after a
-//   HALT, so recordings stay reachable. The board also announces the list
-//   unprompted at boot, and each new recording (@@SAVED) as it's saved, so
-//   the app's list is current from the moment it connects.
-// - Serial stays at 115200 baud (the user's call): a file transfer takes
-//   ~0.7 s per second of audio. 921600 would cut that to ~0.1 s if the wait
-//   ever matters - change kSerialBaudRate, the logger's -BaudRate and the
-//   app's baud menu together.
+// Step 23 - Time of day from a (simulated) light sensor
+// Builds directly on step 21 (test/21_openai_spurious_tool_call_guard.ino.inactive):
+// no change to the audio/protocol/opening-greeting/LISTEN-cycle mechanics.
+// Adds a second tool, get_time_of_day, which the model calls when asked what
+// part of the day it is. The board answers from
+// esp32va_light_sensor::g_light_sensor_value - the global the real light
+// sensor (analogRead(pin) * 1.5, so 0-6142) will eventually write - mapped
+// to day / evening / night by placeholder thresholds in
+// light_sensor_utils.cpp. Until that sensor is wired up, the value is set by
+// hand over Serial:
+//   LIGHT <0-6142>  - set the simulated reading
+//   LIGHT           - show the current reading and its part of the day
 //
-// PASS criterion: after LISTEN, "Saved reply_NNNN.ulaw (...)" logs a length
-// matching the spoken reply, "===== REPLY RECORDING PASSED =====" prints
-// once (with the heap summary), and in the laptop app that file lists,
-// downloads with a matching CRC, and plays back sounding like the reply did.
+// PASS criterion: for each of day / evening / night, set LIGHT to a value
+// in that band, LISTEN, ask e.g. "what part of the day is it?", and confirm
+// the spoken reply matches the "Time of day asked - ..." line logged just
+// before it.
 //
-// New shared modules: reply_recorder_utils (recording) and
-// sd_file_transfer_utils (LIST/GET). i2s_audio_utils gains the ring's
-// recording tap; everything else is unchanged from step 24.
+// New shared module: light_sensor_utils (the global, the LIGHT command, and
+// the get_time_of_day tool handler). Wi-Fi/WSS plumbing, full-duplex
+// I2S/ring buffer, raw-JSON scanning, leveled logging, onboard
+// LED/set_board_state, and the opening greeting stay in wifi_utils,
+// openai_realtime_utils, i2s_audio_utils, realtime_json_utils, log_utils,
+// board_state_utils, and greeting_utils, unchanged.
 
 #include <WebSocketsClient.h>
 #include <ArduinoJson.h>
@@ -43,10 +37,6 @@
 #include "board_state_utils.h"
 #include "greeting_utils.h"
 #include "light_sensor_utils.h"
-#include "heap_diagnostics_utils.h"
-#include "sd_card_utils.h"
-#include "reply_recorder_utils.h"
-#include "sd_file_transfer_utils.h"
 
 namespace {
 // Unchanged from step 21 except for the get_time_of_day tool and its
@@ -60,7 +50,6 @@ const char kSessionUpdateMessage[] =
 const char kCommitMessage[] = R"JSON({"type":"input_audio_buffer.commit"})JSON";
 const char kResponseCreateMessage[] = R"JSON({"type":"response.create"})JSON";
 
-constexpr uint32_t kSerialBaudRate = 115200;  // must match tools/serial_logger.ps1 and tools/reply_audio_app.html
 constexpr uint32_t kSampleRateHz = 24000;   // must match kSessionUpdateMessage's input rate and i2s_audio_utils's I2S rate
 constexpr uint32_t kRecordDurationSec = 3;  // same duration old step 8b/step 12 used
 constexpr uint32_t kChunkSamples = 2400;    // ~100ms per chunk at 24kHz - same chunk duration step 12 confirmed working
@@ -95,53 +84,7 @@ uint32_t listen_cycle = 0;         // deliberately never reset - keeps counting 
 uint32_t connection_count = 0;     // how many times WStype_CONNECTED has fired this run (1 = first connect, 2+ = reconnect)
 unsigned long last_reply_activity_ms = 0;  // last time ANY server message arrived while awaiting_reply - see checkReplyTimeout()
 bool ws_reads_paused_for_backpressure = false;  // see i2s_audio_utils.h's ringShouldPauseReads()
-bool step_verdict_reported = false;  // this step's own reply-recording verdict - see reportStepVerdict()
 }  // namespace
-
-/** Reports this step's verdict exactly once: a final heap snapshot, the heap
-    summary table, then the PASSED/FAILED banner. Later calls are no-ops, so
-    e.g. a reconnect that fails long after a PASS never contradicts it.
-    failure_reason is ignored when passed is true. Banners are never gated
-    behind a log level - see log_utils.h. */
-void reportStepVerdict(bool passed, const char* failure_reason) {
-  if (step_verdict_reported) return;
-  step_verdict_reported = true;
-  esp32va_heap::recordHeapSnapshot("at verdict");
-  esp32va_heap::logHeapSummary();
-  if (passed) {
-    Serial.println("===== REPLY RECORDING PASSED =====");
-    Serial.println("Now check it in the laptop app: it should list, download (CRC OK) and play like the reply did.");
-  } else {
-    Serial.printf("===== REPLY RECORDING FAILED: %s =====\n", failure_reason);
-  }
-}
-
-/** Announces a recording that just closed to the laptop app (if a file was
-    kept), and settles this step's verdict from it: the first complete
-    recording of a LISTEN reply passes (so the heap figures include a full
-    mic-streaming + reply + recording cycle - the opening greeting's
-    recording alone doesn't count); a recording that failed to save fails it.
-    A recording cut short by a disconnect is transient and settles nothing. */
-void handleFinishedRecording(const esp32va_reply_recorder::FinishedRecording& finished) {
-  if (finished.bytes_written > 0) {  // a file was kept on the card
-    esp32va_sd_transfer::announceSavedRecording(finished.file_name, finished.bytes_written);
-  }
-  switch (finished.outcome) {
-    case esp32va_reply_recorder::RecordingOutcome::kSaved:
-      if (listen_cycle > 0) {
-        reportStepVerdict(true, nullptr);
-      }
-      break;
-    case esp32va_reply_recorder::RecordingOutcome::kSavedPartial:
-      break;
-    case esp32va_reply_recorder::RecordingOutcome::kFailed:
-      reportStepVerdict(false, "a reply couldn't be saved to the SD card - see the ERROR above");
-      break;
-    default:
-      LOG_ERROR("Unexpected recording outcome %d.\n", (int)finished.outcome);
-      break;
-  }
-}
 
 /** Marks this LISTEN cycle as having gotten a reply, logging the verdict exactly once per cycle.
     Verdicts are never gated behind a log level - see log_utils.h. */
@@ -167,13 +110,11 @@ void markReplyFailed(const char* reason) {
   }
 }
 
-/** Halts the sketch entirely - reserved for a non-transient problem (the SD card
-    being unusable, or the connection never succeeding - see openai_realtime_utils's
-    attempt cap), not for a single LISTEN cycle failing. Fails this step's verdict
-    too, unless it already passed. Never gated behind a log level - see log_utils.h. */
+/** Halts the sketch entirely - reserved for the connection itself never succeeding
+    (see openai_realtime_utils's attempt cap), not for a single LISTEN cycle failing.
+    Never gated behind a log level - see log_utils.h. */
 void haltSketch(const char* reason) {
   should_keep_running = false;
-  reportStepVerdict(false, reason);
   Serial.printf("===== HALTED: %s =====\n", reason);
 }
 
@@ -196,7 +137,6 @@ void handleServerMessage(uint8_t* payload, size_t length) {
     const uint8_t* value_start = nullptr;
     size_t value_len = 0;
     if (findRawStringField(payload, length, "delta", &value_start, &value_len)) {
-      esp32va_reply_recorder::noteReplyAudioArriving();  // before the ring write, so the tap catches it
       decodeAndRingAudioDelta(value_start, value_len);
     } else {
       LOG_ERROR("Audio delta missing 'delta' field.\n");
@@ -231,11 +171,6 @@ void handleServerMessage(uint8_t* payload, size_t length) {
     session_ready = true;
     if (!session_ever_ready) {
       session_ever_ready = true;
-      // The TLS handshake has already peaked and released its temporary
-      // buffers by now, so the low-water mark is what it cost at its worst.
-      esp32va_heap::recordHeapSnapshot("OpenAI session ready");
-      LOG_INFO("Connected with the SD card mounted - lowest free heap since boot: %u bytes.\n",
-               (unsigned)esp32va_heap::lowestFreeHeapSinceBootBytes());
       LOG_INFO("Ready - type LISTEN to talk.\n");
       LOG_DEBUG("session.updated received (first connect).\n");
       // Deferred to loop() rather than sent here - same reasoning as
@@ -327,9 +262,6 @@ void handleServerMessage(uint8_t* payload, size_t length) {
   if (strcmp(type, "response.done") == 0) {
     const char* status = doc["response"]["status"] | "(unknown)";
     LOG_DEBUG("response.done -> status: %s\n", status);
-    // Whatever the status, no more audio is coming for this response. A
-    // function-call-only response.done has no recording open - a no-op.
-    esp32va_reply_recorder::noteReplyFinished();
     if (strcmp(status, "failed") == 0) {
       const char* error_message = doc["response"]["status_details"]["error"]["message"] | "(no error detail)";
       markReplyFailed(error_message);
@@ -388,7 +320,6 @@ void onWebSocketEvent(WStype_t type, uint8_t* payload, size_t length) {
         LOG_DEBUG("Disconnected while idle between LISTEN cycles - likely a server idle timeout.\n");
       }
       session_ready = false;
-      esp32va_reply_recorder::noteReplyAborted();  // keeps what was saved; must come before the ring reset
       resetRingBuffer();  // any partial reply audio is now stale - don't play it
       markReplyFailed("disconnected before a reply arrived");
       if (registerDisconnectAndMaybeGiveUp(webSocket)) {
@@ -467,19 +398,10 @@ void captureAndStreamAudio() {
   last_reply_activity_ms = millis();
 }
 
-/** True when a LIST/GET may run now: no turn in progress, nothing left to
-    play, nothing left to save. A GET holds loop() for its whole transfer, so
-    it must never overlap playback or recording. */
-bool isIdleForFileTransfer() {
-  return !is_capturing && !awaiting_reply && ringUsedBytes() == 0 && esp32va_reply_recorder::isRecorderIdle();
-}
-
-/** Checks Serial for a typed command. LIST / GET / DELETE <name> / DELETE_ALL answer the laptop
-    app (see sd_file_transfer_utils.h) - with @@BUSY unless idle. LIGHT
-    [<value>] sets/shows the simulated light sensor at any time (see
-    light_sensor_utils.h). LISTEN starts a capture if the session is ready
-    and idle and the last reply is fully saved; otherwise logs why not,
-    without starting one. Anything else is logged and ignored. */
+/** Checks Serial for a typed command. LIGHT [<value>] sets/shows the
+    simulated light sensor at any time (see light_sensor_utils.h). LISTEN
+    starts a capture if the session is ready and idle; otherwise logs why
+    not, without starting one. Anything else is logged and ignored. */
 void checkForSerialCommand() {
   if (!Serial.available()) {
     return;
@@ -489,37 +411,21 @@ void checkForSerialCommand() {
   if (command.length() == 0) {
     return;
   }
-  if (esp32va_sd_transfer::handleFileCommand(command.c_str(), isIdleForFileTransfer())) {
-    return;
-  }
   if (esp32va_light_sensor::handleLightCommand(command.c_str())) {
     return;
   }
   if (!command.equalsIgnoreCase("LISTEN")) {
-    LOG_INFO("Unknown command \"%s\" - expected LISTEN, LIGHT <0-%d>, LIST, GET <name>, DELETE <name> or DELETE_ALL.\n",
+    LOG_INFO("Unknown command \"%s\" - expected LISTEN or LIGHT <0-%d>.\n",
              command.c_str(), esp32va_light_sensor::kMaxLightSensorValue);
     return;
   }
 
-  if (!should_keep_running) {
-    LOG_INFO("LISTEN ignored - the sketch has halted (see the HALTED line above).\n");
-  } else if (!session_ready) {
+  if (!session_ready) {
     LOG_INFO("LISTEN ignored - not ready yet (still connecting/setting up).\n");
   } else if (is_capturing || awaiting_reply) {
     LOG_INFO("LISTEN ignored - still recording or playing back a reply.\n");
-  } else if (!esp32va_reply_recorder::isRecorderIdle()) {
-    LOG_INFO("LISTEN ignored - still saving the last reply to the SD card, try again in a moment.\n");
   } else {
     captureAndStreamAudio();
-  }
-}
-
-/** Lets the recorder do its SD work for this loop() pass, and settles this
-    step's verdict once a recording closes. */
-void serviceReplyRecording() {
-  esp32va_reply_recorder::FinishedRecording finished_recording;
-  if (esp32va_reply_recorder::serviceReplyRecorder(&finished_recording)) {
-    handleFinishedRecording(finished_recording);
   }
 }
 
@@ -558,37 +464,21 @@ void checkPlaybackComplete() {
   markReplyReceived();
 }
 
-/** One-time setup: playback ring buffer, full-duplex mic+speaker I2S, onboard
-    LED, (simulated) light sensor, SD card mount + self-test + reply recorder,
-    Wi-Fi, time sync, then open the secure WebSocket connection - with a heap
-    snapshot after each stage. Halts (step FAILED) if the SD card isn't
-    usable. */
+/** One-time setup: Wi-Fi, time sync, full-duplex mic+speaker I2S, onboard
+    LED, (simulated) light sensor, then open the secure WebSocket connection. */
 void setup() {
-  Serial.begin(kSerialBaudRate);
-  esp32va_heap::startCountingFailedAllocations();
+  Serial.begin(115200);
   LOG_INFO("Boot.\n");
-  esp32va_heap::recordHeapSnapshot("boot");
+  LOG_DEBUG("Free heap at boot (baseline): %u, largest free block: %u\n",
+            ESP.getFreeHeap(), ESP.getMaxAllocHeap());
 
   initPlaybackRingBuffer();
   setupBoardState();
   esp32va_light_sensor::setupLightSensor();
   setupI2sFullDuplex();
-  esp32va_heap::recordHeapSnapshot("after ring buffer + I2S");
-
-  bool sd_card_usable = esp32va_sd_card::mountSdCard() && esp32va_sd_card::runSdSelfTest() &&
-                        esp32va_reply_recorder::setupReplyRecorder(esp32va_sd_transfer::announceDeletedRecording);
-  esp32va_heap::recordHeapSnapshot("after SD + recorder setup");
-  if (!sd_card_usable) {
-    haltSketch("SD card not usable - see the error above");
-    return;
-  }
-  // Now, not on request: loop() - which answers LIST - only starts after
-  // Wi-Fi and time sync, 10+ s from here.
-  esp32va_sd_transfer::announceRecordingList();
 
   connectToWifi();
   syncSystemTime();
-  esp32va_heap::recordHeapSnapshot("after Wi-Fi + time sync");
 
   LOG_INFO("Connecting to OpenAI Realtime API...\n");
   webSocket.onEvent(onWebSocketEvent);
@@ -598,16 +488,13 @@ void setup() {
 /** Services the WebSocket connection (unless paused for backpressure - see
     i2s_audio_utils.h's ringShouldPauseReads()), sends session.update once
     flagged ready, sends the one-time opening greeting once flagged ready,
-    watches for a typed command, drains playback audio to the speaker, saves
-    reply audio to the SD card, and checks for a reply timeout / playback
-    completion. This is a soak-test sketch by design: it keeps running across
-    as many LISTEN cycles and reconnects as it keeps getting fed, and only
-    ever stops if the SD card is unusable or the connection itself can never
-    be (re-)established - and even then keeps answering LIST/GET. */
+    watches for a typed LISTEN/LIGHT command, drains playback audio to the
+    speaker, and checks for a reply timeout / playback completion. This is a
+    soak-test sketch by design: it keeps running across as many LISTEN
+    cycles and reconnects as it keeps getting fed, and only ever stops if the
+    connection itself can never be (re-)established. */
 void loop() {
   if (!should_keep_running) {
-    serviceReplyRecording();  // closes a recording cut short by the halt
-    checkForSerialCommand();
     return;
   }
 
@@ -620,7 +507,7 @@ void loop() {
     // concatenated with the "[LEVEL][%s:%d] " prefix at compile time, so a
     // ternary computed fmt won't compile. Two literal calls instead.
     if (should_pause) {
-      LOG_DEBUG("Ring buffer nearly full - pausing WebSocket reads until playback and the recorder catch up.\n");
+      LOG_DEBUG("Ring buffer nearly full - pausing WebSocket reads until playback catches up.\n");
     } else {
       LOG_DEBUG("Ring buffer has room again - resuming WebSocket reads.\n");
     }
@@ -643,7 +530,6 @@ void loop() {
 
   checkForSerialCommand();
   drainRingBufferToSpeaker();
-  serviceReplyRecording();
   checkPlaybackComplete();
   checkReplyTimeout();
 }

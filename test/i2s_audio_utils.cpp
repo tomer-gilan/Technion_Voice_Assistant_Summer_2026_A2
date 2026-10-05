@@ -13,12 +13,18 @@ constexpr uint32_t kI2sDmaBufLen = 300;
 constexpr uint32_t kI2sDmaBufCount = 12;  // 12*300 = 3600 samples of ring capacity
 
 // Holds raw mu-law bytes (NOT decoded PCM) - see header comment. At
-// 8kHz/1 byte-per-sample, 64KB is ~8.2s of audio.
-constexpr uint32_t kRingBufferBytes = 64 * 1024;
+// 8kHz/1 byte-per-sample, 32KB is ~4.1s of audio. Halved from 64KB in step
+// 24: with the SD card mounted, 64KB left only ~9KB free once the OpenAI
+// session was up, and the first reply/LISTEN ran the heap dry. A 48KB
+// midpoint was tried too, but 32KB was kept to leave RAM for future
+// features (see PROJECT_OVERVIEW.md step 24). Backpressure, not buffer
+// size, is what paces long replies - a smaller ring only shrinks the
+// cushion against network stalls.
+constexpr uint32_t kRingBufferBytes = 32 * 1024;
 // Pause reading more from the WebSocket once free space drops below 30%,
-// resume once it's back above 60% (hysteresis). 30% of 64KB is ~2.5s of
-// headroom when pausing kicks in - comfortably more than one round trip's
-// worth of already-in-flight data.
+// resume once it's back above 60% (hysteresis). 30% of 32KB is ~1.2s of
+// headroom when pausing kicks in - still more than what can already be in
+// flight (one ~0.4s delta being decoded plus a TCP receive window's worth).
 constexpr uint32_t kRingPauseThresholdBytes = (kRingBufferBytes * 3) / 10;
 constexpr uint32_t kRingResumeThresholdBytes = (kRingBufferBytes * 6) / 10;
 
@@ -39,6 +45,10 @@ uint8_t* ring_buffer = nullptr;
 uint32_t ring_write_index = 0;
 uint32_t ring_read_index = 0;
 uint32_t ring_used_bytes = 0;
+
+bool recording_tap_active = false;
+uint32_t recording_tap_read_index = 0;
+uint32_t recording_tap_pending_bytes = 0;
 
 uint8_t decode_scratch[kDecodeOutputBufBytes];
 uint8_t tx_mulaw_bytes[kTxDrainMuLawBytes];
@@ -118,6 +128,7 @@ void resetRingBuffer() {
   ring_write_index = 0;
   ring_read_index = 0;
   ring_used_bytes = 0;
+  ringStopRecordingTap();
 }
 
 uint32_t ringUsedBytes() {
@@ -125,7 +136,36 @@ uint32_t ringUsedBytes() {
 }
 
 uint32_t ringFreeBytes() {
-  return kRingBufferBytes - ring_used_bytes;
+  uint32_t held_bytes = ring_used_bytes;
+  if (recording_tap_active && recording_tap_pending_bytes > held_bytes) {
+    held_bytes = recording_tap_pending_bytes;
+  }
+  return kRingBufferBytes - held_bytes;
+}
+
+void ringStartRecordingTap() {
+  recording_tap_active = true;
+  recording_tap_read_index = ring_write_index;
+  recording_tap_pending_bytes = 0;
+}
+
+void ringStopRecordingTap() {
+  recording_tap_active = false;
+  recording_tap_pending_bytes = 0;
+}
+
+uint32_t ringRecordingTapPendingBytes() {
+  return recording_tap_pending_bytes;
+}
+
+uint32_t ringReadRecordingTap(uint8_t* out, uint32_t max_len) {
+  uint32_t n = min(max_len, recording_tap_pending_bytes);
+  for (uint32_t i = 0; i < n; i++) {
+    out[i] = ring_buffer[recording_tap_read_index];
+    recording_tap_read_index = (recording_tap_read_index + 1) % kRingBufferBytes;
+  }
+  recording_tap_pending_bytes -= n;
+  return n;
 }
 
 namespace {
@@ -143,6 +183,9 @@ void ringWrite(const uint8_t* data, uint32_t len) {
     ring_write_index = (ring_write_index + 1) % kRingBufferBytes;
   }
   ring_used_bytes += len;
+  if (recording_tap_active) {
+    recording_tap_pending_bytes += len;
+  }
 }
 
 /** Copies up to max_len bytes out of the ring buffer into out, wrapping as

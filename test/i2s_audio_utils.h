@@ -35,9 +35,8 @@ uint32_t readMicChunkGained(int32_t* raw_scratch, int16_t* pcm_out, uint32_t max
 // ----- Playback ring buffer -----
 // Holds raw mu-law bytes, not decoded PCM - decoding and 3x upsampling
 // (8kHz mu-law -> the shared port's 24kHz) happen at drain time instead, so
-// the buffer holds ~8.2s of audio at its 64KB capacity rather than ~1.4s of
-// decoded PCM (see PROJECT_OVERVIEW.md "Ring buffer stores compressed audio,
-// not PCM").
+// the buffer holds ~4.1s of audio at its 32KB capacity (64KB until step 24)
+// rather than ~0.7s of decoded PCM.
 
 /** Allocates the ring buffer on the heap (not as a static array - growing it
     to 64KB previously overflowed the linker's much smaller static-allocation
@@ -46,16 +45,40 @@ uint32_t readMicChunkGained(int32_t* raw_scratch, int16_t* pcm_out, uint32_t max
     heap. Halts if allocation fails. */
 void initPlaybackRingBuffer();
 
-/** Resets the ring buffer to empty. Call at the start of each new reply and
-    on disconnect, so stale/partial audio from a previous cycle never gets
-    mixed into the next one. */
+/** Resets the ring buffer to empty (and stops the recording tap, below). Call
+    at the start of each new reply and on disconnect, so stale/partial audio
+    from a previous cycle never gets mixed into the next one. */
 void resetRingBuffer();
 
 /** Bytes currently queued in the ring buffer, awaiting playback. */
 uint32_t ringUsedBytes();
 
-/** Bytes free in the ring buffer right now. */
+/** Bytes free in the ring buffer right now - space still held for the
+    recording tap (below) counts as used, even if playback is past it. */
 uint32_t ringFreeBytes();
+
+// ----- Recording tap -----
+// A second, independent read cursor over the same ring, so a reply can be
+// saved (reply_recorder_utils) without a buffer of its own: every byte
+// written while the tap is active stays in the ring until BOTH playback and
+// the tap have read it. If the tap falls behind (e.g. a slow SD write), the
+// ring fills up and the existing backpressure pauses WebSocket reads - no
+// audio is dropped from either.
+
+/** Starts the tap at the ring's current write position: everything written
+    from now on is kept for ringReadRecordingTap(). Call before writing the
+    first byte that should be recorded. */
+void ringStartRecordingTap();
+
+/** Stops the tap and forgets whatever it hadn't read yet. */
+void ringStopRecordingTap();
+
+/** Bytes written since the tap started that it hasn't read yet. */
+uint32_t ringRecordingTapPendingBytes();
+
+/** Copies up to max_len unread bytes from the tap into out. Returns how
+    many were copied. */
+uint32_t ringReadRecordingTap(uint8_t* out, uint32_t max_len);
 
 /** Base64-decodes a (possibly large) span of mu-law audio in small
     fixed-size aligned slices, writing the raw mu-law bytes straight into the

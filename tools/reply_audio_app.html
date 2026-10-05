@@ -1,0 +1,1289 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Reply Audio</title>
+<!--
+  Laptop app for the ESP32 voice assistant's recorded replies (step 26).
+  One self-contained page: open it in Chrome or Edge (they have Web Serial;
+  Firefox/Safari don't), click "Connect board", pick the board's COM port.
+  It talks to the board directly over USB serial - LIST / GET, protocol in
+  test/sd_file_transfer_utils.h - so nothing runs on the ESP32 and nothing
+  else needs installing. Close serial_logger.ps1 / the Arduino Serial
+  Monitor first: only one program can hold the port.
+-->
+<style>
+  :root {
+    --bg: #f5f6f8;
+    --panel: #ffffff;
+    --text: #1c2230;
+    --muted: #5e6776;
+    --border: #dde2ea;
+    --accent: #2c6bd9;
+    --accent-soft: #e6eefc;
+    --ok: #1d8049;
+    --warn: #a86400;
+    --error: #bf3626;
+    --wave: #2c6bd9;
+    --pause-band: rgba(168, 100, 0, 0.16);
+    --playhead: #bf3626;
+    --log-bg: #f9fafb;
+    --mono: ui-monospace, "Cascadia Mono", Consolas, "SFMono-Regular", monospace;
+    color-scheme: light;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #111419;
+      --panel: #191d25;
+      --text: #e5e8ee;
+      --muted: #98a1b0;
+      --border: #2a303b;
+      --accent: #6e9cff;
+      --accent-soft: #1d2a45;
+      --ok: #4cc283;
+      --warn: #e2a33a;
+      --error: #ff7a68;
+      --wave: #6e9cff;
+      --pause-band: rgba(226, 163, 58, 0.18);
+      --playhead: #ff7a68;
+      --log-bg: #14181f;
+      color-scheme: dark;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font: 15px/1.45 system-ui, "Segoe UI", Roboto, sans-serif;
+  }
+  header {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px 16px;
+    padding: 12px 20px;
+    border-bottom: 1px solid var(--border);
+    background: var(--panel);
+  }
+  header h1 { margin: 0; font-size: 17px; font-weight: 650; }
+  header h1 span { color: var(--muted); font-weight: 400; }
+  .header-controls { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+  .status-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 4px 12px;
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    font-size: 13px;
+    color: var(--muted);
+    white-space: nowrap;
+  }
+  .status-pill::before {
+    content: "";
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: var(--error);
+  }
+  .status-pill.connected::before { background: var(--ok); }
+  .notice {
+    margin: 16px auto 0;
+    max-width: 1408px;
+    padding: 10px 14px;
+    border: 1px solid var(--warn);
+    border-radius: 8px;
+    color: var(--warn);
+    background: var(--panel);
+  }
+  main {
+    display: grid;
+    grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr);
+    gap: 16px;
+    padding: 16px;
+    max-width: 1440px;
+    margin: 0 auto;
+  }
+  .column { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
+  .panel {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 14px 16px;
+    min-width: 0;
+  }
+  .panel-head {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px 10px;
+    margin-bottom: 8px;
+  }
+  .panel-head h2 { margin: 0; font-size: 15px; font-weight: 650; }
+  .panel-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+  .hint { margin: 0 0 8px; color: var(--muted); font-size: 13px; min-height: 1.45em; }
+  button, .button, select {
+    font: inherit;
+    font-size: 13px;
+    padding: 6px 12px;
+    border-radius: 6px;
+    border: 1px solid var(--border);
+    background: var(--panel);
+    color: var(--text);
+    cursor: pointer;
+    text-decoration: none;
+    white-space: nowrap;
+  }
+  button:hover, .button:hover, select:hover { border-color: var(--accent); }
+  button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  button.danger { color: var(--error); }
+  button.danger:hover { border-color: var(--error); }
+  button:disabled, .button[aria-disabled="true"] { opacity: 0.45; pointer-events: none; }
+  button:focus-visible, .button:focus-visible, select:focus-visible, input:focus-visible, .recording:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+  }
+
+  #recording-list { list-style: none; margin: 0; padding: 0; max-height: 260px; overflow-y: auto; }
+  .recording {
+    display: grid;
+    grid-template-columns: 1fr auto auto;
+    align-items: center;
+    gap: 12px;
+    width: 100%;
+    padding: 8px 10px;
+    border: 0;
+    border-radius: 6px;
+    background: transparent;
+    text-align: left;
+    font-size: 14px;
+  }
+  .recording:hover { background: var(--accent-soft); }
+  .recording.selected { background: var(--accent-soft); box-shadow: inset 3px 0 0 var(--accent); }
+  .recording .name { font-family: var(--mono); font-size: 13px; overflow: hidden; text-overflow: ellipsis; }
+  .recording .meta { color: var(--muted); font-size: 13px; font-variant-numeric: tabular-nums; }
+  .badge {
+    font-size: 11px;
+    padding: 1px 7px;
+    border-radius: 999px;
+    border: 1px solid var(--border);
+    color: var(--muted);
+  }
+  .badge.local { color: var(--ok); border-color: currentColor; }
+
+  #waveform {
+    display: block;
+    width: 100%;
+    height: 120px;
+    border-radius: 6px;
+    background: var(--log-bg);
+    border: 1px solid var(--border);
+    cursor: pointer;
+  }
+  audio { width: 100%; margin-top: 10px; }
+  .stats {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
+    gap: 8px 16px;
+    margin: 12px 0 0;
+  }
+  .stats div { min-width: 0; }
+  .stats dt { color: var(--muted); font-size: 12px; }
+  .stats dd { margin: 0; font-variant-numeric: tabular-nums; }
+  .stats dd.warn { color: var(--warn); font-weight: 600; }
+  #pause-list { margin: 8px 0 0; padding-left: 18px; color: var(--muted); font-size: 13px; }
+
+  .board { display: flex; flex-direction: column; height: calc(100vh - 90px); min-height: 420px; position: sticky; top: 16px; }
+  .command-row { display: flex; gap: 8px; margin-bottom: 10px; flex-wrap: wrap; }
+  .command-row input {
+    flex: 1 1 160px;
+    min-width: 0;
+    font: inherit;
+    font-size: 13px;
+    padding: 6px 10px;
+    border-radius: 6px;
+    border: 1px solid var(--border);
+    background: var(--log-bg);
+    color: var(--text);
+  }
+  #log {
+    flex: 1;
+    overflow-y: auto;
+    margin: 0;
+    padding: 8px 10px;
+    background: var(--log-bg);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    font: 12px/1.5 var(--mono);
+    white-space: pre-wrap;
+    word-break: break-word;
+  }
+  #log .error { color: var(--error); }
+  #log .banner { font-weight: 700; }
+  #log .sent { color: var(--accent); }
+  #log .app { color: var(--muted); font-style: italic; }
+  .log-target { margin: 8px 0 0; color: var(--muted); font-size: 12px; min-height: 1.5em; }
+  label.toggle { display: inline-flex; align-items: center; gap: 6px; color: var(--muted); font-size: 13px; }
+
+  @media (max-width: 900px) {
+    main { grid-template-columns: minmax(0, 1fr); padding: 12px 16px; }
+    .board { height: 70vh; position: static; }
+    header { padding: 12px 16px; }
+    .notice { margin: 12px 16px 0; }
+  }
+</style>
+</head>
+<body>
+<header>
+  <h1>Reply Audio <span>· ESP32 voice assistant</span></h1>
+  <div class="header-controls">
+    <select id="baud" aria-label="Baud rate">
+      <option value="115200" selected>115200 baud</option>
+      <option value="921600">921600 baud</option>
+    </select>
+    <button id="connect" class="primary" type="button">Connect board</button>
+    <span id="status" class="status-pill" role="status">Not connected</span>
+  </div>
+</header>
+
+<p id="unsupported" class="notice" hidden>
+  This page reaches the board through Web Serial, which only Chrome and Edge support.
+  Open this file in one of those.
+</p>
+
+<main>
+  <div class="column">
+    <section class="panel" aria-labelledby="recordings-heading">
+      <div class="panel-head">
+        <h2 id="recordings-heading">Recordings on the SD card</h2>
+        <div class="panel-actions">
+          <button id="refresh" type="button" disabled>Refresh</button>
+          <button id="delete-all" class="danger" type="button" disabled>Delete all</button>
+        </div>
+      </div>
+      <p id="list-status" class="hint" aria-live="polite">Connect the board to see its recordings.</p>
+      <ul id="recording-list"></ul>
+    </section>
+
+    <section class="panel" aria-labelledby="player-heading">
+      <div class="panel-head">
+        <h2 id="player-heading">Select a recording</h2>
+        <div class="panel-actions">
+          <a id="download" class="button" aria-disabled="true" href="#">Download WAV</a>
+          <button id="delete" class="danger" type="button" disabled>Delete from SD</button>
+        </div>
+      </div>
+      <p id="player-status" class="hint" aria-live="polite">Pick one from the list to download it from the board and play it here.</p>
+      <canvas id="waveform" aria-label="Waveform - click to jump to a point"></canvas>
+      <audio id="audio" controls preload="auto"></audio>
+      <dl id="stats" class="stats"></dl>
+      <ul id="pause-list"></ul>
+    </section>
+  </div>
+
+  <section class="panel board" aria-labelledby="board-heading">
+    <div class="panel-head">
+      <h2 id="board-heading">Board</h2>
+      <div class="panel-actions">
+        <button id="save-log" type="button" hidden>Save log to folder…</button>
+        <button id="download-log" type="button">Download log</button>
+        <button id="clear-log" type="button" title="Empties the panel (and what Download log saves). A log being saved to a folder keeps everything.">Clear log</button>
+        <label class="toggle"><input id="autoscroll" type="checkbox" checked> Auto-scroll</label>
+      </div>
+    </div>
+    <div class="command-row">
+      <input id="command" type="text" placeholder="Command, e.g. LISTEN or LIGHT 1500" autocomplete="off" aria-label="Command to send to the board">
+      <button id="send" type="button" disabled>Send</button>
+    </div>
+    <pre id="log" aria-live="off"></pre>
+    <p id="log-target" class="log-target"></p>
+  </section>
+</main>
+
+<script>
+"use strict";
+
+// ===== Settings =====
+
+const SAMPLE_RATE_HZ = 8000;  // G.711 mu-law: fixed 8 kHz, 1 byte per sample
+const COMMAND_TIMEOUT_MS = 5000;  // LIST and DELETE answers
+const DELETE_ALL_TIMEOUT_MS = 30000;
+const MAX_KEPT_RECORDINGS = 5;  // mirrors the board's kMaxKeptRecordings (reply_recorder_utils.h) - display only
+const GET_START_TIMEOUT_MS = 5000;
+const BUSY_RETRY_MS = 1500;
+const BUSY_RETRY_LIMIT = 12;
+const MAX_LOG_LINES_SHOWN = 2000;
+const LOG_FILE_FLUSH_MS = 2000;
+const MAX_UNTERMINATED_LINE_BYTES = 4096;  // flush a line that never gets its newline (e.g. boot-time noise)
+const SILENCE_WINDOW_S = 0.02;
+const SILENCE_THRESHOLD_DBFS = -45;
+const PAUSE_REPORT_MIN_S = 0.25;
+const ENVELOPE_POINTS = 600;
+const PCM16_FULL_SCALE = 32768;
+const USB_CHIP_NAMES = { 0x10c4: "CP210x", 0x1a86: "CH340/CH9102" };
+const SAFE_FILE_NAME = /^[A-Za-z0-9_-][A-Za-z0-9_.-]{0,30}$/;  // mirrors the board's isPlainFileName()
+
+// ===== Audio: mu-law decode, WAV, CRC-32, analysis =====
+
+/** Same ITU-T G.711 decode as the board's ulawToLinearPcm16(). */
+const ULAW_TO_PCM16 = new Int16Array(256).map((_, code) => {
+  const inverted = ~code & 0xff;
+  let magnitude = ((inverted & 0x0f) << 3) + 0x84;
+  magnitude <<= (inverted & 0x70) >> 4;
+  return inverted & 0x80 ? 0x84 - magnitude : magnitude - 0x84;
+});
+const ULAW_MAX_MAGNITUDE = 32124;  // mu-law's loudest code
+
+function decodeUlaw(bytes) {
+  const pcm = new Int16Array(bytes.length);
+  for (let i = 0; i < bytes.length; i++) pcm[i] = ULAW_TO_PCM16[bytes[i]];
+  return pcm;
+}
+
+/** 16-bit mono PCM at SAMPLE_RATE_HZ -> a WAV file's bytes. */
+function makeWav(pcm) {
+  const view = new DataView(new ArrayBuffer(44 + pcm.length * 2));
+  const writeText = (offset, text) => [...text].forEach((c, i) => view.setUint8(offset + i, c.charCodeAt(0)));
+  writeText(0, "RIFF");
+  view.setUint32(4, 36 + pcm.length * 2, true);
+  writeText(8, "WAVE");
+  writeText(12, "fmt ");
+  view.setUint32(16, 16, true);                  // fmt chunk size
+  view.setUint16(20, 1, true);                   // PCM
+  view.setUint16(22, 1, true);                   // mono
+  view.setUint32(24, SAMPLE_RATE_HZ, true);
+  view.setUint32(28, SAMPLE_RATE_HZ * 2, true);  // bytes per second
+  view.setUint16(32, 2, true);                   // bytes per frame
+  view.setUint16(34, 16, true);                  // bits per sample
+  writeText(36, "data");
+  view.setUint32(40, pcm.length * 2, true);
+  pcm.forEach((sample, i) => view.setInt16(44 + i * 2, sample, true));
+  return view.buffer;
+}
+
+/** Standard CRC-32 - the same variant as the board's crc32Update() and zlib. */
+const CRC32_TABLE = new Uint32Array(256).map((_, n) => {
+  let crc = n;
+  for (let bit = 0; bit < 8; bit++) crc = crc & 1 ? 0xedb88320 ^ (crc >>> 1) : crc >>> 1;
+  return crc >>> 0;
+});
+function crc32(bytes) {
+  let crc = 0xffffffff;
+  for (const byte of bytes) crc = CRC32_TABLE[(crc ^ byte) & 0xff] ^ (crc >>> 8);
+  return (crc ^ 0xffffffff) >>> 0;
+}
+
+function toDbfs(level) {
+  return level > 0 ? 20 * Math.log10(level / PCM16_FULL_SCALE) : null;
+}
+
+/** Quality stats for one reply plus a min/max envelope for drawing it.
+    Pauses are silent stretches inside the speech. The recording holds the
+    bytes as received, not their timing, so a pause is in OpenAI's audio
+    itself - not a network stall on the board. */
+function analyze(pcm) {
+  const count = pcm.length;
+  const result = {
+    durationS: count / SAMPLE_RATE_HZ, peakDbfs: null, rmsDbfs: null, fullScaleSamples: 0,
+    leadingSilenceS: 0, trailingSilenceS: 0, pauses: [], envelope: [],
+  };
+  if (!count) return result;
+
+  let peak = 0;
+  let sumOfSquares = 0;
+  for (const sample of pcm) {
+    const magnitude = Math.abs(sample);
+    if (magnitude > peak) peak = magnitude;
+    if (magnitude >= ULAW_MAX_MAGNITUDE) result.fullScaleSamples++;
+    sumOfSquares += sample * sample;
+  }
+  result.peakDbfs = toDbfs(peak);
+  result.rmsDbfs = toDbfs(Math.sqrt(sumOfSquares / count));
+
+  const window = Math.round(SAMPLE_RATE_HZ * SILENCE_WINDOW_S);
+  const threshold = PCM16_FULL_SCALE * 10 ** (SILENCE_THRESHOLD_DBFS / 20);
+  const windowIsSilent = [];
+  for (let start = 0; start < count; start += window) {
+    const end = Math.min(start + window, count);
+    let windowSum = 0;
+    for (let i = start; i < end; i++) windowSum += pcm[i] * pcm[i];
+    windowIsSilent.push(Math.sqrt(windowSum / (end - start)) < threshold);
+  }
+  const firstSound = windowIsSilent.indexOf(false);
+  const lastSound = windowIsSilent.lastIndexOf(false);
+  if (firstSound < 0) {
+    result.leadingSilenceS = result.durationS;
+  } else {
+    result.leadingSilenceS = firstSound * SILENCE_WINDOW_S;
+    result.trailingSilenceS = (windowIsSilent.length - 1 - lastSound) * SILENCE_WINDOW_S;
+    let runStart = -1;
+    for (let i = firstSound; i <= lastSound; i++) {
+      if (windowIsSilent[i] && runStart < 0) {
+        runStart = i;
+      } else if (!windowIsSilent[i] && runStart >= 0) {
+        const lengthS = (i - runStart) * SILENCE_WINDOW_S;
+        if (lengthS >= PAUSE_REPORT_MIN_S - 1e-9) result.pauses.push({ startS: runStart * SILENCE_WINDOW_S, lengthS });
+        runStart = -1;
+      }
+    }
+  }
+
+  const bucket = Math.max(1, Math.ceil(count / ENVELOPE_POINTS));
+  for (let start = 0; start < count; start += bucket) {
+    let low = 0;
+    let high = 0;
+    for (let i = start; i < Math.min(start + bucket, count); i++) {
+      if (pcm[i] < low) low = pcm[i];
+      if (pcm[i] > high) high = pcm[i];
+    }
+    result.envelope.push([low / PCM16_FULL_SCALE, high / PCM16_FULL_SCALE]);
+  }
+  return result;
+}
+
+// ===== Serial link to the board =====
+
+class BoardError extends Error {
+  /** kind: "busy" (board answered @@BUSY), "unavailable" (not connected) or "transfer". */
+  constructor(kind, message) {
+    super(message);
+    this.kind = kind;
+  }
+}
+
+function deferred() {
+  let resolve;
+  const promise = new Promise((done) => { resolve = done; });
+  return { promise, resolve };
+}
+
+/** Resolves true if promise settles within ms, false otherwise. */
+function settlesWithin(promise, ms) {
+  let timer;
+  return Promise.race([
+    promise.then(() => true),
+    new Promise((done) => { timer = setTimeout(() => done(false), ms); }),
+  ]).finally(() => clearTimeout(timer));
+}
+
+/** One LIST or GET in flight, filled in as the board's reply streams in. */
+class Transaction {
+  constructor(kind, fileName) {
+    this.kind = kind;
+    this.fileName = fileName;
+    this.files = [];
+    this.size = null;
+    this.data = null;
+    this.boardCrc = null;
+    this.error = null;
+    this.started = deferred();  // GET: @@GET_BEGIN seen (or finished early)
+    this.done = deferred();
+  }
+  finish(error = null) {
+    this.error = error;
+    this.started.resolve();
+    this.done.resolve();
+  }
+}
+
+/** Owns the open port. The read loop splits the stream into log lines and
+    "@@" protocol replies, switching to counted binary reads during a GET;
+    list()/get() run one at a time. */
+class BoardLink {
+  constructor({ onLine, onNote, onConnectionChange, onListAnnounced, onRecordingSaved, onRecordingDeleted }) {
+    this.onLine = onLine;
+    this.onNote = onNote;
+    this.onConnectionChange = onConnectionChange;
+    this.onListAnnounced = onListAnnounced;        // a full list the board sent unprompted (at boot, or a late LIST answer)
+    this.onRecordingSaved = onRecordingSaved;      // "@@SAVED <name> <size>"
+    this.onRecordingDeleted = onRecordingDeleted;  // "@@DELETED <name>"
+    this.announcedFiles = null;                // collects an unprompted list block until its @@LIST_END
+    this.port = null;
+    this.writer = null;
+    this.reader = null;
+    this.baud = null;
+    this.closing = false;
+    this.pending = new Uint8Array(0);
+    this.binary = null;  // {remaining, target} while a GET's raw bytes are arriving
+    this.transaction = null;
+    this.queue = Promise.resolve();
+    this.decoder = new TextDecoder();
+    this.encoder = new TextEncoder();
+  }
+
+  get connected() { return this.writer !== null; }
+
+  async open(port, baud) {
+    await port.open({ baudRate: baud, bufferSize: 65536 });
+    // Release DTR/RTS so the board's auto-reset circuit stays idle. Opening
+    // may already have pulsed them on some setups, restarting the board once.
+    await port.setSignals({ dataTerminalReady: false, requestToSend: false }).catch(() => {});
+    this.port = port;
+    this.baud = baud;
+    this.closing = false;
+    this.writer = port.writable.getWriter();
+    this.onConnectionChange(true);
+    this.readLoop();
+  }
+
+  async close() {
+    this.closing = true;
+    if (this.reader) await this.reader.cancel().catch(() => {});
+  }
+
+  async readLoop() {
+    // A recoverable error (framing, buffer overrun) ends one reader and gives
+    // port.readable a fresh stream; a lost device leaves it null.
+    while (this.port && this.port.readable && !this.closing) {
+      this.reader = this.port.readable.getReader();
+      try {
+        for (;;) {
+          const { value, done } = await this.reader.read();
+          if (done) break;
+          if (value) this.consume(value);
+        }
+      } catch (error) {
+        if (!this.closing) this.onNote(`Serial read error: ${error.message}`);
+      } finally {
+        this.reader.releaseLock();
+        this.reader = null;
+      }
+    }
+    await this.teardown();
+  }
+
+  async teardown() {
+    if (this.writer) {
+      try { this.writer.releaseLock(); } catch (_) { /* a write was still pending - it fails, which is fine */ }
+      this.writer = null;
+    }
+    if (this.port) {
+      await this.port.close().catch(() => {});
+      this.port = null;
+    }
+    this.pending = new Uint8Array(0);
+    this.binary = null;
+    this.announcedFiles = null;
+    if (this.transaction) this.transaction.finish("the serial port closed mid-transfer");
+    this.onConnectionChange(false, this.closing);
+  }
+
+  consume(chunk) {
+    let data = chunk;
+    if (this.pending.length) {
+      data = new Uint8Array(this.pending.length + chunk.length);
+      data.set(this.pending);
+      data.set(chunk, this.pending.length);
+    }
+    let offset = 0;
+    while (offset < data.length) {
+      if (this.binary) {
+        const take = Math.min(this.binary.remaining, data.length - offset);
+        if (this.binary.target) {
+          this.binary.target.set(data.subarray(offset, offset + take), this.binary.target.length - this.binary.remaining);
+        }
+        this.binary.remaining -= take;
+        offset += take;
+        if (this.binary.remaining === 0) this.binary = null;
+        continue;
+      }
+      let newlineAt = data.indexOf(10, offset);
+      if (newlineAt < 0) {
+        if (data.length - offset <= MAX_UNTERMINATED_LINE_BYTES) break;
+        newlineAt = data.length;
+      }
+      const line = this.decoder.decode(data.subarray(offset, newlineAt)).replace(/\r$/, "");
+      offset = newlineAt + 1;
+      if (line.startsWith("@@")) this.handleProtocolLine(line);
+      else this.onLine(line);
+    }
+    this.pending = offset < data.length ? data.slice(offset) : new Uint8Array(0);
+  }
+
+  handleProtocolLine(line) {
+    const parts = line.split(/\s+/);
+    const tag = parts[0];
+    const transaction = this.transaction;
+
+    if (tag === "@@GET_BEGIN" && parts.length === 3 && /^\d+$/.test(parts[2])) {
+      const size = Number(parts[2]);
+      let target = null;
+      if (transaction && transaction.kind === "GET" && transaction.fileName === parts[1]) {
+        transaction.size = size;
+        transaction.data = new Uint8Array(size);
+        target = transaction.data;
+        transaction.started.resolve();
+      } else {
+        this.onNote(`Skipping ${size} bytes of a GET this page didn't ask for (${parts[1]}).`);
+      }
+      if (size > 0) this.binary = { remaining: size, target };
+      return;
+    }
+
+    if (tag === "@@SAVED" && parts.length === 3 && /^\d+$/.test(parts[2])) {
+      this.onRecordingSaved({ name: parts[1], size: Number(parts[2]) });
+      return;
+    }
+    if (tag === "@@DELETED" && parts.length === 2) {
+      if (transaction && transaction.kind === "DELETE" && transaction.fileName === parts[1]) transaction.finish();
+      this.onRecordingDeleted(parts[1]);
+      return;
+    }
+    // A list block answers the pending LIST if there is one; otherwise it was
+    // sent unprompted (at boot) or arrived after its LIST timed out - either
+    // way it's the current list.
+    if (tag === "@@LIST_BEGIN" || tag === "@@FILE" || tag === "@@LIST_END") {
+      const request = transaction && transaction.kind === "LIST" ? transaction : null;
+      if (tag === "@@LIST_BEGIN") {
+        if (request) request.files = [];
+        else this.announcedFiles = [];
+      } else if (tag === "@@FILE") {
+        const rest = line.slice("@@FILE ".length);
+        const splitAt = rest.lastIndexOf(" ");
+        const file = { name: rest.slice(0, splitAt), size: Number(rest.slice(splitAt + 1)) };
+        if (request) request.files.push(file);
+        else if (this.announcedFiles) this.announcedFiles.push(file);
+      } else if (request) {
+        request.finish();
+      } else if (this.announcedFiles) {
+        this.onListAnnounced(this.announcedFiles);
+        this.announcedFiles = null;
+      }
+      return;
+    }
+
+    if (!transaction) {
+      this.onLine(line);  // e.g. a late @@BUSY for a request that already timed out
+      return;
+    }
+    if (tag === "@@BUSY") {
+      transaction.finish("busy");
+    } else if (tag === "@@LIST_ERROR") {
+      transaction.finish(line.slice("@@LIST_ERROR ".length));
+    } else if (tag === "@@GET_END" && transaction.kind === "GET" && parts.length === 3) {
+      transaction.boardCrc = parseInt(parts[2], 16) >>> 0;
+      transaction.finish();
+    } else if (tag === "@@GET_ERROR") {
+      transaction.finish(line.slice("@@GET_ERROR ".length));
+    } else if (tag === "@@DELETE_ERROR") {
+      transaction.finish(line.slice("@@DELETE_ERROR ".length));
+    } else if (tag === "@@DELETE_ALL_DONE" && transaction.kind === "DELETE_ALL" && parts.length === 3) {
+      const left = Number(parts[2]);
+      transaction.finish(left > 0 ? `${left} recording${left === 1 ? "" : "s"} couldn't be deleted - see the log` : null);
+    } else {
+      this.onLine(line);
+    }
+  }
+
+  async send(text) {
+    if (!this.connected) throw new BoardError("unavailable", "The board isn't connected.");
+    await this.writer.write(this.encoder.encode(text + "\n"));
+  }
+
+  /** Queues a LIST/GET behind any already running, so only one is ever in flight. */
+  run(kind, command, fileName) {
+    const job = this.queue.then(() => this.runNow(kind, command, fileName));
+    this.queue = job.catch(() => {});
+    return job;
+  }
+
+  async runNow(kind, command, fileName) {
+    const transaction = new Transaction(kind, fileName);
+    this.transaction = transaction;
+    try {
+      await this.send(command);
+      let finished;
+      if (kind !== "GET") {
+        const timeoutMs = kind === "DELETE_ALL" ? DELETE_ALL_TIMEOUT_MS : COMMAND_TIMEOUT_MS;
+        finished = await settlesWithin(transaction.done.promise, timeoutMs);
+      } else {
+        finished = await settlesWithin(transaction.started.promise, GET_START_TIMEOUT_MS);
+        if (finished) {
+          // 10 bits per byte on the wire, doubled for margin, plus slack.
+          const budgetMs = ((transaction.size || 0) * 10 / this.baud) * 2000 + 5000;
+          finished = await settlesWithin(transaction.done.promise, budgetMs);
+        }
+      }
+      if (!finished) {
+        this.binary = null;
+        throw new BoardError("transfer", `No complete answer to ${command} - timed out.`);
+      }
+    } finally {
+      this.transaction = null;
+    }
+    if (transaction.error === "busy") {
+      throw new BoardError("busy", "The board is busy (a reply is in progress, playing, or being saved).");
+    }
+    if (transaction.error) throw new BoardError("transfer", transaction.error);
+    return transaction;
+  }
+
+  async list() {
+    return (await this.run("LIST", "LIST")).files;
+  }
+
+  /** Deletes one recording from the SD card. Success also reaches
+      onRecordingDeleted, the same as a DELETE typed in the command box. */
+  async deleteRecording(fileName) {
+    await this.run("DELETE", `DELETE ${fileName}`, fileName);
+  }
+
+  /** Deletes every recording on the card; each one reaches onRecordingDeleted
+      as the board confirms it. Throws if any were left. */
+  async deleteAll() {
+    await this.run("DELETE_ALL", "DELETE_ALL");
+  }
+
+  /** Downloads one recording and checks it against the board's CRC. */
+  async get(fileName) {
+    const transaction = await this.run("GET", `GET ${fileName}`, fileName);
+    const data = transaction.data || new Uint8Array(0);
+    const crc = crc32(data);
+    if (crc !== transaction.boardCrc) {
+      throw new BoardError("transfer", "CRC mismatch - the transfer was corrupted, try again.");
+    }
+    return { data, crc };
+  }
+}
+
+// ===== Page state =====
+
+const elements = {
+  baud: document.getElementById("baud"),
+  connect: document.getElementById("connect"),
+  status: document.getElementById("status"),
+  unsupported: document.getElementById("unsupported"),
+  refresh: document.getElementById("refresh"),
+  deleteAll: document.getElementById("delete-all"),
+  listStatus: document.getElementById("list-status"),
+  list: document.getElementById("recording-list"),
+  playerHeading: document.getElementById("player-heading"),
+  playerStatus: document.getElementById("player-status"),
+  download: document.getElementById("download"),
+  deleteButton: document.getElementById("delete"),
+  waveform: document.getElementById("waveform"),
+  audio: document.getElementById("audio"),
+  stats: document.getElementById("stats"),
+  pauseList: document.getElementById("pause-list"),
+  log: document.getElementById("log"),
+  logTarget: document.getElementById("log-target"),
+  saveLog: document.getElementById("save-log"),
+  downloadLog: document.getElementById("download-log"),
+  clearLog: document.getElementById("clear-log"),
+  autoscroll: document.getElementById("autoscroll"),
+  command: document.getElementById("command"),
+  send: document.getElementById("send"),
+};
+
+const state = {
+  recordings: [],
+  downloaded: new Map(),  // name -> { size, crc, analysis, wavUrl } for this page session
+  selectedName: null,
+  analysis: null,
+  busyRetries: 0,
+  listTimer: null,
+  reconnectWanted: false,
+  logLines: [],
+  logFile: null,  // { handle, bytesWritten, queued: [] } once a folder is picked
+  sessionStamp: fileStamp(new Date()),
+};
+
+const link = new BoardLink({
+  onLine: (line) => appendLog(line),
+  onNote: (text) => appendLog(`(app) ${text}`),
+  onConnectionChange: handleConnectionChange,
+  onListAnnounced: (files) => {
+    clearTimeout(state.listTimer);  // nothing left to ask for
+    showRecordings(files);
+  },
+  onRecordingSaved: addSavedRecording,
+  onRecordingDeleted: removeRecording,
+});
+
+function pad(number, width = 2) { return String(number).padStart(width, "0"); }
+function fileStamp(date) {
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}_` +
+         `${pad(date.getHours())}-${pad(date.getMinutes())}-${pad(date.getSeconds())}`;
+}
+function clockStamp(date) {
+  return `${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}.${pad(date.getMilliseconds(), 3)}`;
+}
+function formatSeconds(seconds) { return `${seconds.toFixed(1)} s`; }
+function formatBytes(bytes) { return bytes < 1024 ? `${bytes} B` : `${(bytes / 1024).toFixed(1)} KB`; }
+function formatDbfs(value) { return value === null ? "silent" : `${value.toFixed(1)} dBFS`; }
+function hex32(value) { return value.toString(16).padStart(8, "0"); }
+
+// ===== Connection =====
+
+async function connectPort(port) {
+  try {
+    await link.open(port, Number(elements.baud.value));
+  } catch (error) {
+    appendLog(`(app) Couldn't open the port (${error.message}). Is it open in another program - the logger, ` +
+              "the Arduino Serial Monitor, or an upload?");
+  }
+}
+
+async function onConnectClick() {
+  if (link.connected) {
+    state.reconnectWanted = false;
+    await link.close();
+    return;
+  }
+  try {
+    const port = await navigator.serial.requestPort();
+    await connectPort(port);
+  } catch (error) {
+    if (error.name !== "NotFoundError") appendLog(`(app) ${error.message}`);  // NotFoundError = chooser cancelled
+  }
+}
+
+function handleConnectionChange(connected, closedOnPurpose) {
+  elements.status.classList.toggle("connected", connected);
+  elements.connect.textContent = connected ? "Disconnect" : "Connect board";
+  elements.baud.disabled = connected;
+  elements.refresh.disabled = !connected;
+  elements.deleteAll.disabled = !connected || state.recordings.length === 0;
+  elements.send.disabled = !connected;
+  elements.deleteButton.disabled = !connected || !state.selectedName;
+  if (connected) {
+    const info = link.port.getInfo();
+    const chip = USB_CHIP_NAMES[info.usbVendorId] || "USB serial";
+    elements.status.textContent = `${chip} · ${link.baud} baud`;
+    appendLog(`(app) Connected (${chip}, ${link.baud} baud).`);
+    state.reconnectWanted = true;
+    scheduleListRefresh(500);
+  } else {
+    elements.status.textContent = "Not connected";
+    appendLog(closedOnPurpose
+      ? "(app) Disconnected."
+      : "(app) Lost the board's port - it reconnects by itself when the board is plugged back in.");
+    elements.listStatus.textContent = "Connect the board to see its recordings.";
+  }
+}
+
+// ===== Log =====
+
+function appendLog(text) {
+  const stamped = `[${clockStamp(new Date())}] ${text}`;
+  state.logLines.push(stamped);
+  if (state.logFile) state.logFile.queued.push(stamped);
+
+  const line = document.createElement("div");
+  if (text.startsWith(">> ")) line.className = "sent";
+  else if (text.startsWith("(app)")) line.className = "app";
+  else if (text.includes("[ERROR]") || text.includes("FAILED")) line.className = "error";
+  else if (text.startsWith("=====")) line.className = "banner";
+  line.textContent = stamped;
+  elements.log.appendChild(line);
+  while (elements.log.childElementCount > MAX_LOG_LINES_SHOWN) elements.log.firstChild.remove();
+  if (elements.autoscroll.checked) elements.log.scrollTop = elements.log.scrollHeight;
+}
+
+async function sendCommand(text) {
+  const command = text.trim();
+  if (!command) return;
+  if (/^GET\b/i.test(command)) {
+    appendLog("(app) Not sent: pick a recording from the list instead - a raw GET would stream binary into the log.");
+    return;
+  }
+  try {
+    await link.send(command);
+    appendLog(`>> ${command}`);
+  } catch (error) {
+    appendLog(`(app) Not sent: ${error.message}`);
+  }
+}
+
+/** Saves the log as it grows into a folder of your choice - pick tools/ so
+    "read log" finds it, same name format as serial_logger.ps1. */
+async function onSaveLogClick() {
+  try {
+    const folder = await window.showDirectoryPicker({ id: "esp32-logs", mode: "readwrite" });
+    const fileName = `esp32_log_${state.sessionStamp}.txt`;
+    const handle = await folder.getFileHandle(fileName, { create: true });
+    state.logFile = { handle, bytesWritten: 0, queued: [...state.logLines] };
+    await flushLogFile();
+    elements.logTarget.textContent = `Saving to ${folder.name}/${fileName}`;
+    elements.saveLog.textContent = "Saving log ✓";
+    elements.saveLog.disabled = true;
+  } catch (error) {
+    if (error.name !== "AbortError") appendLog(`(app) Couldn't save the log there (${error.message}). Use Download log instead.`);
+  }
+}
+
+async function flushLogFile() {
+  const sink = state.logFile;
+  if (!sink || sink.flushing || !sink.queued.length) return;
+  sink.flushing = true;
+  try {
+    const text = sink.queued.join("\n") + "\n";
+    sink.queued = [];
+    const bytes = new TextEncoder().encode(text);
+    const writable = await sink.handle.createWritable({ keepExistingData: true });
+    await writable.write({ type: "write", position: sink.bytesWritten, data: bytes });
+    await writable.close();
+    sink.bytesWritten += bytes.length;
+  } finally {
+    sink.flushing = false;
+  }
+}
+
+/** Empties the panel and the Download log buffer. A log file being saved to
+    a folder is left whole - it's the session's record for "read log" - and
+    just gets a line marking when the clear happened. */
+function onClearLogClick() {
+  elements.log.replaceChildren();
+  state.logLines = [];
+  if (state.logFile) state.logFile.queued.push(`[${clockStamp(new Date())}] (app) Log cleared on screen.`);
+}
+
+function onDownloadLogClick() {
+  const blob = new Blob([state.logLines.join("\n") + "\n"], { type: "text/plain" });
+  const url = URL.createObjectURL(blob);
+  const anchor = Object.assign(document.createElement("a"), { href: url, download: `esp32_log_${state.sessionStamp}.txt` });
+  anchor.click();
+  setTimeout(() => URL.revokeObjectURL(url), 5000);
+}
+
+// ===== Recordings list =====
+
+function scheduleListRefresh(delayMs) {
+  if (!link.connected) return;
+  clearTimeout(state.listTimer);
+  state.busyRetries = 0;
+  state.listTimer = setTimeout(loadList, delayMs);
+}
+
+async function loadList() {
+  if (!link.connected) return;
+  elements.listStatus.textContent = "Asking the board…";
+  let files;
+  try {
+    files = await link.list();
+  } catch (error) {
+    if (error.kind === "busy" && state.busyRetries < BUSY_RETRY_LIMIT) {
+      state.busyRetries += 1;
+      elements.listStatus.textContent = "The board is busy with a reply - retrying…";
+      state.listTimer = setTimeout(loadList, BUSY_RETRY_MS);
+    } else if (error.message.includes("timed out")) {
+      // Usually the board restarting: it announces its list as it boots.
+      elements.listStatus.textContent = "No answer yet - the board may be starting up. The list appears as soon as it reports.";
+    } else {
+      elements.listStatus.textContent = error.message;
+    }
+    return;
+  }
+  showRecordings(files);
+}
+
+/** Replaces the list with files reported by the board (a LIST answer or an announcement). */
+function showRecordings(files) {
+  state.recordings = files.map((file) => ({ ...file, durationS: file.size / SAMPLE_RATE_HZ }));
+  state.recordings.sort(newestFirst);
+  updateListStatus();
+  renderList();
+}
+
+/** Adds (or updates) one recording the board just announced with @@SAVED. */
+function addSavedRecording(file) {
+  const recording = { ...file, durationS: file.size / SAMPLE_RATE_HZ };
+  state.recordings = state.recordings.filter((existing) => existing.name !== file.name);
+  state.recordings.push(recording);
+  state.recordings.sort(newestFirst);
+  updateListStatus();
+  renderList();
+}
+
+/** Drops a recording the board reported deleted (@@DELETED) from the list,
+    from the laptop's copies, and from the player if it was showing it. */
+function removeRecording(fileName) {
+  state.recordings = state.recordings.filter((recording) => recording.name !== fileName);
+  const copy = state.downloaded.get(fileName);
+  if (copy) URL.revokeObjectURL(copy.wavUrl);
+  state.downloaded.delete(fileName);
+  if (state.selectedName === fileName) resetPlayer(`${fileName} was deleted from the SD card.`);
+  updateListStatus();
+  renderList();
+}
+
+/** Sort order for the list: highest reply number first. Numeric, so
+    reply_10000 still sorts above reply_9999. */
+function newestFirst(a, b) {
+  return b.name.localeCompare(a.name, undefined, { numeric: true });
+}
+
+function updateListStatus() {
+  const count = state.recordings.length;
+  elements.listStatus.textContent = count
+    ? `${count} recording${count === 1 ? "" : "s"} - newest first. The board keeps the newest ${MAX_KEPT_RECORDINGS}.`
+    : "No recordings yet. Send LISTEN and talk to the board - every reply is saved.";
+  elements.deleteAll.disabled = !link.connected || count === 0;
+}
+
+/** Asks for confirmation, then deletes every recording on the SD card. The
+    list empties as the board confirms each file (@@DELETED). */
+async function onDeleteAllClick() {
+  const count = state.recordings.length;
+  const question = `Delete all ${count} recording${count === 1 ? "" : "s"} from the ESP32's SD card?\n\nThis can't be undone.`;
+  if (!count || !window.confirm(question)) return;
+  elements.deleteAll.disabled = true;
+  elements.listStatus.textContent = "Deleting…";
+  try {
+    await link.deleteAll();
+    updateListStatus();
+  } catch (error) {
+    elements.listStatus.textContent = error.kind === "busy"
+      ? "The board is busy with a reply - try Delete all again in a moment."
+      : `Couldn't delete everything: ${error.message}`;
+    elements.deleteAll.disabled = !link.connected || state.recordings.length === 0;
+    if (error.kind !== "busy") scheduleListRefresh(500);  // show what's actually left
+  }
+}
+
+function isOnLaptop(recording) {
+  const copy = state.downloaded.get(recording.name);
+  return Boolean(copy && copy.size === recording.size);
+}
+
+function renderList() {
+  elements.list.replaceChildren(...state.recordings.map((recording) => {
+    const item = document.createElement("li");
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "recording" + (recording.name === state.selectedName ? " selected" : "");
+    const name = document.createElement("span");
+    name.className = "name";
+    name.textContent = recording.name;
+    const meta = document.createElement("span");
+    meta.className = "meta";
+    meta.textContent = `${formatSeconds(recording.durationS)} · ${formatBytes(recording.size)}`;
+    const badge = document.createElement("span");
+    const local = isOnLaptop(recording);
+    badge.className = "badge" + (local ? " local" : "");
+    badge.textContent = local ? "on laptop" : "on board";
+    button.append(name, meta, badge);
+    button.addEventListener("click", () => selectRecording(recording));
+    item.appendChild(button);
+    return item;
+  }));
+}
+
+// ===== Player =====
+
+async function selectRecording(recording) {
+  if (!SAFE_FILE_NAME.test(recording.name)) {
+    elements.playerStatus.textContent = "That file name can't be fetched from the board.";
+    return;
+  }
+  state.selectedName = recording.name;
+  state.analysis = null;
+  renderList();
+  elements.playerHeading.textContent = recording.name;
+  elements.deleteButton.disabled = !link.connected;
+  elements.download.setAttribute("aria-disabled", "true");
+  elements.stats.replaceChildren();
+  elements.pauseList.replaceChildren();
+  elements.audio.removeAttribute("src");
+  drawWaveform();
+
+  let copy = state.downloaded.get(recording.name);
+  let fromLaptop = Boolean(copy && copy.size === recording.size);
+  if (!fromLaptop) {
+    elements.playerStatus.textContent = "Downloading from the board…";
+    try {
+      const { data, crc } = await link.get(recording.name);
+      const pcm = decodeUlaw(data);
+      if (copy) URL.revokeObjectURL(copy.wavUrl);
+      copy = {
+        size: data.length, crc, analysis: analyze(pcm),
+        wavUrl: URL.createObjectURL(new Blob([makeWav(pcm)], { type: "audio/wav" })),
+      };
+      state.downloaded.set(recording.name, copy);
+    } catch (error) {
+      if (state.selectedName === recording.name) {
+        elements.playerStatus.textContent = error.kind === "busy"
+          ? "The board is busy with a reply - pick it again in a moment."
+          : error.message;
+      }
+      return;
+    }
+  }
+  if (state.selectedName !== recording.name) return;  // another one was picked meanwhile
+
+  renderList();
+  state.analysis = copy.analysis;
+  elements.playerStatus.textContent = fromLaptop
+    ? `Playing the copy already on the laptop · CRC ${hex32(copy.crc)}`
+    : `Downloaded from the board · CRC ${hex32(copy.crc)} verified`;
+  elements.audio.src = copy.wavUrl;
+  elements.download.href = copy.wavUrl;
+  elements.download.download = recording.name.replace(/\.ulaw$/i, "") + ".wav";
+  elements.download.setAttribute("aria-disabled", "false");
+  renderStats(copy);
+  drawWaveform();
+  elements.audio.play().catch(() => { /* autoplay blocked - the controls still work */ });
+}
+
+/** Empties the player back to its "nothing selected" state, with a message. */
+function resetPlayer(message) {
+  state.selectedName = null;
+  state.analysis = null;
+  elements.playerHeading.textContent = "Select a recording";
+  elements.playerStatus.textContent = message;
+  elements.audio.removeAttribute("src");
+  elements.audio.load();
+  elements.download.setAttribute("aria-disabled", "true");
+  elements.deleteButton.disabled = true;
+  elements.stats.replaceChildren();
+  elements.pauseList.replaceChildren();
+  drawWaveform();
+}
+
+/** Asks for confirmation, then deletes the selected recording from the SD
+    card. The list and player update when the board confirms (@@DELETED). */
+async function onDeleteClick() {
+  const fileName = state.selectedName;
+  if (!fileName) return;
+  const keepTip = state.downloaded.has(fileName) ? "\n\nTo keep a copy, use Download WAV first." : "";
+  if (!window.confirm(`Delete ${fileName} from the ESP32's SD card?\n\nThis can't be undone.${keepTip}`)) return;
+  elements.deleteButton.disabled = true;
+  try {
+    await link.deleteRecording(fileName);
+  } catch (error) {
+    if (state.selectedName === fileName) {
+      elements.playerStatus.textContent = error.kind === "busy"
+        ? "The board is busy with a reply - try deleting again in a moment."
+        : `Couldn't delete it: ${error.message}`;
+      elements.deleteButton.disabled = !link.connected;
+    }
+  }
+}
+
+function renderStats(copy) {
+  const analysis = copy.analysis;
+  const rows = [
+    ["Duration", formatSeconds(analysis.durationS)],
+    ["Size", `${copy.size.toLocaleString()} bytes`],
+    ["Peak level", formatDbfs(analysis.peakDbfs)],
+    ["Average (RMS) level", formatDbfs(analysis.rmsDbfs)],
+    ["Samples at full scale", analysis.fullScaleSamples.toLocaleString(), analysis.fullScaleSamples > 0],
+    ["Silence before / after speech",
+      `${formatSeconds(analysis.leadingSilenceS)} / ${formatSeconds(analysis.trailingSilenceS)}`],
+    ["Pauses ≥ 0.25 s inside speech", String(analysis.pauses.length)],
+  ];
+  elements.stats.replaceChildren(...rows.map(([label, value, warn]) => {
+    const wrapper = document.createElement("div");
+    const term = document.createElement("dt");
+    term.textContent = label;
+    const detail = document.createElement("dd");
+    detail.textContent = value;
+    if (warn) detail.className = "warn";
+    wrapper.append(term, detail);
+    return wrapper;
+  }));
+  elements.pauseList.replaceChildren(...analysis.pauses.map((pause) => {
+    const item = document.createElement("li");
+    item.textContent = `${formatSeconds(pause.lengthS)} pause at ${formatSeconds(pause.startS)}`;
+    return item;
+  }));
+}
+
+function cssVar(name) {
+  return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+}
+
+function drawWaveform() {
+  const canvas = elements.waveform;
+  const ratio = window.devicePixelRatio || 1;
+  const width = canvas.clientWidth;
+  const height = canvas.clientHeight;
+  canvas.width = Math.round(width * ratio);
+  canvas.height = Math.round(height * ratio);
+  const context = canvas.getContext("2d");
+  context.setTransform(ratio, 0, 0, ratio, 0, 0);
+  context.clearRect(0, 0, width, height);
+  const analysis = state.analysis;
+  if (!analysis || !analysis.envelope.length) return;
+
+  const duration = analysis.durationS || 1;
+  context.fillStyle = cssVar("--pause-band");
+  analysis.pauses.forEach((pause) => {
+    context.fillRect((pause.startS / duration) * width, 0, (pause.lengthS / duration) * width, height);
+  });
+
+  const middle = height / 2;
+  const columnWidth = width / analysis.envelope.length;
+  context.fillStyle = cssVar("--wave");
+  analysis.envelope.forEach(([low, high], index) => {
+    const top = middle - high * middle;
+    const bottom = middle - low * middle;
+    context.fillRect(index * columnWidth, top, Math.max(1, columnWidth - 0.5), Math.max(1, bottom - top));
+  });
+
+  const audio = elements.audio;
+  if (audio.duration) {
+    context.fillStyle = cssVar("--playhead");
+    context.fillRect((audio.currentTime / audio.duration) * width - 1, 0, 2, height);
+  }
+}
+
+function animatePlayhead() {
+  drawWaveform();
+  if (!elements.audio.paused) requestAnimationFrame(animatePlayhead);
+}
+
+// ===== Wiring =====
+
+elements.connect.addEventListener("click", onConnectClick);
+elements.refresh.addEventListener("click", () => scheduleListRefresh(0));
+elements.deleteAll.addEventListener("click", onDeleteAllClick);
+elements.saveLog.addEventListener("click", onSaveLogClick);
+elements.downloadLog.addEventListener("click", onDownloadLogClick);
+elements.clearLog.addEventListener("click", onClearLogClick);
+elements.deleteButton.addEventListener("click", onDeleteClick);
+elements.send.addEventListener("click", () => { sendCommand(elements.command.value); elements.command.value = ""; });
+elements.command.addEventListener("keydown", (event) => {
+  if (event.key === "Enter") { sendCommand(elements.command.value); elements.command.value = ""; }
+});
+elements.audio.addEventListener("play", () => requestAnimationFrame(animatePlayhead));
+elements.audio.addEventListener("seeked", drawWaveform);
+elements.audio.addEventListener("ended", drawWaveform);
+elements.waveform.addEventListener("click", (event) => {
+  const audio = elements.audio;
+  if (!audio.duration) return;
+  const bounds = elements.waveform.getBoundingClientRect();
+  audio.currentTime = ((event.clientX - bounds.left) / bounds.width) * audio.duration;
+});
+window.addEventListener("resize", drawWaveform);
+setInterval(() => flushLogFile().catch((error) => {
+  appendLog(`(app) Writing the log file failed (${error.message}) - stopped saving it.`);
+  state.logFile = null;
+  elements.logTarget.textContent = "";
+  elements.saveLog.textContent = "Save log to folder…";
+  elements.saveLog.disabled = false;
+}), LOG_FILE_FLUSH_MS);
+
+if ("showDirectoryPicker" in window) elements.saveLog.hidden = false;
+if ("serial" in navigator) {
+  // Replugged board: reopen it, unless Disconnect was clicked.
+  navigator.serial.addEventListener("connect", (event) => {
+    if (!link.connected && state.reconnectWanted) connectPort(event.target);
+  });
+  // A port allowed earlier on this page's origin can reopen without the chooser.
+  navigator.serial.getPorts().then((ports) => { if (ports.length === 1 && !link.connected) connectPort(ports[0]); });
+} else {
+  elements.unsupported.hidden = false;
+  elements.connect.disabled = true;
+}
+drawWaveform();
+
+// For poking at from the browser console while debugging.
+window.replyAudioApp = { link, connectPort, crc32, decodeUlaw, analyze, makeWav };
+</script>
+</body>
+</html>
