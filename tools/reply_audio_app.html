@@ -148,6 +148,19 @@
     outline-offset: 2px;
   }
 
+  .tabs { display: flex; gap: 4px; margin: 0 0 10px; border-bottom: 1px solid var(--border); }
+  .tab {
+    border: 0;
+    border-bottom: 2px solid transparent;
+    border-radius: 0;
+    background: transparent;
+    color: var(--muted);
+    padding: 6px 10px;
+  }
+  .tab:hover { color: var(--text); border-bottom-color: var(--border); }
+  .tab[aria-selected="true"] { color: var(--text); border-bottom-color: var(--accent); font-weight: 600; }
+  .gain-option { margin: 0 0 10px; }
+
   #recording-list { list-style: none; margin: 0; padding: 0; max-height: 260px; overflow-y: auto; }
   .recording {
     display: grid;
@@ -265,6 +278,10 @@
           <button id="delete-all" class="danger" type="button" disabled>Delete all</button>
         </div>
       </div>
+      <div class="tabs" role="tablist" aria-label="Kind of recording">
+        <button class="tab" type="button" role="tab" aria-selected="true" data-kind="reply">Replies</button>
+        <button class="tab" type="button" role="tab" aria-selected="false" data-kind="command">Voice commands</button>
+      </div>
       <p id="list-status" class="hint" aria-live="polite">Connect the board to see its recordings.</p>
       <ul id="recording-list"></ul>
     </section>
@@ -278,6 +295,10 @@
         </div>
       </div>
       <p id="player-status" class="hint" aria-live="polite">Pick one from the list to download it from the board and play it here.</p>
+      <label id="gain-option" class="toggle gain-option" hidden>
+        <input id="apply-gain" type="checkbox">
+        Apply the board's <span id="gain-factor">×2</span> gain - hear it the way OpenAI received it
+      </label>
       <canvas id="waveform" aria-label="Waveform - click to jump to a point"></canvas>
       <audio id="audio" controls preload="auto"></audio>
       <dl id="stats" class="stats"></dl>
@@ -309,10 +330,10 @@
 
 // ===== Settings =====
 
-const SAMPLE_RATE_HZ = 8000;  // G.711 mu-law: fixed 8 kHz, 1 byte per sample
 const COMMAND_TIMEOUT_MS = 5000;  // LIST and DELETE answers
 const DELETE_ALL_TIMEOUT_MS = 30000;
-const MAX_KEPT_RECORDINGS = 5;  // mirrors the board's kMaxKeptRecordings (reply_recorder_utils.h) - display only
+const MAX_KEPT_RECORDINGS = 5;  // mirrors the board's kMaxKeptRecordings (recording_folder_utils.h) - display only
+const BOARD_MIC_GAIN = 2;       // mirrors test.ino's kSoftwareGain (x4 until 2026-10-06) - for "what OpenAI hears"
 const GET_START_TIMEOUT_MS = 5000;
 const BUSY_RETRY_MS = 1500;
 const BUSY_RETRY_LIMIT = 12;
@@ -325,9 +346,30 @@ const PAUSE_REPORT_MIN_S = 0.25;
 const ENVELOPE_POINTS = 600;
 const PCM16_FULL_SCALE = 32768;
 const USB_CHIP_NAMES = { 0x10c4: "CP210x", 0x1a86: "CH340/CH9102" };
-const SAFE_FILE_NAME = /^[A-Za-z0-9_-][A-Za-z0-9_.-]{0,30}$/;  // mirrors the board's isPlainFileName()
+const SAFE_FILE_NAME = /^[A-Za-z0-9_-][A-Za-z0-9_.-]{0,30}$/;  // a plain name, no path
 
-// ===== Audio: mu-law decode, WAV, CRC-32, analysis =====
+/** The two kinds of recording the board keeps, told apart by extension
+    (see the board's recording_folder_utils.h). */
+const RECORDING_KINDS = {
+  reply: {
+    label: "Replies", noun: "reply", nounPlural: "replies", folderArgument: "replies",
+    sampleRateHz: 8000, bytesPerSample: 1,  // G.711 mu-law
+    fullScaleMagnitude: 32124,              // mu-law's loudest code
+    decode: decodeUlaw,
+  },
+  command: {
+    label: "Voice commands", noun: "voice command", nounPlural: "voice commands", folderArgument: "commands",
+    sampleRateHz: 24000, bytesPerSample: 2,  // the mic's own 16-bit samples, before the board's gain
+    fullScaleMagnitude: 32767,
+    decode: decodePcm16,
+  },
+};
+
+function kindOfFile(name) {
+  return /\.pcm$/i.test(name) ? "command" : "reply";
+}
+
+// ===== Audio: decoding, WAV, CRC-32, analysis =====
 
 /** Same ITU-T G.711 decode as the board's ulawToLinearPcm16(). */
 const ULAW_TO_PCM16 = new Int16Array(256).map((_, code) => {
@@ -336,7 +378,6 @@ const ULAW_TO_PCM16 = new Int16Array(256).map((_, code) => {
   magnitude <<= (inverted & 0x70) >> 4;
   return inverted & 0x80 ? 0x84 - magnitude : magnitude - 0x84;
 });
-const ULAW_MAX_MAGNITUDE = 32124;  // mu-law's loudest code
 
 function decodeUlaw(bytes) {
   const pcm = new Int16Array(bytes.length);
@@ -344,21 +385,35 @@ function decodeUlaw(bytes) {
   return pcm;
 }
 
-/** 16-bit mono PCM at SAMPLE_RATE_HZ -> a WAV file's bytes. */
-function makeWav(pcm) {
+/** Raw 16-bit little-endian PCM bytes -> samples. */
+function decodePcm16(bytes) {
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  const pcm = new Int16Array(bytes.length >> 1);
+  for (let i = 0; i < pcm.length; i++) pcm[i] = view.getInt16(i * 2, true);
+  return pcm;
+}
+
+/** The board's software gain: multiply and clamp to 16 bits, exactly as
+    readMicChunkGained() does before sending audio to OpenAI. */
+function applyBoardGain(pcm) {
+  return pcm.map((sample) => Math.max(-32768, Math.min(32767, sample * BOARD_MIC_GAIN)));
+}
+
+/** 16-bit mono PCM -> a WAV file's bytes. */
+function makeWav(pcm, sampleRateHz) {
   const view = new DataView(new ArrayBuffer(44 + pcm.length * 2));
   const writeText = (offset, text) => [...text].forEach((c, i) => view.setUint8(offset + i, c.charCodeAt(0)));
   writeText(0, "RIFF");
   view.setUint32(4, 36 + pcm.length * 2, true);
   writeText(8, "WAVE");
   writeText(12, "fmt ");
-  view.setUint32(16, 16, true);                  // fmt chunk size
-  view.setUint16(20, 1, true);                   // PCM
-  view.setUint16(22, 1, true);                   // mono
-  view.setUint32(24, SAMPLE_RATE_HZ, true);
-  view.setUint32(28, SAMPLE_RATE_HZ * 2, true);  // bytes per second
-  view.setUint16(32, 2, true);                   // bytes per frame
-  view.setUint16(34, 16, true);                  // bits per sample
+  view.setUint32(16, 16, true);                 // fmt chunk size
+  view.setUint16(20, 1, true);                  // PCM
+  view.setUint16(22, 1, true);                  // mono
+  view.setUint32(24, sampleRateHz, true);
+  view.setUint32(28, sampleRateHz * 2, true);   // bytes per second
+  view.setUint16(32, 2, true);                  // bytes per frame
+  view.setUint16(34, 16, true);                 // bits per sample
   writeText(36, "data");
   view.setUint32(40, pcm.length * 2, true);
   pcm.forEach((sample, i) => view.setInt16(44 + i * 2, sample, true));
@@ -381,14 +436,14 @@ function toDbfs(level) {
   return level > 0 ? 20 * Math.log10(level / PCM16_FULL_SCALE) : null;
 }
 
-/** Quality stats for one reply plus a min/max envelope for drawing it.
-    Pauses are silent stretches inside the speech. The recording holds the
-    bytes as received, not their timing, so a pause is in OpenAI's audio
+/** Level stats for one recording plus a min/max envelope for drawing it.
+    Pauses are silent stretches inside the sound. For a reply, the file holds
+    the bytes as received, not their timing, so a pause is in OpenAI's audio
     itself - not a network stall on the board. */
-function analyze(pcm) {
+function analyze(pcm, sampleRateHz, fullScaleMagnitude) {
   const count = pcm.length;
   const result = {
-    durationS: count / SAMPLE_RATE_HZ, peakDbfs: null, rmsDbfs: null, fullScaleSamples: 0,
+    durationS: count / sampleRateHz, peakDbfs: null, rmsDbfs: null, fullScaleSamples: 0,
     leadingSilenceS: 0, trailingSilenceS: 0, pauses: [], envelope: [],
   };
   if (!count) return result;
@@ -398,13 +453,13 @@ function analyze(pcm) {
   for (const sample of pcm) {
     const magnitude = Math.abs(sample);
     if (magnitude > peak) peak = magnitude;
-    if (magnitude >= ULAW_MAX_MAGNITUDE) result.fullScaleSamples++;
+    if (magnitude >= fullScaleMagnitude) result.fullScaleSamples++;
     sumOfSquares += sample * sample;
   }
   result.peakDbfs = toDbfs(peak);
   result.rmsDbfs = toDbfs(Math.sqrt(sumOfSquares / count));
 
-  const window = Math.round(SAMPLE_RATE_HZ * SILENCE_WINDOW_S);
+  const window = Math.round(sampleRateHz * SILENCE_WINDOW_S);
   const threshold = PCM16_FULL_SCALE * 10 ** (SILENCE_THRESHOLD_DBFS / 20);
   const windowIsSilent = [];
   for (let start = 0; start < count; start += window) {
@@ -494,7 +549,9 @@ class Transaction {
     "@@" protocol replies, switching to counted binary reads during a GET;
     list()/get() run one at a time. */
 class BoardLink {
-  constructor({ onLine, onNote, onConnectionChange, onListAnnounced, onRecordingSaved, onRecordingDeleted }) {
+  constructor({ onLine, onNote, onConnectionChange, onListAnnounced, onRecordingSaved, onRecordingDeleted,
+                onTransferProgress }) {
+    this.onTransferProgress = onTransferProgress;  // (bytes received, total) while a GET's bytes arrive
     this.onLine = onLine;
     this.onNote = onNote;
     this.onConnectionChange = onConnectionChange;
@@ -588,6 +645,9 @@ class BoardLink {
         }
         this.binary.remaining -= take;
         offset += take;
+        if (this.binary.target && this.onTransferProgress) {
+          this.onTransferProgress(this.binary.target.length - this.binary.remaining, this.binary.target.length);
+        }
         if (this.binary.remaining === 0) this.binary = null;
         continue;
       }
@@ -732,10 +792,11 @@ class BoardLink {
     await this.run("DELETE", `DELETE ${fileName}`, fileName);
   }
 
-  /** Deletes every recording on the card; each one reaches onRecordingDeleted
-      as the board confirms it. Throws if any were left. */
-  async deleteAll() {
-    await this.run("DELETE_ALL", "DELETE_ALL");
+  /** Deletes every recording in one folder ("replies" or "commands"); each
+      one reaches onRecordingDeleted as the board confirms it. Throws if any
+      were left. */
+  async deleteAll(folderArgument) {
+    await this.run("DELETE_ALL", `DELETE_ALL ${folderArgument}`);
   }
 
   /** Downloads one recording and checks it against the board's CRC. */
@@ -761,6 +822,9 @@ const elements = {
   deleteAll: document.getElementById("delete-all"),
   listStatus: document.getElementById("list-status"),
   list: document.getElementById("recording-list"),
+  tabs: document.querySelectorAll(".tab"),
+  gainOption: document.getElementById("gain-option"),
+  applyGain: document.getElementById("apply-gain"),
   playerHeading: document.getElementById("player-heading"),
   playerStatus: document.getElementById("player-status"),
   download: document.getElementById("download"),
@@ -780,8 +844,9 @@ const elements = {
 };
 
 const state = {
-  recordings: [],
-  downloaded: new Map(),  // name -> { size, crc, analysis, wavUrl } for this page session
+  recordings: [],         // both kinds: { name, size, kind, durationS }
+  activeKind: "reply",    // which tab is showing
+  downloaded: new Map(),  // name -> { kind, size, crc, pcm, variants: { plain, gained } } for this page session
   selectedName: null,
   analysis: null,
   busyRetries: 0,
@@ -789,6 +854,9 @@ const state = {
   reconnectWanted: false,
   logLines: [],
   logFile: null,  // { handle, bytesWritten, queued: [] } once a folder is picked
+  downloadingName: null,    // the recording a GET is running for
+  lastProgressPercent: -1,
+  selectedSource: "",       // "Downloaded from the board ..." / "Playing the copy already on the laptop ..."
   sessionStamp: fileStamp(new Date()),
 };
 
@@ -802,6 +870,7 @@ const link = new BoardLink({
   },
   onRecordingSaved: addSavedRecording,
   onRecordingDeleted: removeRecording,
+  onTransferProgress: showDownloadProgress,
 });
 
 function pad(number, width = 2) { return String(number).padStart(width, "0"); }
@@ -847,7 +916,7 @@ function handleConnectionChange(connected, closedOnPurpose) {
   elements.connect.textContent = connected ? "Disconnect" : "Connect board";
   elements.baud.disabled = connected;
   elements.refresh.disabled = !connected;
-  elements.deleteAll.disabled = !connected || state.recordings.length === 0;
+  elements.deleteAll.disabled = !connected || recordingsOfActiveKind().length === 0;
   elements.send.disabled = !connected;
   elements.deleteButton.disabled = !connected || !state.selectedName;
   if (connected) {
@@ -981,19 +1050,24 @@ async function loadList() {
   showRecordings(files);
 }
 
+/** A board-reported file with its kind and length worked out. */
+function describeRecording(file) {
+  const kind = kindOfFile(file.name);
+  const format = RECORDING_KINDS[kind];
+  return { ...file, kind, durationS: file.size / (format.sampleRateHz * format.bytesPerSample) };
+}
+
 /** Replaces the list with files reported by the board (a LIST answer or an announcement). */
 function showRecordings(files) {
-  state.recordings = files.map((file) => ({ ...file, durationS: file.size / SAMPLE_RATE_HZ }));
-  state.recordings.sort(newestFirst);
+  state.recordings = files.map(describeRecording).sort(newestFirst);
   updateListStatus();
   renderList();
 }
 
 /** Adds (or updates) one recording the board just announced with @@SAVED. */
 function addSavedRecording(file) {
-  const recording = { ...file, durationS: file.size / SAMPLE_RATE_HZ };
   state.recordings = state.recordings.filter((existing) => existing.name !== file.name);
-  state.recordings.push(recording);
+  state.recordings.push(describeRecording(file));
   state.recordings.sort(newestFirst);
   updateListStatus();
   renderList();
@@ -1004,43 +1078,82 @@ function addSavedRecording(file) {
 function removeRecording(fileName) {
   state.recordings = state.recordings.filter((recording) => recording.name !== fileName);
   const copy = state.downloaded.get(fileName);
-  if (copy) URL.revokeObjectURL(copy.wavUrl);
+  if (copy) releaseCopy(copy);
   state.downloaded.delete(fileName);
   if (state.selectedName === fileName) resetPlayer(`${fileName} was deleted from the SD card.`);
   updateListStatus();
   renderList();
 }
 
-/** Sort order for the list: highest reply number first. Numeric, so
+/** Frees the WAV files made for a downloaded copy. */
+function releaseCopy(copy) {
+  Object.values(copy.variants).forEach((variant) => URL.revokeObjectURL(variant.wavUrl));
+}
+
+/** Sort order for the list: highest number first. Numeric, so
     reply_10000 still sorts above reply_9999. */
 function newestFirst(a, b) {
   return b.name.localeCompare(a.name, undefined, { numeric: true });
 }
 
+function recordingsOfActiveKind() {
+  return state.recordings.filter((recording) => recording.kind === state.activeKind);
+}
+
+/** Updates the tab labels (with counts), the status line under them, and
+    whether Delete all applies. */
 function updateListStatus() {
-  const count = state.recordings.length;
-  elements.listStatus.textContent = count
-    ? `${count} recording${count === 1 ? "" : "s"} - newest first. The board keeps the newest ${MAX_KEPT_RECORDINGS}.`
-    : "No recordings yet. Send LISTEN and talk to the board - every reply is saved.";
+  elements.tabs.forEach((tab) => {
+    const kind = tab.dataset.kind;
+    const count = state.recordings.filter((recording) => recording.kind === kind).length;
+    tab.textContent = `${RECORDING_KINDS[kind].label} (${count})`;
+    tab.setAttribute("aria-selected", String(kind === state.activeKind));
+  });
+  const format = RECORDING_KINDS[state.activeKind];
+  const count = recordingsOfActiveKind().length;
+  let text;
+  if (count && state.activeKind === "command") {
+    const downloadSecondsPerAudioSecond = (format.sampleRateHz * format.bytesPerSample * 10) / Number(elements.baud.value);
+    text = `${count} ${count === 1 ? format.noun : format.nounPlural} - newest first. The board keeps the newest ` +
+           `${MAX_KEPT_RECORDINGS}. Uncompressed, so each second of audio takes about ` +
+           `${downloadSecondsPerAudioSecond.toFixed(1)} s to download.`;
+  } else if (count) {
+    text = `${count} ${count === 1 ? format.noun : format.nounPlural} - newest first. The board keeps the newest ` +
+           `${MAX_KEPT_RECORDINGS}.`;
+  } else if (state.activeKind === "command") {
+    text = "No voice commands yet. Every LISTEN saves what the mic heard.";
+  } else {
+    text = "No replies yet. Send LISTEN and talk to the board - every reply is saved.";
+  }
+  elements.listStatus.textContent = text;
   elements.deleteAll.disabled = !link.connected || count === 0;
 }
 
-/** Asks for confirmation, then deletes every recording on the SD card. The
-    list empties as the board confirms each file (@@DELETED). */
+/** Switches the list between replies and voice commands. */
+function selectTab(kind) {
+  state.activeKind = kind;
+  updateListStatus();
+  renderList();
+}
+
+/** Asks for confirmation, then deletes every recording of the kind showing.
+    The list empties as the board confirms each file (@@DELETED). */
 async function onDeleteAllClick() {
-  const count = state.recordings.length;
-  const question = `Delete all ${count} recording${count === 1 ? "" : "s"} from the ESP32's SD card?\n\nThis can't be undone.`;
+  const format = RECORDING_KINDS[state.activeKind];
+  const count = recordingsOfActiveKind().length;
+  const question = `Delete all ${count} ${count === 1 ? format.noun : format.nounPlural} from the ESP32's SD card?` +
+                   "\n\nThis can't be undone.";
   if (!count || !window.confirm(question)) return;
   elements.deleteAll.disabled = true;
   elements.listStatus.textContent = "Deleting…";
   try {
-    await link.deleteAll();
+    await link.deleteAll(format.folderArgument);
     updateListStatus();
   } catch (error) {
     elements.listStatus.textContent = error.kind === "busy"
       ? "The board is busy with a reply - try Delete all again in a moment."
       : `Couldn't delete everything: ${error.message}`;
-    elements.deleteAll.disabled = !link.connected || state.recordings.length === 0;
+    elements.deleteAll.disabled = !link.connected || recordingsOfActiveKind().length === 0;
     if (error.kind !== "busy") scheduleListRefresh(500);  // show what's actually left
   }
 }
@@ -1051,7 +1164,7 @@ function isOnLaptop(recording) {
 }
 
 function renderList() {
-  elements.list.replaceChildren(...state.recordings.map((recording) => {
+  elements.list.replaceChildren(...recordingsOfActiveKind().map((recording) => {
     const item = document.createElement("li");
     const button = document.createElement("button");
     button.type = "button";
@@ -1075,6 +1188,16 @@ function renderList() {
 
 // ===== Player =====
 
+/** Shows how far a download has got, while one is running for the
+    selected recording. */
+function showDownloadProgress(bytesReceived, bytesTotal) {
+  if (!state.downloadingName || state.downloadingName !== state.selectedName) return;
+  const percent = Math.floor((bytesReceived * 100) / bytesTotal);
+  if (percent === state.lastProgressPercent) return;
+  state.lastProgressPercent = percent;
+  elements.playerStatus.textContent = `Downloading from the board… ${percent}%`;
+}
+
 async function selectRecording(recording) {
   if (!SAFE_FILE_NAME.test(recording.name)) {
     elements.playerStatus.textContent = "That file name can't be fetched from the board.";
@@ -1084,6 +1207,7 @@ async function selectRecording(recording) {
   state.analysis = null;
   renderList();
   elements.playerHeading.textContent = recording.name;
+  elements.gainOption.hidden = recording.kind !== "command";
   elements.deleteButton.disabled = !link.connected;
   elements.download.setAttribute("aria-disabled", "true");
   elements.stats.replaceChildren();
@@ -1092,17 +1216,15 @@ async function selectRecording(recording) {
   drawWaveform();
 
   let copy = state.downloaded.get(recording.name);
-  let fromLaptop = Boolean(copy && copy.size === recording.size);
+  const fromLaptop = Boolean(copy && copy.size === recording.size);
   if (!fromLaptop) {
     elements.playerStatus.textContent = "Downloading from the board…";
+    state.downloadingName = recording.name;
+    state.lastProgressPercent = -1;
     try {
       const { data, crc } = await link.get(recording.name);
-      const pcm = decodeUlaw(data);
-      if (copy) URL.revokeObjectURL(copy.wavUrl);
-      copy = {
-        size: data.length, crc, analysis: analyze(pcm),
-        wavUrl: URL.createObjectURL(new Blob([makeWav(pcm)], { type: "audio/wav" })),
-      };
+      if (copy) releaseCopy(copy);
+      copy = { kind: recording.kind, size: data.length, crc, pcm: RECORDING_KINDS[recording.kind].decode(data), variants: {} };
       state.downloaded.set(recording.name, copy);
     } catch (error) {
       if (state.selectedName === recording.name) {
@@ -1111,22 +1233,66 @@ async function selectRecording(recording) {
           : error.message;
       }
       return;
+    } finally {
+      state.downloadingName = null;
     }
   }
   if (state.selectedName !== recording.name) return;  // another one was picked meanwhile
 
   renderList();
-  state.analysis = copy.analysis;
-  elements.playerStatus.textContent = fromLaptop
+  state.selectedSource = fromLaptop
     ? `Playing the copy already on the laptop · CRC ${hex32(copy.crc)}`
     : `Downloaded from the board · CRC ${hex32(copy.crc)} verified`;
-  elements.audio.src = copy.wavUrl;
-  elements.download.href = copy.wavUrl;
-  elements.download.download = recording.name.replace(/\.ulaw$/i, "") + ".wav";
+  showSelectedCopy(copy, { autoplay: true });
+}
+
+/** The playable version of a copy: as recorded, or - for a voice command
+    with the gain option ticked - with the board's gain applied. Each is
+    built once and kept. */
+function playableVersion(copy) {
+  const withGain = copy.kind === "command" && elements.applyGain.checked;
+  const key = withGain ? "withGain" : "asRecorded";
+  if (!copy.variants[key]) {
+    const format = RECORDING_KINDS[copy.kind];
+    const pcm = withGain ? applyBoardGain(copy.pcm) : copy.pcm;
+    copy.variants[key] = {
+      analysis: analyze(pcm, format.sampleRateHz, format.fullScaleMagnitude),
+      wavUrl: URL.createObjectURL(new Blob([makeWav(pcm, format.sampleRateHz)], { type: "audio/wav" })),
+    };
+  }
+  return { version: copy.variants[key], withGain };
+}
+
+/** Loads the selected copy into the player, stats and waveform. With
+    keepPosition, carries on from the same point (used when the gain option
+    is switched mid-playback). */
+function showSelectedCopy(copy, { autoplay = false, keepPosition = false } = {}) {
+  const { version, withGain } = playableVersion(copy);
+  const position = elements.audio.currentTime;
+  const wasPlaying = !elements.audio.paused;
+  state.analysis = version.analysis;
+  let levelNote = "";
+  if (copy.kind === "command") {
+    levelNote = withGain
+      ? ` · with the board's ×${BOARD_MIC_GAIN} gain, as OpenAI received it`
+      : ` · the mic's own level, before the ×${BOARD_MIC_GAIN} gain`;
+  }
+  elements.playerStatus.textContent = state.selectedSource + levelNote;
+  elements.audio.src = version.wavUrl;
+  elements.download.href = version.wavUrl;
+  elements.download.download =
+    state.selectedName.replace(/\.(ulaw|pcm)$/i, "") + (withGain ? `_gain_x${BOARD_MIC_GAIN}` : "") + ".wav";
   elements.download.setAttribute("aria-disabled", "false");
-  renderStats(copy);
+  renderStats(copy, version.analysis);
   drawWaveform();
-  elements.audio.play().catch(() => { /* autoplay blocked - the controls still work */ });
+  if (keepPosition) {
+    elements.audio.addEventListener("loadedmetadata", () => {
+      elements.audio.currentTime = position;
+      if (wasPlaying) elements.audio.play().catch(() => {});
+    }, { once: true });
+  } else if (autoplay) {
+    elements.audio.play().catch(() => { /* autoplay blocked - the controls still work */ });
+  }
 }
 
 /** Empties the player back to its "nothing selected" state, with a message. */
@@ -1135,6 +1301,7 @@ function resetPlayer(message) {
   state.analysis = null;
   elements.playerHeading.textContent = "Select a recording";
   elements.playerStatus.textContent = message;
+  elements.gainOption.hidden = true;
   elements.audio.removeAttribute("src");
   elements.audio.load();
   elements.download.setAttribute("aria-disabled", "true");
@@ -1164,17 +1331,16 @@ async function onDeleteClick() {
   }
 }
 
-function renderStats(copy) {
-  const analysis = copy.analysis;
+function renderStats(copy, analysis) {
   const rows = [
     ["Duration", formatSeconds(analysis.durationS)],
     ["Size", `${copy.size.toLocaleString()} bytes`],
     ["Peak level", formatDbfs(analysis.peakDbfs)],
     ["Average (RMS) level", formatDbfs(analysis.rmsDbfs)],
     ["Samples at full scale", analysis.fullScaleSamples.toLocaleString(), analysis.fullScaleSamples > 0],
-    ["Silence before / after speech",
+    ["Silence before / after sound",
       `${formatSeconds(analysis.leadingSilenceS)} / ${formatSeconds(analysis.trailingSilenceS)}`],
-    ["Pauses ≥ 0.25 s inside speech", String(analysis.pauses.length)],
+    ["Pauses ≥ 0.25 s inside", String(analysis.pauses.length)],
   ];
   elements.stats.replaceChildren(...rows.map(([label, value, warn]) => {
     const wrapper = document.createElement("div");
@@ -1242,6 +1408,11 @@ function animatePlayhead() {
 elements.connect.addEventListener("click", onConnectClick);
 elements.refresh.addEventListener("click", () => scheduleListRefresh(0));
 elements.deleteAll.addEventListener("click", onDeleteAllClick);
+elements.tabs.forEach((tab) => tab.addEventListener("click", () => selectTab(tab.dataset.kind)));
+elements.applyGain.addEventListener("change", () => {
+  const copy = state.selectedName && state.downloaded.get(state.selectedName);
+  if (copy) showSelectedCopy(copy, { keepPosition: true });
+});
 elements.saveLog.addEventListener("click", onSaveLogClick);
 elements.downloadLog.addEventListener("click", onDownloadLogClick);
 elements.clearLog.addEventListener("click", onClearLogClick);
@@ -1268,6 +1439,7 @@ setInterval(() => flushLogFile().catch((error) => {
   elements.saveLog.disabled = false;
 }), LOG_FILE_FLUSH_MS);
 
+document.getElementById("gain-factor").textContent = `×${BOARD_MIC_GAIN}`;
 if ("showDirectoryPicker" in window) elements.saveLog.hidden = false;
 if ("serial" in navigator) {
   // Replugged board: reopen it, unless Disconnect was clicked.
