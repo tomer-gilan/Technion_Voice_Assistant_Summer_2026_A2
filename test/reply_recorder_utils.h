@@ -1,11 +1,13 @@
 #pragma once
 
 #include <stdint.h>
+#include "recording_folder_utils.h"
 
 // Saves each spoken reply to the SD card as it arrives: one file per reply
-// in kRepliesDirectory, named reply_NNNN.ulaw, holding the raw 8kHz G.711
-// mu-law bytes exactly as OpenAI sent them (no header - the laptop app adds
-// one). The bytes come from the playback ring buffer's recording tap
+// in esp32va_recordings::kReplyFolder (/replies/reply_NNNN.ulaw), holding the
+// raw 8kHz G.711 mu-law bytes exactly as OpenAI sent them (no header - the
+// laptop app adds one), keeping only the newest kMaxKeptRecordings. The
+// bytes come from the playback ring buffer's recording tap
 // (i2s_audio_utils.h), so recording needs no audio buffer of its own.
 //
 // Split by context: the note*() calls only flip state and are safe from
@@ -17,24 +19,6 @@
 
 namespace esp32va_reply_recorder {
 
-/** Folder on the card (relative to its root) that holds the recordings. */
-constexpr char kRepliesDirectory[] = "/replies";
-
-/** How many recordings the card keeps (the user's call, 2026-10-05). Each
-    time a reply is saved, the oldest ones beyond this are deleted - names
-    keep counting up, so the lowest number is always the oldest. */
-constexpr uint32_t kMaxKeptRecordings = 5;
-
-/** Told the file name of each recording the recorder deletes on its own, so
-    the caller can pass it on (e.g. to the laptop app) without this module
-    knowing the serial protocol. */
-using RecordingDeletedListener = void (*)(const char* file_name);
-
-struct CleanupResult {
-  uint32_t deleted_count;
-  uint32_t remaining_count;  // recordings still on the card afterwards
-};
-
 enum class RecordingOutcome {
   kSaved,         // the whole reply was written and the file closed cleanly
   kSavedPartial,  // the reply was cut short (disconnect) - what arrived is kept
@@ -43,25 +27,16 @@ enum class RecordingOutcome {
 
 struct FinishedRecording {
   RecordingOutcome outcome;
-  char file_name[24];  // e.g. "reply_0007.ulaw"
+  char file_name[esp32va_recordings::kMaxRecordingNameSize];  // e.g. "reply_0007.ulaw"
   uint32_t bytes_written;
 };
 
-/** Creates kRepliesDirectory if it doesn't exist yet, picks the next free
-    reply number by scanning it, and trims the card down to
-    kMaxKeptRecordings (oldest first), telling on_recording_deleted about
-    each file it deletes - now and after every later save. Call once from
+/** Prepares the replies folder (creates it, picks the next number, trims it
+    to kMaxKeptRecordings), telling on_recording_deleted about each file
+    deleted - now and in the trim after every later save. Call once from
     setup(), after the SD card is mounted. Returns false (logged) if the
     folder can't be created or read. */
-bool setupReplyRecorder(RecordingDeletedListener on_recording_deleted);
-
-/** Deletes the oldest recordings (lowest numbers) until at most keep_count
-    remain - 0 deletes them all - telling on_recording_deleted (if not null)
-    about each one. Only reply_NNNN.ulaw files count; anything else in the
-    folder is left alone. Stops at the first file that can't be deleted
-    (logged). SD work: call only while the recorder is idle, from setup() or
-    loop(). */
-CleanupResult deleteOldestRecordings(uint32_t keep_count, RecordingDeletedListener on_recording_deleted);
+bool setupReplyRecorder(esp32va_recordings::RecordingDeletedListener on_recording_deleted);
 
 /** Call for every reply audio delta, BEFORE it's written to the ring. Starts
     a new recording (and the ring's recording tap) if none is in progress;

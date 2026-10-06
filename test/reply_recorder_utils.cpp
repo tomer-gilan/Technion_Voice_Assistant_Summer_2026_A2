@@ -17,9 +17,8 @@ namespace esp32va_reply_recorder {
 
 namespace {
 
-constexpr char kReplyFilePrefix[] = "reply_";
-constexpr size_t kReplyFilePrefixLen = sizeof(kReplyFilePrefix) - 1;
-constexpr char kReplyFileExtension[] = ".ulaw";
+using esp32va_recordings::kReplyFolder;
+
 constexpr uint32_t kWriteBlockBytes = 512;      // one SD sector
 constexpr uint32_t kMaxBlocksPerService = 4;    // caps one loop() pass at ~2KB of SD writing
 constexpr uint32_t kMuLawBytesPerSecond = 8000;  // 8kHz, 1 byte per sample
@@ -44,36 +43,13 @@ unsigned long last_audio_arrival_ms = 0;
 uint32_t bytes_written = 0;
 uint32_t next_reply_number = 1;
 char current_file_name[sizeof(FinishedRecording::file_name)];
-char oldest_file_name[sizeof(FinishedRecording::file_name)];
 char path_buffer[kMaxPathLen];
 uint8_t write_block[kWriteBlockBytes];
-RecordingDeletedListener deleted_listener = nullptr;  // from setupReplyRecorder(), for the trims after each save
+esp32va_recordings::RecordingDeletedListener deleted_listener = nullptr;  // from setupReplyRecorder(), for the trims after each save
 
-/** Builds "<mount point><replies dir>" or, with a file name,
-    "<mount point><replies dir>/<file name>" into path_buffer. */
+/** Full POSIX path of a reply file, built in path_buffer. */
 const char* repliesPath(const char* file_name) {
-  if (file_name == nullptr) {
-    snprintf(path_buffer, sizeof(path_buffer), "%s%s", esp32va_sd_card::kSdMountPoint, kRepliesDirectory);
-  } else {
-    snprintf(path_buffer, sizeof(path_buffer), "%s%s/%s", esp32va_sd_card::kSdMountPoint, kRepliesDirectory,
-             file_name);
-  }
-  return path_buffer;
-}
-
-/** If name is "reply_<number>.ulaw" (case-insensitive), stores the number
-    and returns true; otherwise returns false. */
-bool parseReplyNumber(const char* name, uint32_t* number) {
-  if (strncasecmp(name, kReplyFilePrefix, kReplyFilePrefixLen) != 0) {
-    return false;
-  }
-  char* parse_end = nullptr;
-  unsigned long parsed = strtoul(name + kReplyFilePrefixLen, &parse_end, 10);
-  if (parse_end == name + kReplyFilePrefixLen || strcasecmp(parse_end, kReplyFileExtension) != 0) {
-    return false;
-  }
-  *number = static_cast<uint32_t>(parsed);
-  return true;
+  return esp32va_recordings::recordingPath(kReplyFolder, file_name, path_buffer, sizeof(path_buffer));
 }
 
 /** Creates the file for the recording that just started. On failure, logs
@@ -162,83 +138,17 @@ void closeRecording(FinishedRecording* finished) {
 
 }  // namespace
 
-CleanupResult deleteOldestRecordings(uint32_t keep_count, RecordingDeletedListener on_recording_deleted) {
-  CleanupResult result = {0, 0};
-  // One folder scan per deletion: simple, and never deletes while a
-  // directory listing is open. Only ever a handful of files.
-  for (;;) {
-    DIR* directory = opendir(repliesPath(nullptr));
-    if (directory == nullptr) {
-      LOG_ERROR("Couldn't open %s to clean up old recordings (errno %d).\n", kRepliesDirectory, errno);
-      return result;
-    }
-    uint32_t recording_count = 0;
-    uint32_t oldest_number = UINT32_MAX;
-    while (struct dirent* entry = readdir(directory)) {
-      uint32_t number = 0;
-      if (!parseReplyNumber(entry->d_name, &number)) {
-        continue;
-      }
-      recording_count++;
-      if (number < oldest_number && strlen(entry->d_name) < sizeof(oldest_file_name)) {
-        oldest_number = number;
-        strcpy(oldest_file_name, entry->d_name);
-      }
-    }
-    closedir(directory);
-
-    result.remaining_count = recording_count;
-    if (recording_count <= keep_count || oldest_number == UINT32_MAX) {
-      return result;
-    }
-    if (unlink(repliesPath(oldest_file_name)) != 0) {
-      LOG_ERROR("Couldn't delete %s (errno %d) - stopping the cleanup.\n", oldest_file_name, errno);
-      return result;
-    }
-    result.deleted_count++;
-    result.remaining_count = recording_count - 1;
-    if (keep_count > 0) {
-      LOG_INFO("Deleted the oldest recording, %s - keeping the newest %u.\n", oldest_file_name,
-               (unsigned)keep_count);
-    } else {
-      LOG_INFO("Deleted %s from the SD card.\n", oldest_file_name);
-    }
-    if (on_recording_deleted != nullptr) {
-      on_recording_deleted(oldest_file_name);
-    }
-  }
-}
-
-bool setupReplyRecorder(RecordingDeletedListener on_recording_deleted) {
+bool setupReplyRecorder(esp32va_recordings::RecordingDeletedListener on_recording_deleted) {
   deleted_listener = on_recording_deleted;
-  const char* directory_path = repliesPath(nullptr);
-  if (mkdir(directory_path, 0777) != 0 && errno != EEXIST) {
-    LOG_ERROR("Couldn't create %s on the SD card (errno %d).\n", kRepliesDirectory, errno);
+  uint32_t kept_count = 0;
+  if (!esp32va_recordings::prepareRecordingFolder(kReplyFolder, deleted_listener, &next_reply_number,
+                                                  &kept_count)) {
     return false;
   }
-  DIR* directory = opendir(directory_path);
-  if (directory == nullptr) {
-    LOG_ERROR("Couldn't open %s on the SD card (errno %d).\n", kRepliesDirectory, errno);
-    return false;
-  }
-  uint32_t recording_count = 0;
-  uint32_t highest_number = 0;
-  while (struct dirent* entry = readdir(directory)) {
-    uint32_t number = 0;
-    if (parseReplyNumber(entry->d_name, &number)) {
-      recording_count++;
-      highest_number = max(highest_number, number);
-    }
-  }
-  closedir(directory);
-
-  next_reply_number = highest_number + 1;
-  if (recording_count > kMaxKeptRecordings) {
-    recording_count = deleteOldestRecordings(kMaxKeptRecordings, deleted_listener).remaining_count;
-  }
-  LOG_INFO("Reply recorder ready - %u earlier recording(s) on the card (keeps the newest %u), next is %s%04u%s.\n",
-           (unsigned)recording_count, (unsigned)kMaxKeptRecordings, kReplyFilePrefix,
-           (unsigned)next_reply_number, kReplyFileExtension);
+  esp32va_recordings::formatRecordingName(kReplyFolder, next_reply_number, current_file_name,
+                                          sizeof(current_file_name));
+  LOG_INFO("Reply recorder ready - %u earlier recording(s) on the card (keeps the newest %u), next is %s.\n",
+           (unsigned)kept_count, (unsigned)esp32va_recordings::kMaxKeptRecordings, current_file_name);
   return true;
 }
 
@@ -258,8 +168,8 @@ void noteReplyAudioArriving() {
     return;
   }
   missed_reply_logged = false;
-  snprintf(current_file_name, sizeof(current_file_name), "%s%04u%s", kReplyFilePrefix,
-           (unsigned)next_reply_number, kReplyFileExtension);
+  esp32va_recordings::formatRecordingName(kReplyFolder, next_reply_number, current_file_name,
+                                          sizeof(current_file_name));
   next_reply_number++;
   bytes_written = 0;
   write_failed = false;
@@ -303,7 +213,8 @@ bool serviceReplyRecorder(FinishedRecording* finished) {
   if (fully_written || state == RecorderState::kAborting) {
     closeRecording(finished);
     if (finished->bytes_written > 0) {  // a new file was kept - make room by dropping the oldest
-      deleteOldestRecordings(kMaxKeptRecordings, deleted_listener);
+      esp32va_recordings::deleteOldestRecordings(kReplyFolder, esp32va_recordings::kMaxKeptRecordings,
+                                                 deleted_listener);
     }
     return true;
   }

@@ -1,30 +1,7 @@
-// Step 27 - Save each LISTEN's mic audio to the SD card, to check the mic
-// Builds directly on step 25 (test/25_reply_recording_and_file_transfer.ino.inactive),
-// which is unchanged in behavior (still a fixed 3 s LISTEN). Adds:
-// - Every LISTEN's mic audio is saved as /voice_commands/command_NNNN.pcm -
-//   the mic's own 16-bit samples at 24kHz, BEFORE the x2 software gain -
-//   written chunk by chunk as it's streamed to OpenAI, with no extra audio
-//   buffer. Newest 5 kept, like the replies. LIST/GET/DELETE cover both
-//   folders (a name's prefix picks the folder); DELETE_ALL takes "replies"
-//   or "commands". The laptop app lists and plays them, with an option to
-//   apply the x2 gain to hear what OpenAI got.
-// - Mic timing check: each LISTEN logs how long the slowest 100 ms chunk
-//   took to handle (read -> base64 -> send -> SD write) against how much the
-//   mic's buffer holds (150 ms), with an ERROR when audio was likely dropped
-//   - a possible cause of the inconsistent mic readings.
-//
-// PASS criterion: after LISTEN, "Saved command_NNNN.pcm (...)" logs ~3.0 s,
-// "===== VOICE COMMAND RECORDING PASSED =====" prints once (with the heap
-// summary), and in the laptop app that file plays back as your own voice.
-// What it reveals about the mic is the point - the PASS is about the
-// recording working, whatever it sounds like.
-//
-// New shared modules: recording_folder_utils (what both recording folders
-// share - naming, numbering, keeping the newest 5; the reply recorder now
-// uses it too) and voice_command_recorder_utils. i2s_audio_utils gains
-// micBufferCapacityMs().
-//
-// Unchanged from step 25:
+// Step 25 - Record each reply to the SD card + serial LIST/GET for the laptop
+// Builds directly on step 24 (test/24_sd_card_heap_budget.ino.inactive): no
+// change to the audio/protocol/greeting/LISTEN-cycle/tool mechanics, and the
+// playback ring buffer stays 32KB. Adds:
 // - Recording: every spoken reply (the opening greeting included) is saved
 //   as /replies/reply_NNNN.ulaw - raw 8kHz mu-law, exactly as OpenAI sent
 //   it - through a second read cursor on the playback ring buffer, so no
@@ -42,6 +19,15 @@
 //   ~0.7 s per second of audio. 921600 would cut that to ~0.1 s if the wait
 //   ever matters - change kSerialBaudRate, the logger's -BaudRate and the
 //   app's baud menu together.
+//
+// PASS criterion: after LISTEN, "Saved reply_NNNN.ulaw (...)" logs a length
+// matching the spoken reply, "===== REPLY RECORDING PASSED =====" prints
+// once (with the heap summary), and in the laptop app that file lists,
+// downloads with a matching CRC, and plays back sounding like the reply did.
+//
+// New shared modules: reply_recorder_utils (recording) and
+// sd_file_transfer_utils (LIST/GET). i2s_audio_utils gains the ring's
+// recording tap; everything else is unchanged from step 24.
 
 #include <WebSocketsClient.h>
 #include <ArduinoJson.h>
@@ -61,7 +47,6 @@
 #include "sd_card_utils.h"
 #include "reply_recorder_utils.h"
 #include "sd_file_transfer_utils.h"
-#include "voice_command_recorder_utils.h"
 
 namespace {
 // Unchanged from step 21 except for the get_time_of_day tool and its
@@ -79,11 +64,7 @@ constexpr uint32_t kSerialBaudRate = 115200;  // must match tools/serial_logger.
 constexpr uint32_t kSampleRateHz = 24000;   // must match kSessionUpdateMessage's input rate and i2s_audio_utils's I2S rate
 constexpr uint32_t kRecordDurationSec = 3;  // same duration old step 8b/step 12 used
 constexpr uint32_t kChunkSamples = 2400;    // ~100ms per chunk at 24kHz - same chunk duration step 12 confirmed working
-constexpr uint32_t kChunkMs = kChunkSamples * 1000 / kSampleRateHz;
-// Mic levels are quiet without any gain (step 3). x4 until 2026-10-06, when a
-// spoken "1, 2, 3" hit full scale (min -32768 / max 32767) - clipped before
-// OpenAI heard it. Must match tools/reply_audio_app.html's BOARD_MIC_GAIN.
-constexpr int32_t kSoftwareGain = 2;
+constexpr int32_t kSoftwareGain = 4;        // mic levels are otherwise quiet - see step 3 findings
 constexpr unsigned long kReplyTimeoutMs = 15000;  // max silence (no server message) while awaiting_reply, not a total-reply-duration cap - see checkReplyTimeout()
 
 constexpr uint32_t kChunkPcmBytes = kChunkSamples * sizeof(int16_t);
@@ -114,7 +95,7 @@ uint32_t listen_cycle = 0;         // deliberately never reset - keeps counting 
 uint32_t connection_count = 0;     // how many times WStype_CONNECTED has fired this run (1 = first connect, 2+ = reconnect)
 unsigned long last_reply_activity_ms = 0;  // last time ANY server message arrived while awaiting_reply - see checkReplyTimeout()
 bool ws_reads_paused_for_backpressure = false;  // see i2s_audio_utils.h's ringShouldPauseReads()
-bool step_verdict_reported = false;  // this step's own voice-command-recording verdict - see reportStepVerdict()
+bool step_verdict_reported = false;  // this step's own reply-recording verdict - see reportStepVerdict()
 }  // namespace
 
 /** Reports this step's verdict exactly once: a final heap snapshot, the heap
@@ -128,35 +109,37 @@ void reportStepVerdict(bool passed, const char* failure_reason) {
   esp32va_heap::recordHeapSnapshot("at verdict");
   esp32va_heap::logHeapSummary();
   if (passed) {
-    Serial.println("===== VOICE COMMAND RECORDING PASSED =====");
-    Serial.println("Now play it in the laptop app (Voice commands tab) to hear what the mic picked up.");
+    Serial.println("===== REPLY RECORDING PASSED =====");
+    Serial.println("Now check it in the laptop app: it should list, download (CRC OK) and play like the reply did.");
   } else {
-    Serial.printf("===== VOICE COMMAND RECORDING FAILED: %s =====\n", failure_reason);
+    Serial.printf("===== REPLY RECORDING FAILED: %s =====\n", failure_reason);
   }
 }
 
-/** Tells the laptop app about a reply recording that just closed, if a file
-    was kept (the reply recorder logs the outcome itself). */
+/** Announces a recording that just closed to the laptop app (if a file was
+    kept), and settles this step's verdict from it: the first complete
+    recording of a LISTEN reply passes (so the heap figures include a full
+    mic-streaming + reply + recording cycle - the opening greeting's
+    recording alone doesn't count); a recording that failed to save fails it.
+    A recording cut short by a disconnect is transient and settles nothing. */
 void handleFinishedRecording(const esp32va_reply_recorder::FinishedRecording& finished) {
-  if (finished.bytes_written > 0) {
+  if (finished.bytes_written > 0) {  // a file was kept on the card
     esp32va_sd_transfer::announceSavedRecording(finished.file_name, finished.bytes_written);
   }
-}
-
-/** Closes this LISTEN's mic recording, tells the laptop app about it, and
-    settles this step's verdict: the first voice command saved in full
-    passes; one whose writing failed fails. */
-void finishVoiceCommandRecording() {
-  esp32va_command_recorder::FinishedVoiceCommand finished;
-  if (!esp32va_command_recorder::finishVoiceCommand(&finished)) {
-    reportStepVerdict(false, "this LISTEN's mic audio couldn't be saved - see the ERROR above");
-    return;
-  }
-  esp32va_sd_transfer::announceSavedRecording(finished.file_name, finished.bytes_written);
-  if (finished.write_failed) {
-    reportStepVerdict(false, "writing the mic audio to the SD card failed partway - see the ERROR above");
-  } else {
-    reportStepVerdict(true, nullptr);
+  switch (finished.outcome) {
+    case esp32va_reply_recorder::RecordingOutcome::kSaved:
+      if (listen_cycle > 0) {
+        reportStepVerdict(true, nullptr);
+      }
+      break;
+    case esp32va_reply_recorder::RecordingOutcome::kSavedPartial:
+      break;
+    case esp32va_reply_recorder::RecordingOutcome::kFailed:
+      reportStepVerdict(false, "a reply couldn't be saved to the SD card - see the ERROR above");
+      break;
+    default:
+      LOG_ERROR("Unexpected recording outcome %d.\n", (int)finished.outcome);
+      break;
   }
 }
 
@@ -422,13 +405,10 @@ void onWebSocketEvent(WStype_t type, uint8_t* payload, size_t length) {
 }
 
 /** Records kRecordDurationSec of mic audio, streaming each ~100ms chunk to the
-    session as it's captured and saving the mic's own samples to the SD card
-    (voice_command_recorder_utils.h). Commits the buffer and requests a
-    response once done, then closes the recording and starts the reply
-    timeout. Also checks whether handling each chunk kept up with the mic.
-    Does NOT touch the LED - the LED is the model-controlled set_board_state
-    output, not a "recording in progress" indicator (see PROJECT_OVERVIEW.md
-    step 15). */
+    session as it's captured. Commits the buffer and requests a response once
+    done, then starts the reply timeout. Does NOT touch the LED - the LED is
+    the model-controlled set_board_state output, not a "recording in
+    progress" indicator (see PROJECT_OVERVIEW.md step 15). */
 void captureAndStreamAudio() {
   listen_cycle++;
   is_capturing = true;
@@ -437,16 +417,12 @@ void captureAndStreamAudio() {
   response_fully_received = false;
   function_call_turn_pending = false;
   resetRingBuffer();
-  esp32va_command_recorder::beginVoiceCommand();
   LOG_INFO("LISTEN #%u: recording %us and streaming to OpenAI...\n",
            listen_cycle, kRecordDurationSec);
 
   uint32_t total_samples = kSampleRateHz * kRecordDurationSec;
   uint32_t samples_sent = 0;
   uint32_t chunks_sent = 0;
-  uint32_t chunks_read = 0;
-  unsigned long slowest_chunk_handling_ms = 0;
-  unsigned long total_chunk_handling_ms = 0;
 
   // Independent of whether the model replies, this tells us whether real
   // audio was actually captured - separates "mic/gain problem" from "server
@@ -459,29 +435,24 @@ void captureAndStreamAudio() {
     uint32_t samples_wanted = min(kChunkSamples, total_samples - samples_sent);
     uint32_t samples_read = readMicChunkGained(raw_chunk, pcm_chunk, samples_wanted, kSoftwareGain,
                                                 &level_min, &level_max, &level_sum_of_squares);
-    // From here until the next read, the mic keeps filling its buffer.
-    unsigned long handling_started_ms = millis();
 
     size_t base64_len = 0;
     int b64_result = mbedtls_base64_encode(base64_chunk, sizeof(base64_chunk), &base64_len,
                                             reinterpret_cast<const unsigned char*>(pcm_chunk),
                                             samples_read * sizeof(int16_t));
-    if (b64_result == 0) {
-      snprintf(json_message, kJsonMessageBufferSize,
-               R"JSON({"type":"input_audio_buffer.append","audio":"%.*s"})JSON",
-               (int)base64_len, base64_chunk);
-      webSocket.sendTXT(json_message);
-      chunks_sent++;
-    } else {
+    if (b64_result != 0) {
       LOG_ERROR("base64 encode failed (code %d) - skipping this chunk.\n", b64_result);
+      samples_sent += samples_read;
+      continue;
     }
-    esp32va_command_recorder::appendMicChunk(raw_chunk, samples_read);  // overwrites raw_chunk
-    samples_sent += samples_read;
-    chunks_read++;
 
-    unsigned long handling_ms = millis() - handling_started_ms;
-    slowest_chunk_handling_ms = max(slowest_chunk_handling_ms, handling_ms);
-    total_chunk_handling_ms += handling_ms;
+    snprintf(json_message, kJsonMessageBufferSize,
+             R"JSON({"type":"input_audio_buffer.append","audio":"%.*s"})JSON",
+             (int)base64_len, base64_chunk);
+    webSocket.sendTXT(json_message);
+
+    samples_sent += samples_read;
+    chunks_sent++;
   }
 
   webSocket.sendTXT(kCommitMessage);
@@ -490,18 +461,6 @@ void captureAndStreamAudio() {
   LOG_INFO("Done streaming - waiting for reply...\n");
   LOG_DEBUG("Done streaming (%u chunks). Mic level: min=%d max=%d rms=%.1f\n",
             chunks_sent, level_min, level_max, level_rms);
-
-  // A chunk lasts kChunkMs; the mic's buffer holds micBufferCapacityMs().
-  // One chunk taking longer than the buffer, or chunks taking longer than
-  // they last on average, means mic audio was dropped between reads.
-  unsigned long average_chunk_handling_ms = chunks_read > 0 ? total_chunk_handling_ms / chunks_read : 0;
-  uint32_t mic_buffer_ms = micBufferCapacityMs();
-  LOG_INFO("Mic timing: handling a %u ms chunk took %lu ms at most, %lu ms on average (the mic buffer holds %u ms).\n",
-           (unsigned)kChunkMs, slowest_chunk_handling_ms, average_chunk_handling_ms, (unsigned)mic_buffer_ms);
-  if (slowest_chunk_handling_ms >= mic_buffer_ms || average_chunk_handling_ms >= kChunkMs) {
-    LOG_ERROR("Mic audio was probably dropped this LISTEN - handling couldn't keep up with the mic.\n");
-  }
-  finishVoiceCommandRecording();
 
   is_capturing = false;
   awaiting_reply = true;
@@ -537,7 +496,7 @@ void checkForSerialCommand() {
     return;
   }
   if (!command.equalsIgnoreCase("LISTEN")) {
-    LOG_INFO("Unknown command \"%s\" - expected LISTEN, LIGHT <0-%d>, LIST, GET <name>, DELETE <name> or DELETE_ALL [replies|commands].\n",
+    LOG_INFO("Unknown command \"%s\" - expected LISTEN, LIGHT <0-%d>, LIST, GET <name>, DELETE <name> or DELETE_ALL.\n",
              command.c_str(), esp32va_light_sensor::kMaxLightSensorValue);
     return;
   }
@@ -617,9 +576,7 @@ void setup() {
   esp32va_heap::recordHeapSnapshot("after ring buffer + I2S");
 
   bool sd_card_usable = esp32va_sd_card::mountSdCard() && esp32va_sd_card::runSdSelfTest() &&
-                        esp32va_reply_recorder::setupReplyRecorder(esp32va_sd_transfer::announceDeletedRecording) &&
-                        esp32va_command_recorder::setupVoiceCommandRecorder(
-                            esp32va_sd_transfer::announceDeletedRecording);
+                        esp32va_reply_recorder::setupReplyRecorder(esp32va_sd_transfer::announceDeletedRecording);
   esp32va_heap::recordHeapSnapshot("after SD + recorder setup");
   if (!sd_card_usable) {
     haltSketch("SD card not usable - see the error above");

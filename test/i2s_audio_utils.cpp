@@ -97,6 +97,10 @@ void setupI2sFullDuplex() {
   i2s_set_pin(kI2sPort, &pin_config);
 }
 
+uint32_t micBufferCapacityMs() {
+  return kI2sDmaBufCount * kI2sDmaBufLen * 1000 / kSampleRateHz;
+}
+
 uint32_t readMicChunkGained(int32_t* raw_scratch, int16_t* pcm_out, uint32_t max_samples, int32_t gain,
                              int16_t* level_min, int16_t* level_max, double* level_sum_of_squares) {
   size_t bytes_read = 0;

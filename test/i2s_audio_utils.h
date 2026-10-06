@@ -32,6 +32,11 @@ void setupI2sFullDuplex();
 uint32_t readMicChunkGained(int32_t* raw_scratch, int16_t* pcm_out, uint32_t max_samples, int32_t gain,
                              int16_t* level_min, int16_t* level_max, double* level_sum_of_squares);
 
+/** How much mic audio the I2S driver can hold, in milliseconds, before it
+    starts dropping it. If handling one chunk takes longer than this (or
+    keeps taking longer than a chunk lasts), audio is lost between reads. */
+uint32_t micBufferCapacityMs();
+
 // ----- Playback ring buffer -----
 // Holds raw mu-law bytes, not decoded PCM - decoding and 3x upsampling
 // (8kHz mu-law -> the shared port's 24kHz) happen at drain time instead, so
