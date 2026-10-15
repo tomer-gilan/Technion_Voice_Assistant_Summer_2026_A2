@@ -84,6 +84,37 @@ void appendMicChunk(int32_t* raw_i2s_words, uint32_t sample_count) {
   bytes_written += chunk_bytes;
 }
 
+void appendMicSamples(const int16_t* samples, uint32_t sample_count) {
+  if (file_descriptor < 0 || sample_count == 0) {
+    return;
+  }
+  size_t chunk_bytes = sample_count * sizeof(int16_t);
+  ssize_t result = write(file_descriptor, samples, chunk_bytes);  // the ESP32 is little-endian, as the file is
+  if (result != static_cast<ssize_t>(chunk_bytes)) {
+    LOG_ERROR("Writing %s failed (errno %d) after %u bytes - the rest of this LISTEN isn't saved.\n",
+              current_file_name, errno, (unsigned)bytes_written);
+    write_failed = true;
+    close(file_descriptor);
+    file_descriptor = -1;
+    return;
+  }
+  bytes_written += chunk_bytes;
+}
+
+void cancelVoiceCommand() {
+  if (file_descriptor >= 0) {
+    close(file_descriptor);
+    file_descriptor = -1;
+  }
+  unlink(commandPath(current_file_name));  // fails harmlessly if it was never created
+  bytes_written = 0;
+  write_failed = false;
+  if (next_command_number > 1) {
+    next_command_number--;
+  }
+  LOG_DEBUG("Deleted %s - it wasn't speech.\n", current_file_name);
+}
+
 bool finishVoiceCommand(FinishedVoiceCommand* finished) {
   if (file_descriptor >= 0 && close(file_descriptor) != 0) {
     LOG_ERROR("Closing %s failed (errno %d) - the file may be incomplete.\n", current_file_name, errno);

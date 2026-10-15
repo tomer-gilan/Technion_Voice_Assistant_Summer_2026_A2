@@ -11,7 +11,7 @@ namespace {
 
 constexpr size_t kStageCount = static_cast<size_t>(Stage::kCount);
 constexpr size_t kDetailBufferSize = 72;  // e.g. "SDHC 7580 MB, self-test passed" - room to spare
-constexpr size_t kProtocolLineBufferSize = 768;  // the longest is step 29's @@TIMING line (~700 chars at worst)
+constexpr size_t kProtocolLineBufferSize = 1024;  // the longest is the @@TIMING line (~850 chars at worst since step 30)
 
 struct StageRecord {
   StageState state;
@@ -70,6 +70,8 @@ const char* pipelineStateName(PipelineState state) {
       return "booting";
     case PipelineState::kReady:
       return "ready";
+    case PipelineState::kArmed:
+      return "armed";
     case PipelineState::kListening:
       return "listening";
     case PipelineState::kProcessing:
@@ -177,6 +179,10 @@ void reportTextLine(const char* tag, const char* text) {
 
 void setRawLineOpen(bool open) {
   raw_line_open = open;
+}
+
+void endRawLine() {
+  startProtocolLine();
 }
 
 void reprintStatusSnapshot() {

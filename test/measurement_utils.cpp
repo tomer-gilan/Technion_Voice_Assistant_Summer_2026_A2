@@ -39,6 +39,14 @@ struct TurnMeasurements {
   uint32_t backpressure_pauses;
   int32_t heard_chars;  // -1 until the input transcript arrives
   char tool_name[kToolNameBufferSize];
+  bool listen_stats_set;  // setListenStats() was called this turn
+  ListenMode listen_mode;
+  long pre_roll_ms;
+  long speech_ms;
+  long end_of_speech_to_commit_ms;
+  long fifo_max_ms;
+  long dropped_ms;
+  long mic_gap_max_ms;
   bool reported;
 };
 
@@ -132,6 +140,19 @@ void setCaptureStats(uint32_t sent_bytes, uint32_t send_ms, int32_t peak_abs_sam
   turn.chunk_avg_ms = chunk_avg_ms;
 }
 
+void setListenStats(ListenMode mode, uint32_t pre_roll_ms, long speech_ms, long end_of_speech_to_commit_ms,
+                    uint32_t fifo_max_ms, uint32_t dropped_ms, uint32_t mic_gap_max_ms) {
+  if (!turn_active) return;
+  turn.listen_stats_set = true;
+  turn.listen_mode = mode;
+  turn.pre_roll_ms = static_cast<long>(pre_roll_ms);
+  turn.speech_ms = speech_ms;
+  turn.end_of_speech_to_commit_ms = end_of_speech_to_commit_ms;
+  turn.fifo_max_ms = static_cast<long>(fifo_max_ms);
+  turn.dropped_ms = static_cast<long>(dropped_ms);
+  turn.mic_gap_max_ms = static_cast<long>(mic_gap_max_ms);
+}
+
 void addReplyAudio(uint32_t base64_chars) {
   if (turn_active) turn.reply_base64_chars += base64_chars;
 }
@@ -159,12 +180,18 @@ void reportTurn(bool passed) {
   uint32_t reply_audio_bytes = turn.reply_base64_chars / 4 * 3;
   uint32_t reply_audio_ms = reply_audio_bytes * 1000 / kMuLawBytesPerSecond;
   uint32_t upload_kbps = turn.send_ms > 0 ? turn.sent_bytes * 8 / turn.send_ms : 0;  // bits per ms = kbit/s
+  const char* listen_mode = "-";
+  if (turn.listen_stats_set) {
+    listen_mode = turn.listen_mode == ListenMode::kVoice ? "vad" : "manual";
+  }
+  long unset = -1;
   esp32va_status::printProtocolLine(
       "@@TIMING n=%u result=%s first_event_after_rec_ms=%ld heard_after_rec_ms=%ld first_text_after_rec_ms=%ld "
       "first_audio_after_rec_ms=%ld tool=%s tool_after_rec_ms=%ld tool_roundtrip_ms=%ld "
       "response_done_after_rec_ms=%ld playback_done_after_rec_ms=%ld rec_ms=%ld sent_bytes=%u upload_kbps=%u "
       "reply_audio_bytes=%u reply_audio_ms=%u pauses=%u heard_chars=%ld mic_peak_dbfs=%.1f mic_rms_dbfs=%.1f "
-      "clipped=%u chunk_max_ms=%u chunk_avg_ms=%u heap_free=%u heap_lowest=%u heap_largest=%u rssi=%d",
+      "clipped=%u chunk_max_ms=%u chunk_avg_ms=%u heap_free=%u heap_lowest=%u heap_largest=%u rssi=%d "
+      "mode=%s preroll_ms=%ld speech_ms=%ld eos_to_commit_ms=%ld fifo_max_ms=%ld dropped_ms=%ld mic_gap_max_ms=%ld",
       (unsigned)turn.listen_number, passed ? "pass" : "fail", msAfterRecording(TurnEvent::kFirstServerEvent),
       msAfterRecording(TurnEvent::kHeardTranscript), msAfterRecording(TurnEvent::kFirstTranscript),
       msAfterRecording(TurnEvent::kFirstAudio), turn.tool_name, msAfterRecording(TurnEvent::kToolCall),
@@ -174,7 +201,11 @@ void reportTurn(bool passed) {
       (long)turn.heard_chars, toDbfs(turn.peak_abs_sample), toDbfs(turn.rms_sample),
       (unsigned)turn.clipped_samples, (unsigned)turn.chunk_max_ms, (unsigned)turn.chunk_avg_ms,
       (unsigned)esp32va_heap::freeHeapBytes(), (unsigned)esp32va_heap::lowestFreeHeapSinceBootBytes(),
-      (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_8BIT), (int)WiFi.RSSI());
+      (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_8BIT), (int)WiFi.RSSI(), listen_mode,
+      turn.listen_stats_set ? turn.pre_roll_ms : unset, turn.listen_stats_set ? turn.speech_ms : unset,
+      turn.listen_stats_set ? turn.end_of_speech_to_commit_ms : unset,
+      turn.listen_stats_set ? turn.fifo_max_ms : unset, turn.listen_stats_set ? turn.dropped_ms : unset,
+      turn.listen_stats_set ? turn.mic_gap_max_ms : unset);
 }
 
 }  // namespace esp32va_measure

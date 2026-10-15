@@ -13,8 +13,9 @@
 //       stage: sd | mic | speaker | wifi | time | openai - one per startup
 //       check. detail is free text to the end of the line.
 //   @@STATE <state> [detail]
-//       state: booting | ready | listening | processing | tool | speaking |
-//              saving | reconnecting | halted - what the assistant is doing.
+//       state: booting | ready | armed | listening | processing | tool |
+//              speaking | saving | reconnecting | halted - what the
+//              assistant is doing (armed: hands-free, waiting for speech).
 //   @@RESULT <pass|fail> <LISTEN number> [reason]   - a LISTEN cycle's verdict
 //   @@MIC_LEVEL <dBFS>       - the mic's level, every ~100 ms while listening
 //   @@HEARD <text>           - what the user said (input transcription)
@@ -23,7 +24,8 @@
 //
 // Other modules add their own state lines the same way (@@LED, @@VOLUME in
 // device_controls_utils.h, @@LIGHT in light_sensor_utils.h, @@BOOT_TIMING /
-// @@TIMING in measurement_utils.h, @@HEAP in heap_diagnostics_utils.h). The STATUS
+// @@TIMING in measurement_utils.h, @@HEAP in heap_diagnostics_utils.h, @@VAD /
+// @@VAD_LEVEL / @@VAD_EVENT in hands_free_utils.h). The STATUS
 // serial command reprints all of them, so an app that connects mid-session
 // gets the full picture.
 
@@ -39,6 +41,7 @@ enum class StageState : uint8_t { kPending, kActive, kOk, kFail };
 enum class PipelineState : uint8_t {
   kBooting,
   kReady,
+  kArmed,  // hands-free (step 30): listening for speech to start
   kListening,
   kProcessing,
   kTool,
@@ -69,10 +72,14 @@ void printProtocolLine(const char* format, ...) __attribute__((format(printf, 1,
 void reportTextLine(const char* tag, const char* text);
 
 /** Tells this module a raw, not-yet-terminated line is being printed (the
-    streamed transcript) - true when it starts, false once it ends with a
-    newline. While one is open, every @@ line first ends it with a newline,
-    since the app only reads "@@" at the very start of a line. */
+    streamed transcript) - true after each piece of it, false once it ends
+    with a newline. While one is open, every @@ line first ends it with a
+    newline, since the app only reads "@@" at the very start of a line. */
 void setRawLineOpen(bool open);
+
+/** Ends the raw line with a newline if one is open - for the end of the
+    streamed transcript, or other text that must start on a line of its own. */
+void endRawLine();
 
 /** Prints every startup check's last @@STAGE line and the current @@STATE
     again - the board's half of the STATUS command. */

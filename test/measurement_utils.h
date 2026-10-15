@@ -66,6 +66,21 @@ void beginTurn(uint32_t listen_number);
 /** Stamps a turn event with millis(), the first time only. */
 void markTurnEvent(TurnEvent event);
 
+/** How a LISTEN's recording started - @@TIMING's mode key (step 30). */
+enum class ListenMode : uint8_t {
+  kManual,  // the LISTEN command / Talk button: a fixed-length recording
+  kVoice,   // hands-free: started and ended by the voice activity detector
+};
+
+/** Records how step 30's mic task captured this LISTEN: what started it,
+    the pre-roll (audio from before the start was confirmed), the speech in
+    it and the time from its end to the commit (-1 when not known, e.g. a
+    manual LISTEN), the furthest loop() fell behind the mic, audio dropped
+    because it fell further than the ring holds, and the longest gap
+    between two of the mic task's reads. */
+void setListenStats(ListenMode mode, uint32_t pre_roll_ms, long speech_ms, long end_of_speech_to_commit_ms,
+                    uint32_t fifo_max_ms, uint32_t dropped_ms, uint32_t mic_gap_max_ms);
+
 /** Records how the recording went: total JSON bytes sent and the time spent
     inside sendTXT() for them, the gained mic level (peak and RMS as raw
     sample values, the count of full-scale samples), and the slowest /
@@ -93,7 +108,9 @@ void setToolName(const char* tool_name);
     upload_kbps (sent_bytes over time spent sending), reply_audio_bytes (mu-law
     bytes = 1/8000 s each), reply_audio_ms, pauses, heard_chars, mic_peak_dbfs,
     mic_rms_dbfs, clipped, chunk_max_ms, chunk_avg_ms, heap_free, heap_lowest,
-    heap_largest, rssi. */
+    heap_largest, rssi, then step 30's mode (vad | manual, "-" if unset),
+    preroll_ms, speech_ms, eos_to_commit_ms, fifo_max_ms, dropped_ms,
+    mic_gap_max_ms (-1 if unset). */
 void reportTurn(bool passed);
 
 }  // namespace esp32va_measure

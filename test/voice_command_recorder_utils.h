@@ -13,7 +13,10 @@
 //
 // Written chunk by chunk from the LISTEN capture loop (loop() context) with
 // POSIX calls, like the reply recorder. No audio buffer of its own: each
-// chunk is packed into the caller's raw I2S buffer in place.
+// chunk is packed into the caller's raw I2S buffer in place - or, from step
+// 30 on, written straight from the 16-bit samples mic_capture_utils.h hands
+// out (appendMicSamples()). A hands-free utterance that turns out not to be
+// speech is deleted again (cancelVoiceCommand()).
 
 namespace esp32va_command_recorder {
 
@@ -39,6 +42,16 @@ void beginVoiceCommand();
     samples (the same conversion, minus the gain) in place, so its contents
     are destroyed. Does nothing if no file is open. */
 void appendMicChunk(int32_t* raw_i2s_words, uint32_t sample_count);
+
+/** Appends mic samples that are already the mic's own 16-bit values (step
+    30's mic task delivers them that way). Does nothing if no file is open. */
+void appendMicSamples(const int16_t* samples, uint32_t sample_count);
+
+/** Deletes the file begun by beginVoiceCommand() and gives its number back,
+    so the next recording reuses it - for a hands-free utterance discarded
+    as not-speech. Nothing is announced: the laptop app only hears about
+    finished recordings. */
+void cancelVoiceCommand();
 
 /** Closes this LISTEN's file, logs it, and trims the folder to
     kMaxKeptRecordings. Returns false if nothing was recorded (no file);
