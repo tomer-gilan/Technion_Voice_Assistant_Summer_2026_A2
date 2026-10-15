@@ -48,6 +48,8 @@ uint32_t ring_write_index = 0;
 uint32_t ring_read_index = 0;
 uint32_t ring_used_bytes = 0;
 
+bool ring_lent_to_mic = false;  // see lendRingToMic()
+
 bool recording_tap_active = false;
 uint32_t recording_tap_read_index = 0;
 uint32_t recording_tap_pending_bytes = 0;
@@ -75,16 +77,31 @@ uint8_t decode_scratch[kDecodeOutputBufBytes];
 uint8_t tx_mulaw_bytes[kTxDrainMuLawBytes];
 int32_t tx_i2s_words[kTxDrainMuLawBytes * kOutputUpsampleFactor];
 
-/** ITU-T G.711 mu-law sample -> linear PCM16. The classic public-domain
-    bit-manipulation decode (not a lookup table). */
-int16_t ulawToLinearPcm16(uint8_t ulaw_sample) {
-  constexpr int kBias = 0x84;
-  uint8_t inverted = ~ulaw_sample;
-  int magnitude = ((inverted & 0x0F) << 3) + kBias;
-  magnitude <<= (inverted & 0x70) >> 4;
-  return static_cast<int16_t>((inverted & 0x80) ? (kBias - magnitude) : (magnitude - kBias));
-}
+constexpr int kUlawBias = 0x84;
+constexpr int kUlawClip = 32635;  // the largest magnitude mu-law encodes; louder is clipped to it
 }  // namespace
+
+uint8_t linearPcm16ToUlaw(int16_t sample) {
+  int sign = sample < 0 ? 0x80 : 0;
+  int magnitude = sample < 0 ? -static_cast<int>(sample) : sample;
+  if (magnitude > kUlawClip) {
+    magnitude = kUlawClip;
+  }
+  magnitude += kUlawBias;
+  int exponent = 7;
+  for (int mask = 0x4000; (magnitude & mask) == 0 && exponent > 0; mask >>= 1) {
+    exponent--;
+  }
+  int mantissa = (magnitude >> (exponent + 3)) & 0x0F;
+  return static_cast<uint8_t>(~(sign | (exponent << 4) | mantissa));
+}
+
+int16_t ulawToLinearPcm16(uint8_t ulaw_sample) {
+  uint8_t inverted = ~ulaw_sample;
+  int magnitude = ((inverted & 0x0F) << 3) + kUlawBias;
+  magnitude <<= (inverted & 0x70) >> 4;
+  return static_cast<int16_t>((inverted & 0x80) ? (kUlawBias - magnitude) : (magnitude - kUlawBias));
+}
 
 void setupI2sFullDuplex() {
   i2s_config_t i2s_config = {
@@ -205,6 +222,19 @@ uint32_t readMicChunkGained(int32_t* raw_scratch, int16_t* pcm_out, uint32_t max
   return samples_read;
 }
 
+void readMicSamples(int32_t* raw_scratch, int16_t* samples_out, uint32_t sample_count) {
+  size_t bytes_read = 0;
+  i2s_read(kI2sPort, raw_scratch, sample_count * sizeof(int32_t), &bytes_read, portMAX_DELAY);
+  uint32_t samples_read = bytes_read / sizeof(int32_t);
+  for (uint32_t i = 0; i < samples_read; i++) {
+    samples_out[i] = static_cast<int16_t>(raw_scratch[i] >> 16);
+  }
+  // portMAX_DELAY returns only once all of it arrived - this is just in case.
+  for (uint32_t i = samples_read; i < sample_count; i++) {
+    samples_out[i] = 0;
+  }
+}
+
 void initPlaybackRingBuffer() {
   ring_buffer = static_cast<uint8_t*>(malloc(kRingBufferBytes));
   if (ring_buffer == nullptr) {
@@ -294,6 +324,11 @@ uint32_t ringRead(uint8_t* out, uint32_t max_len) {
 }  // namespace
 
 void decodeAndRingAudioDelta(const uint8_t* b64_data, size_t b64_len) {
+  if (ring_lent_to_mic) {
+    LOG_ERROR("Reply audio arrived while the mic was listening - dropped %u base64 characters of it.\n",
+              (unsigned)b64_len);
+    return;
+  }
   size_t offset = 0;
   while (offset < b64_len) {
     size_t take = min((size_t)kDecodeInputChars, b64_len - offset);
@@ -333,4 +368,28 @@ bool ringShouldPauseReads(bool currently_paused) {
     return ringFreeBytes() <= kRingResumeThresholdBytes;
   }
   return ringFreeBytes() < kRingPauseThresholdBytes;
+}
+
+uint8_t* lendRingToMic(uint32_t* capacity_samples) {
+  if (ring_buffer == nullptr || ring_used_bytes > 0 || recording_tap_active) {
+    return nullptr;
+  }
+  if (!ring_lent_to_mic) {
+    resetRingBuffer();
+    ring_lent_to_mic = true;
+  }
+  *capacity_samples = kRingBufferBytes;  // one mu-law byte per sample
+  return ring_buffer;
+}
+
+void returnRingFromMic() {
+  if (!ring_lent_to_mic) {
+    return;
+  }
+  ring_lent_to_mic = false;
+  resetRingBuffer();  // the mic's samples aren't audio to play
+}
+
+bool isRingLentToMic() {
+  return ring_lent_to_mic;
 }

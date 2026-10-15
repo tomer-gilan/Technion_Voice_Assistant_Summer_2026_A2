@@ -32,11 +32,18 @@ void setupI2sFullDuplex();
 uint32_t readMicChunkGained(int32_t* raw_scratch, int16_t* pcm_out, uint32_t max_samples, int32_t gain,
                              int16_t* level_min, int16_t* level_max, double* level_sum_of_squares);
 
+/** Reads exactly sample_count mic samples, blocking until they've all
+    arrived, as the mic's own 16-bit values (the I2S word >> 16, no gain) -
+    for step 30's mic task (mic_capture_utils.h). raw_scratch must hold
+    sample_count words. */
+void readMicSamples(int32_t* raw_scratch, int16_t* samples_out, uint32_t sample_count);
+
 /** Startup mic check (step 28): reads ~0.4 s from the mic and checks it
     isn't stuck at one value, as it is with no mic answering. Writes a short
     human-readable result into detail_out either way. Returns true if the mic
     looks alive. Only tells "sending audio" from "not" - a floating data line
-    might still pass. Call once from setup(), after setupI2sFullDuplex(). */
+    might still pass. Call once from setup(), after setupI2sFullDuplex() -
+    and before mic_capture_utils.h's task starts reading the mic. */
 bool checkMicrophoneSignal(char* detail_out, size_t detail_size);
 
 /** Sets the speaker volume, 0-100% (anything higher counts as 100%), or
@@ -107,8 +114,9 @@ uint32_t ringReadRecordingTap(uint8_t* out, uint32_t max_len);
     fixed-size aligned slices, writing the raw mu-law bytes straight into the
     ring buffer - decode-to-PCM and upsampling happen later, at drain time.
     Drops (and logs) a slice that doesn't fit in the ring rather than
-    blocking or overwriting unread data. Never allocates proportionally to
-    b64_len (see PROJECT_OVERVIEW.md "Audio blew the heap, again"). */
+    blocking or overwriting unread data, and the whole span while the ring
+    is lent to the mic (below). Never allocates proportionally to b64_len
+    (see PROJECT_OVERVIEW.md "Audio blew the heap, again"). */
 void decodeAndRingAudioDelta(const uint8_t* b64_data, size_t b64_len);
 
 /** Drains a small, fixed amount of raw mu-law audio from the ring buffer (if
@@ -130,3 +138,36 @@ void drainRingBufferToSpeaker();
     playback speed (see PROJECT_OVERVIEW.md "Backpressure, not a bigger
     buffer"). */
 bool ringShouldPauseReads(bool currently_paused);
+
+// ----- Lending the ring to the mic (step 30) -----
+// While nothing plays, the ring's memory sits unused - and hands-free
+// listening needs a pre-roll and a FIFO for the mic (mic_capture_utils.h),
+// which the heap has no room for besides. So the ring is lent out, holding
+// the mic's 24 kHz samples as mu-law bytes like the replies (one byte each,
+// not two): ~1.36 s of them. Half-duplex keeps that safe - nothing may play
+// while the mic has it, and a reply only starts arriving after the capture
+// ended and the ring came back.
+
+/** Lends the ring to the mic: returns its memory, and how many mu-law
+    samples it holds in *capacity_samples, when it's empty and the recording
+    tap is off - nothing playing or being saved. Otherwise nullptr (the ring
+    stays as it is). While lent, playback has nothing to play and incoming
+    reply audio is dropped (logged). */
+uint8_t* lendRingToMic(uint32_t* capacity_samples);
+
+/** Takes the ring back from the mic, empty, for playback. The caller must
+    be sure the mic no longer writes into it. A no-op if it isn't lent. */
+void returnRingFromMic();
+
+/** Whether the ring is lent to the mic right now. */
+bool isRingLentToMic();
+
+// ----- G.711 mu-law -----
+
+/** One 16-bit PCM sample as its 8-bit mu-law code (the classic G.711
+    encode, matching ulawToLinearPcm16()). */
+uint8_t linearPcm16ToUlaw(int16_t sample);
+
+/** One 8-bit mu-law code as a 16-bit PCM sample (the classic public-domain
+    G.711 decode). */
+int16_t ulawToLinearPcm16(uint8_t ulaw_sample);
