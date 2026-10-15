@@ -11,7 +11,7 @@ namespace {
 
 constexpr size_t kStageCount = static_cast<size_t>(Stage::kCount);
 constexpr size_t kDetailBufferSize = 72;  // e.g. "SDHC 7580 MB, self-test passed" - room to spare
-constexpr size_t kProtocolLineBufferSize = 128;  // the longest is a @@STAGE line with a full detail
+constexpr size_t kProtocolLineBufferSize = 768;  // the longest is step 29's @@TIMING line (~700 chars at worst)
 
 struct StageRecord {
   StageState state;

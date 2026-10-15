@@ -28,7 +28,9 @@ uint32_t freeHeapBytes();
 uint32_t lowestFreeHeapSinceBootBytes();
 
 /** Records a labelled snapshot (free, largest free block, low-water mark)
-    for logHeapSummary(), logs it at DEBUG, and returns its free-heap figure.
+    for logHeapSummary(), logs it at DEBUG, prints it as an always-on
+    "@@HEAP free=.. largest=.. lowest=.. stage=<label>" line (step 29), and
+    returns its free-heap figure.
     `label` must be a string literal - it's stored by pointer, not copied.
     Once the snapshot table is full, further snapshots are logged at ERROR
     and left out of the summary. */

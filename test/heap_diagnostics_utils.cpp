@@ -3,6 +3,7 @@
 #include <Arduino.h>
 #include <esp_heap_caps.h>
 #include "log_utils.h"
+#include "status_report_utils.h"
 
 namespace esp32va_heap {
 
@@ -65,6 +66,10 @@ uint32_t recordHeapSnapshot(const char* label) {
             "failed allocations so far %u.\n",
             label, (unsigned)snapshot.free_bytes, (unsigned)snapshot.largest_free_block_bytes,
             (unsigned)snapshot.lowest_free_since_boot_bytes, (unsigned)failed_allocation_count);
+  // Machine-readable twin of the line above, for tools/measurements_report.py (step 29).
+  esp32va_status::printProtocolLine("@@HEAP free=%u largest=%u lowest=%u stage=%s", (unsigned)snapshot.free_bytes,
+                                    (unsigned)snapshot.largest_free_block_bytes,
+                                    (unsigned)snapshot.lowest_free_since_boot_bytes, label);
   if (snapshot_count < kMaxSnapshots) {
     snapshots[snapshot_count++] = snapshot;
   } else {

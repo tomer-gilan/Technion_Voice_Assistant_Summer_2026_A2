@@ -106,6 +106,9 @@ or left inline in `test.ino`:
   `LED_BRIGHTNESS` Serial commands.
 - `settings_store_utils.h`/`.cpp` — settings kept across reboots in NVS flash
   (volume, mute, LED brightness, light thresholds).
+- `measurement_utils.h`/`.cpp` — the `@@BOOT_TIMING` / `@@TIMING` measurement
+  lines (startup stage durations; per-LISTEN latencies, sizes, mic levels,
+  heap), read back by `tools/measurements_report.py`.
 
 `test.ino` itself should keep only what's actually under test: Wi-Fi/session
 wiring, the LISTEN cycle's mechanics, the server-event-driven state machine,
@@ -296,6 +299,14 @@ Serial): board health and the assistant's live state, a Talk button, speaker
 with its own log saving. It reads only `@@` lines for status - so anything
 the app shows must have a matching `@@` line in the firmware, printed
 whatever the log level. Like the logger, it holds the COM port exclusively.
+
+**`tools/measurements_report.py`**: turns the `@@BOOT_TIMING` / `@@TIMING` /
+`@@HEAP` lines in one or more saved logs into `boot_timing.csv`,
+`timing.csv`, `heap.csv` and a `summary.md` (median / min / max / p90 per
+field), in a `measurements/` folder next to the first log:
+```
+python tools/measurements_report.py tools/esp32_log_<timestamp>.txt [more logs...]
+```
 
 ### "Read log"
 When Tomer says "read log" (or similar - "read the log", "check the log")

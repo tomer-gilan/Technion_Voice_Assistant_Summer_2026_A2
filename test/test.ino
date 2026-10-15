@@ -1,38 +1,37 @@
-// Step 28 - Control center: board status and device controls for the laptop app
-// Builds directly on step 27 (test/27_voice_command_recording.ino.inactive),
-// whose LISTEN cycle, reply/voice-command recording and file transfer are
-// unchanged. Adds, for the redesigned tools/reply_audio_app.html:
-// - Status lines (status_report_utils.h), always printed whatever the log
-//   level: @@STAGE for each startup check (SD card, microphone, speaker,
-//   Wi-Fi, time sync, OpenAI), @@STATE for what the assistant is doing
-//   (booting / ready / listening / processing / tool / speaking / saving /
-//   reconnecting / halted), @@RESULT per LISTEN, @@MIC_LEVEL while
-//   listening, @@HEARD / @@SAID transcripts, @@WIFI signal strength. The
-//   STATUS command reprints the whole picture for an app that connects late.
-// - A real mic check at startup (checkMicrophoneSignal()): ~0.4 s of audio
-//   must not be stuck at one value.
-// - Device controls (device_controls_utils.h): VOLUME / MUTE (software
-//   volume - the MAX98357A has no volume control of its own), BEEP to check
-//   the speaker by ear, LED on/off and LED_BRIGHTNESS (the LED is now PWM
-//   dimmed), LIGHT_BANDS for the light sensor's day/evening thresholds.
-//   Volume, mute, brightness and thresholds survive a reboot (NVS flash,
-//   settings_store_utils.h). A spoken "turn on the light" now announces
-//   @@LED ... voice, so the app's switch follows it.
-// - Time sync now says so every 15 s while it's still waiting, instead of
-//   printing dots forever.
+// Step 29 - Measurements for the presentation: timing, levels and heap per LISTEN
+// Builds directly on step 28 (test/28_control_center.ino.inactive), whose
+// LISTEN cycle, status lines, device controls, recordings and file transfer
+// are unchanged. Adds measurement_utils.h, which only reads millis() and
+// counts what the sketch already handles - no behavior change:
+// - @@BOOT_TIMING once, on the first session.updated: how long each startup
+//   stage took (hardware, SD, Wi-Fi, time sync, TLS + WebSocket connect,
+//   session setup), plus heap and Wi-Fi signal at that point.
+// - @@TIMING once per LISTEN, right after its verdict: time from the end of
+//   recording to the first server message, the input transcript, the first
+//   reply text and audio, the tool call (and its round trip), response.done
+//   and the end of playback; plus bytes sent and upload speed, reply audio
+//   length, backpressure pauses, mic peak/RMS in dBFS and clipped samples,
+//   chunk handling time, heap and Wi-Fi signal.
+// - @@HEAP at every heap snapshot (heap_diagnostics_utils), so the per-stage
+//   heap table is machine-readable too.
+// tools/measurements_report.py turns a saved log into a CSV and a summary
+// (median / min / max per key).
 //
-// PASS criterion: "===== CONTROL CENTER PASSED =====" prints once, when the
-// first LISTEN passes with every startup check ok (heap summary included);
-// it FAILS instead if a startup check failed (e.g. the mic check). In the
-// laptop app: all six status lights turn green, Talk runs a LISTEN and the
-// big indicator goes Listening -> Processing -> Speaking -> Ready, and saying
-// "turn on the light" flips the LED switch by itself.
+// PASS criterion: "===== MEASUREMENTS PASSED =====" prints once, when the
+// first LISTEN passes with every startup check ok - after one @@BOOT_TIMING
+// line and that LISTEN's @@TIMING line, both with no -1 in the fields that
+// must have happened (every *_ms in @@BOOT_TIMING; first_event, first_audio,
+// response_done and playback_done in @@TIMING). It FAILS instead if a startup
+// check failed. Then run tools/measurements_report.py on the saved log.
 //
-// Unchanged from step 27: every LISTEN's mic audio is saved as
+// Unchanged from step 28: @@STAGE / @@STATE / @@RESULT / @@MIC_LEVEL /
+// @@HEARD / @@SAID / @@WIFI status lines and the STATUS command for the
+// laptop app; VOLUME / MUTE / BEEP / LED / LED_BRIGHTNESS / LIGHT_BANDS
+// controls kept across reboots; every LISTEN's mic audio saved as
 // /voice_commands/command_NNNN.pcm and every reply as /replies/reply_NNNN.ulaw
-// (newest 5 of each), with LIST / GET / DELETE / DELETE_ALL for the laptop
-// app, refused with @@BUSY while a reply is in progress, playing or being
-// saved. Serial stays at 115200 baud.
+// (newest 5 of each), with LIST / GET / DELETE / DELETE_ALL, refused with
+// @@BUSY while a reply is in progress, playing or being saved. Serial stays
+// at 115200 baud.
 
 #include <WebSocketsClient.h>
 #include <ArduinoJson.h>
@@ -55,6 +54,7 @@
 #include "voice_command_recorder_utils.h"
 #include "status_report_utils.h"
 #include "device_controls_utils.h"
+#include "measurement_utils.h"
 
 namespace {
 // Unchanged from step 21 except for the get_time_of_day tool and its
@@ -125,10 +125,10 @@ void reportStepVerdict(bool passed, const char* failure_reason) {
   esp32va_heap::recordHeapSnapshot("at verdict");
   esp32va_heap::logHeapSummary();
   if (passed) {
-    Serial.println("===== CONTROL CENTER PASSED =====");
-    Serial.println("Check the laptop app: six green status lights, and the LED switch follows a spoken request.");
+    Serial.println("===== MEASUREMENTS PASSED =====");
+    Serial.println("Check the @@BOOT_TIMING and @@TIMING lines above, then keep running LISTEN cycles to collect more.");
   } else {
-    Serial.printf("===== CONTROL CENTER FAILED: %s =====\n", failure_reason);
+    Serial.printf("===== MEASUREMENTS FAILED: %s =====\n", failure_reason);
   }
 }
 
@@ -173,6 +173,7 @@ void markReplyReceived() {
   Serial.printf("===== LISTEN #%u PASSED =====\n", listen_cycle);
   Serial.println("Type LISTEN to continue the conversation.");
   esp32va_status::printProtocolLine("@@RESULT pass %u", listen_cycle);
+  esp32va_measure::reportTurn(true);
   const char* failed_check = firstFailedStartupCheck();
   reportStepVerdict(failed_check == nullptr, failed_check);
 }
@@ -187,6 +188,7 @@ void markReplyFailed(const char* reason) {
   awaiting_reply = false;
   Serial.printf("===== LISTEN #%u FAILED: %s =====\n", listen_cycle, reason);
   esp32va_status::printProtocolLine("@@RESULT fail %u %s", listen_cycle, reason);
+  esp32va_measure::reportTurn(false);
   if (session_ready) {
     Serial.println("Type LISTEN to try again.");
   }
@@ -213,6 +215,7 @@ void handleServerMessage(uint8_t* payload, size_t length) {
   // step 16's "reply timeout fired mid-reply" discovery.
   if (awaiting_reply) {
     last_reply_activity_ms = millis();
+    esp32va_measure::markTurnEvent(esp32va_measure::TurnEvent::kFirstServerEvent);
   }
 
   char type_buf[48];
@@ -224,6 +227,10 @@ void handleServerMessage(uint8_t* payload, size_t length) {
     if (findRawStringField(payload, length, "delta", &value_start, &value_len)) {
       esp32va_reply_recorder::noteReplyAudioArriving();  // before the ring write, so the tap catches it
       speech_in_progress = true;
+      if (awaiting_reply) {
+        esp32va_measure::markTurnEvent(esp32va_measure::TurnEvent::kFirstAudio);
+        esp32va_measure::addReplyAudio(value_len);
+      }
       decodeAndRingAudioDelta(value_start, value_len);
     } else {
       LOG_ERROR("Audio delta missing 'delta' field.\n");
@@ -270,6 +277,8 @@ void handleServerMessage(uint8_t* payload, size_t length) {
       // should_send_session_update below (sendTXT() from inside this
       // callback can deadlock the library).
       should_send_opening_greeting = true;
+      esp32va_measure::markBootMilestone(esp32va_measure::BootMilestone::kSessionReady);
+      esp32va_measure::reportBootTiming();
       // A later mid-conversation disconnect gets its own fresh attempt
       // budget, rather than one shared with however many retries startup
       // itself needed.
@@ -299,6 +308,8 @@ void handleServerMessage(uint8_t* payload, size_t length) {
               function_name, (const char*)(doc["arguments"] | "{}"));
     bool handled = false;
     snprintf(active_tool_name, sizeof(active_tool_name), "%s", function_name);
+    esp32va_measure::markTurnEvent(esp32va_measure::TurnEvent::kToolCall);
+    esp32va_measure::setToolName(function_name);
     if (strcmp(function_name, "set_board_state") == 0) {
       handled = handleSetBoardStateCall(doc, webSocket);
     } else if (strcmp(function_name, "get_time_of_day") == 0) {
@@ -316,6 +327,9 @@ void handleServerMessage(uint8_t* payload, size_t length) {
     // Raw streamed content (the model's own spoken-reply transcript) - always
     // printed, never gated behind a log level. See log_utils.h.
     const char* delta = doc["delta"] | "";
+    if (awaiting_reply) {
+      esp32va_measure::markTurnEvent(esp32va_measure::TurnEvent::kFirstTranscript);
+    }
     if (!transcript_in_progress) {
       transcript_in_progress = true;
       Serial.print("Streaming transcript: ");
@@ -350,6 +364,8 @@ void handleServerMessage(uint8_t* payload, size_t length) {
     // LISTEN cycle's verdict, which depends only on the spoken reply.
     const char* transcript = doc["transcript"] | (const char*)nullptr;
     Serial.printf("You said: \"%s\"\n", transcript != nullptr ? transcript : "(none)");
+    esp32va_measure::markTurnEvent(esp32va_measure::TurnEvent::kHeardTranscript);
+    esp32va_measure::setHeardLength(transcript != nullptr ? strlen(transcript) : 0);
     if (transcript != nullptr) {
       esp32va_status::reportTextLine("HEARD", transcript);  // the app's chat bubble
     }
@@ -378,6 +394,7 @@ void handleServerMessage(uint8_t* payload, size_t length) {
       // in handleSetBoardStateCall(). The *next* response.done is the
       // model's real spoken confirmation, which does count as the reply.
       function_call_turn_pending = false;
+      esp32va_measure::markTurnEvent(esp32va_measure::TurnEvent::kToolResponseDone);
       LOG_INFO("Function call done - waiting for spoken confirmation.\n");
     } else {
       // The PASS verdict itself waits for the ring buffer to actually finish
@@ -386,6 +403,9 @@ void handleServerMessage(uint8_t* payload, size_t length) {
       // since awaiting_reply is false then, so checkPlaybackComplete() stays
       // a no-op until the next real LISTEN cycle resets this flag anyway.)
       response_fully_received = true;
+      if (awaiting_reply) {
+        esp32va_measure::markTurnEvent(esp32va_measure::TurnEvent::kResponseDone);
+      }
     }
     return;
   }
@@ -407,6 +427,7 @@ void onWebSocketEvent(WStype_t type, uint8_t* payload, size_t length) {
   switch (type) {
     case WStype_CONNECTED:
       connection_count++;
+      esp32va_measure::markBootMilestone(esp32va_measure::BootMilestone::kSocketConnected);  // first connect only
       LOG_INFO("Connected (#%u).\n", connection_count);
       session_ready = false;
       esp32va_status::reportStage(esp32va_status::Stage::kOpenAi, esp32va_status::StageState::kActive,
@@ -454,18 +475,24 @@ void onWebSocketEvent(WStype_t type, uint8_t* payload, size_t length) {
 }
 
 /** Prints "@@MIC_LEVEL <dBFS>" for one chunk of (gained) mic audio - the
-    level OpenAI hears - for the laptop app's live meter. */
-void reportChunkMicLevel(const int16_t* samples, uint32_t count) {
+    level OpenAI hears - for the laptop app's live meter. Returns how many of
+    its samples sit at full scale (clipped by the gain), for @@TIMING. */
+uint32_t reportChunkMicLevel(const int16_t* samples, uint32_t count) {
   if (count == 0) {
-    return;
+    return 0;
   }
   double sum_of_squares = 0.0;
+  uint32_t clipped_samples = 0;
   for (uint32_t i = 0; i < count; i++) {
     sum_of_squares += static_cast<double>(samples[i]) * samples[i];
+    if (samples[i] == INT16_MAX || samples[i] == INT16_MIN) {
+      clipped_samples++;
+    }
   }
   double rms = sqrt(sum_of_squares / count);
   int level_dbfs = rms >= 1.0 ? static_cast<int>(lround(20.0 * log10(rms / 32768.0))) : -96;
   esp32va_status::printProtocolLine("@@MIC_LEVEL %d", level_dbfs);
+  return clipped_samples;
 }
 
 /** Records kRecordDurationSec of mic audio, streaming each ~100ms chunk to the
@@ -478,6 +505,7 @@ void reportChunkMicLevel(const int16_t* samples, uint32_t count) {
     step 15). */
 void captureAndStreamAudio() {
   listen_cycle++;
+  esp32va_measure::beginTurn(listen_cycle);
   is_capturing = true;
   awaiting_reply = false;
   reply_received_this_cycle = false;
@@ -498,6 +526,9 @@ void captureAndStreamAudio() {
   uint32_t chunks_read = 0;
   unsigned long slowest_chunk_handling_ms = 0;
   unsigned long total_chunk_handling_ms = 0;
+  uint32_t sent_json_bytes = 0;
+  unsigned long total_send_ms = 0;
+  uint32_t clipped_samples = 0;
 
   // Independent of whether the model replies, this tells us whether real
   // audio was actually captured - separates "mic/gain problem" from "server
@@ -512,17 +543,20 @@ void captureAndStreamAudio() {
                                                 &level_min, &level_max, &level_sum_of_squares);
     // From here until the next read, the mic keeps filling its buffer.
     unsigned long handling_started_ms = millis();
-    reportChunkMicLevel(pcm_chunk, samples_read);
+    clipped_samples += reportChunkMicLevel(pcm_chunk, samples_read);
 
     size_t base64_len = 0;
     int b64_result = mbedtls_base64_encode(base64_chunk, sizeof(base64_chunk), &base64_len,
                                             reinterpret_cast<const unsigned char*>(pcm_chunk),
                                             samples_read * sizeof(int16_t));
     if (b64_result == 0) {
-      snprintf(json_message, kJsonMessageBufferSize,
-               R"JSON({"type":"input_audio_buffer.append","audio":"%.*s"})JSON",
-               (int)base64_len, base64_chunk);
+      int json_len = snprintf(json_message, kJsonMessageBufferSize,
+                              R"JSON({"type":"input_audio_buffer.append","audio":"%.*s"})JSON",
+                              (int)base64_len, base64_chunk);
+      unsigned long send_started_ms = millis();
       webSocket.sendTXT(json_message);
+      total_send_ms += millis() - send_started_ms;
+      sent_json_bytes += json_len > 0 ? static_cast<uint32_t>(json_len) : 0;
       chunks_sent++;
     } else {
       LOG_ERROR("base64 encode failed (code %d) - skipping this chunk.\n", b64_result);
@@ -538,6 +572,7 @@ void captureAndStreamAudio() {
 
   webSocket.sendTXT(kCommitMessage);
   webSocket.sendTXT(kResponseCreateMessage);
+  esp32va_measure::markTurnEvent(esp32va_measure::TurnEvent::kRecordingDone);
   double level_rms = sqrt(level_sum_of_squares / samples_sent);
   Serial.printf("Done streaming - waiting for reply...\n");
   LOG_DEBUG("Done streaming (%u chunks). Mic level: min=%d max=%d rms=%.1f\n",
@@ -550,6 +585,11 @@ void captureAndStreamAudio() {
   uint32_t mic_buffer_ms = micBufferCapacityMs();
   LOG_INFO("Mic timing: handling a %u ms chunk took %lu ms at most, %lu ms on average (the mic buffer holds %u ms).\n",
            (unsigned)kChunkMs, slowest_chunk_handling_ms, average_chunk_handling_ms, (unsigned)mic_buffer_ms);
+  int32_t negative_peak = -static_cast<int32_t>(level_min);
+  int32_t positive_peak = static_cast<int32_t>(level_max);
+  int32_t peak_abs_sample = negative_peak > positive_peak ? negative_peak : positive_peak;
+  esp32va_measure::setCaptureStats(sent_json_bytes, total_send_ms, peak_abs_sample, level_rms, clipped_samples,
+                                   slowest_chunk_handling_ms, average_chunk_handling_ms);
   if (slowest_chunk_handling_ms >= mic_buffer_ms || average_chunk_handling_ms >= kChunkMs) {
     LOG_ERROR("Mic audio was probably dropped this LISTEN - handling couldn't keep up with the mic.\n");
   }
@@ -668,6 +708,7 @@ void checkPlaybackComplete() {
   if (ringUsedBytes() > 0) {
     return;  // still playing
   }
+  esp32va_measure::markTurnEvent(esp32va_measure::TurnEvent::kPlaybackDone);
   markReplyReceived();
 }
 
@@ -742,6 +783,7 @@ void setup() {
                               mic_ok ? esp32va_status::StageState::kOk : esp32va_status::StageState::kFail,
                               stage_detail);
   esp32va_heap::recordHeapSnapshot("after ring buffer + I2S");
+  esp32va_measure::markBootMilestone(esp32va_measure::BootMilestone::kHardwareReady);
 
   esp32va_status::reportStage(esp32va_status::Stage::kSdCard, esp32va_status::StageState::kActive, "mounting");
   bool sd_card_usable = esp32va_sd_card::mountSdCard() && esp32va_sd_card::runSdSelfTest() &&
@@ -762,9 +804,12 @@ void setup() {
   // Now, not on request: loop() - which answers LIST - only starts after
   // Wi-Fi and time sync, 10+ s from here.
   esp32va_sd_transfer::announceRecordingList();
+  esp32va_measure::markBootMilestone(esp32va_measure::BootMilestone::kSdReady);
 
   connectToWifi();
+  esp32va_measure::markBootMilestone(esp32va_measure::BootMilestone::kWifiConnected);
   syncSystemTime();
+  esp32va_measure::markBootMilestone(esp32va_measure::BootMilestone::kTimeSynced);
   esp32va_heap::recordHeapSnapshot("after Wi-Fi + time sync");
 
   Serial.printf("Connecting to OpenAI Realtime API...\n");
@@ -799,6 +844,7 @@ void loop() {
     // concatenated with the "[LEVEL][%s:%d] " prefix at compile time, so a
     // ternary computed fmt won't compile. Two literal calls instead.
     if (should_pause) {
+      esp32va_measure::noteBackpressurePause();
       LOG_DEBUG("Ring buffer nearly full - pausing WebSocket reads until playback and the recorder catch up.\n");
     } else {
       LOG_DEBUG("Ring buffer has room again - resuming WebSocket reads.\n");
