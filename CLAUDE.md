@@ -86,7 +86,8 @@ or left inline in `test.ino`:
 - `openai_realtime_utils.h`/`.cpp` — WSS connection setup, root CA, auth
   header, reconnect backoff, generic WebSocket event logging.
 - `i2s_audio_utils.h`/`.cpp` — full-duplex mic+speaker I2S setup, gained mic
-  reads, the playback ring buffer, mu-law decode.
+  reads, the playback ring buffer (lent to the mic task while it's empty,
+  since step 30), mu-law encode/decode.
 - `realtime_json_utils.h`/`.cpp` — cheap raw-JSON scanning
   (`extractEventType()`/`findRawStringField()`) to avoid a full parse of
   large audio-delta events.
@@ -109,6 +110,18 @@ or left inline in `test.ino`:
 - `measurement_utils.h`/`.cpp` — the `@@BOOT_TIMING` / `@@TIMING` measurement
   lines (startup stage durations; per-LISTEN latencies, sizes, mic levels,
   heap), read back by `tools/measurements_report.py`.
+- `vad_utils.h`/`.cpp` — the voice activity detector behind hands-free
+  listening (speech-band level against an adaptive noise floor, voicing,
+  syllable rhythm). Pure computation, no Arduino: `tools/vad_replay.cpp`
+  compiles the same file on the laptop.
+- `mic_capture_utils.h`/`.cpp` — the FreeRTOS task that reads the mic without
+  pause: feeds the detector, keeps the pre-roll, and queues each capture
+  (mu-law, in the borrowed playback ring) so a slow send delays audio
+  instead of losing it.
+- `hands_free_utils.h`/`.cpp` — hands-free listening on top of those: the
+  `VAD` / `VAD_SENSITIVITY` / `VAD_HANGOVER` commands (kept in NVS), when the
+  mic may listen (the half-duplex cooldown, the pause after repeated
+  noises), and the `@@VAD` / `@@VAD_LEVEL` / `@@VAD_EVENT` lines.
 
 `test.ino` itself should keep only what's actually under test: Wi-Fi/session
 wiring, the LISTEN cycle's mechanics, the server-event-driven state machine,
@@ -294,18 +307,31 @@ policy, so the full `powershell -ExecutionPolicy Bypass -File ...` form is
 the one to reach for.
 
 **`tools/reply_audio_app.html`**: the laptop control center (Chrome/Edge, Web
-Serial): board health and the assistant's live state, a Talk button, speaker
-/ LED / light-sensor controls, the SD card recordings, and a serial terminal
-with its own log saving. It reads only `@@` lines for status - so anything
+Serial): board health and the assistant's live state, a Talk button and the
+hands-free switch (with its voice-level meter and sensitivity / silence
+sliders), speaker / LED / light-sensor controls, the SD card recordings, and
+a serial terminal with its own log saving. It reads only `@@` lines for status - so anything
 the app shows must have a matching `@@` line in the firmware, printed
 whatever the log level. Like the logger, it holds the COM port exclusively.
 
 **`tools/measurements_report.py`**: turns the `@@BOOT_TIMING` / `@@TIMING` /
 `@@HEAP` lines in one or more saved logs into `boot_timing.csv`,
 `timing.csv`, `heap.csv` and a `summary.md` (median / min / max / p90 per
-field), in a `measurements/` folder next to the first log:
+field; hands-free LISTENs in a section of their own), in a `measurements/`
+folder next to the first log:
 ```
 python tools/measurements_report.py tools/esp32_log_<timestamp>.txt [more logs...]
+```
+
+**`tools/vad_replay.cpp`**: replays recordings through the board's own voice
+activity detector (`test/vad_utils.cpp`) on the laptop, showing where
+hands-free listening would start and stop recording - for tuning
+`VAD_SENSITIVITY` / `VAD_HANGOVER` without flashing. Feed it voice commands
+from the SD card (the laptop app's "Download WAV", plain - not gained) or any
+16-bit WAV:
+```
+g++ -std=c++11 -O2 -I test tools/vad_replay.cpp test/vad_utils.cpp -o vad_replay
+vad_replay --sensitivity 3 --hangover 1000 [--frames] [--captures <folder>] <file>...
 ```
 
 ### "Read log"

@@ -15,6 +15,11 @@
   - Talk sends LISTEN; the controls send VOLUME / MUTE / BEEP / LED /
     LED_BRIGHTNESS (test/device_controls_utils.h) and LIGHT / LIGHT_BANDS
     (test/light_sensor_utils.h).
+  - Hands-free (step 30): the switch next to Talk sends VAD on/off, the
+    sliders under it VAD_SENSITIVITY / VAD_HANGOVER, and the meter shows
+    @@VAD_LEVEL against the noise floor and the speech threshold while the
+    board waits for speech (test/hands_free_utils.h). Shown only when the
+    board reports @@VAD.
   - Recordings use LIST / GET / DELETE (test/sd_file_transfer_utils.h).
   Close serial_logger.ps1 / the Arduino Serial Monitor first: only one
   program can hold the port.
@@ -70,6 +75,7 @@
     }
   }
   * { box-sizing: border-box; }
+  [hidden] { display: none !important; }  /* even on elements whose class sets a display */
   body {
     margin: 0;
     background: var(--bg);
@@ -296,6 +302,8 @@
   .orb svg { width: 44px; height: 44px; }
   .orb::after { content: ""; position: absolute; inset: -6px; border-radius: 50%; border: 3px solid currentColor; opacity: 0.3; }
   .orb[data-state="ready"] { background: var(--ok-soft); color: var(--ok); }
+  .orb[data-state="armed"] { background: var(--ok-soft); color: var(--ok); }
+  .orb[data-state="armed"]::after { animation: breathe 2.8s ease-in-out infinite; }
   .orb[data-state="listening"] { background: var(--rec-soft); color: var(--rec); }
   .orb[data-state="listening"]::after { animation: pulse 1.1s ease-out infinite; }
   .orb[data-state="processing"], .orb[data-state="tool"], .orb[data-state="reconnecting"] { background: var(--warn-soft); color: var(--warn); }
@@ -305,13 +313,14 @@
   .orb[data-state="speaking"]::after { animation: pulse 1.6s ease-out infinite; }
   .orb[data-state="error"], .orb[data-state="halted"] { background: var(--error-soft); color: var(--error); }
   @keyframes pulse { from { transform: scale(1); opacity: 0.5; } to { transform: scale(1.22); opacity: 0; } }
+  @keyframes breathe { 0%, 100% { transform: scale(1); opacity: 0.2; } 50% { transform: scale(1.1); opacity: 0.55; } }
   @keyframes spin { to { transform: rotate(360deg); } }
   .state-label { font-size: 26px; font-weight: 700; line-height: 1.15; }
   .state-detail { color: var(--muted); font-size: 14px; margin-top: 2px; min-height: 1.45em; }
   .steps { display: flex; gap: 4px; margin-top: 12px; flex-wrap: wrap; }
   .steps span { font-size: 12px; padding: 3px 9px; border-radius: 999px; border: 1px solid var(--border); color: var(--muted); }
   .steps span.now { border-color: currentColor; font-weight: 600; }
-  .steps span.now[data-step="ready"] { color: var(--ok); }
+  .steps span.now[data-step="ready"], .steps span.now[data-step="armed"] { color: var(--ok); }
   .steps span.now[data-step="listening"] { color: var(--rec); }
   .steps span.now[data-step="processing"] { color: var(--warn); }
   .steps span.now[data-step="speaking"] { color: var(--accent); }
@@ -322,11 +331,29 @@
     justify-content: center; min-width: 210px;
   }
   button.talk svg { width: 20px; height: 20px; }
-  button.talk.is-listening, button.talk.is-listening:disabled { background: var(--rec); color: var(--on-accent); opacity: 1; }
+  button.talk.is-listening, button.talk.is-listening:disabled {
+    /* --progress: how much of the recording is done (manual) or used (hands-free, of its 10 s cap) */
+    background: linear-gradient(to right, color-mix(in srgb, var(--on-accent) 28%, transparent) var(--progress, 0%),
+                transparent var(--progress, 0%)), var(--rec);
+    color: var(--on-accent); opacity: 1;
+  }
+  .hands-free { display: inline-flex; align-items: center; gap: 8px; font-size: 14px; font-weight: 600; cursor: pointer; }
   .meter { flex: 1; min-width: 150px; }
   .meter-label { font-size: 12px; color: var(--muted); display: flex; justify-content: space-between; gap: 8px; }
-  .meter-track { height: 8px; border-radius: 4px; background: var(--bg); border: 1px solid var(--border); overflow: hidden; }
-  .meter-fill { height: 100%; width: 0; background: var(--ok); transition: width 0.1s; }
+  .meter-track { position: relative; height: 8px; border-radius: 4px; background: var(--bg); border: 1px solid var(--border); }
+  .meter-fill { height: 100%; width: 0; border-radius: 3px; background: var(--ok); transition: width 0.1s; }
+  .meter-fill.quiet { background: color-mix(in srgb, var(--muted) 55%, var(--bg)); }
+  .meter-mark { position: absolute; top: -4px; bottom: -4px; width: 2px; margin-left: -1px; border-radius: 1px; transition: left 0.3s; }
+  .meter-mark.floor { background: color-mix(in srgb, var(--muted) 60%, transparent); }
+  .meter-mark.threshold { background: var(--text); }
+  .meter-note { font-size: 12px; color: var(--muted); margin-top: 5px; min-height: 1.45em; font-variant-numeric: tabular-nums; }
+  .vad-settings {
+    grid-column: 1 / -1; justify-self: stretch; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 6px 18px; padding: 10px 12px; border: 1px solid var(--border); border-radius: 8px; background: var(--bg); text-align: left;
+  }
+  .vad-settings label { font-size: 13px; color: var(--muted); white-space: nowrap; }
+  .vad-settings .control-note { grid-column: 1 / -1; }
+  .vad-settings.off .control-line { opacity: 0.6; }
   kbd { font: 12px var(--mono); border: 1px solid var(--border); border-bottom-width: 2px; border-radius: 4px; padding: 0 5px; }
   .conversation { grid-column: 1 / -1; display: flex; flex-direction: column; gap: 6px; border-top: 1px solid var(--border); padding-top: 12px; }
   #bubbles { display: flex; flex-direction: column; gap: 6px; max-height: 220px; overflow-y: auto; }
@@ -381,6 +408,7 @@
     .health { grid-template-columns: repeat(2, minmax(0, 1fr)); }
     .assistant { grid-template-columns: minmax(0, 1fr); justify-items: center; text-align: center; }
     .steps { justify-content: center; }
+    .vad-settings { grid-template-columns: minmax(0, 1fr); }
     #log { height: 60vh; }
     header { padding: 12px 16px; }
     .notice { margin: 12px 16px 0; }
@@ -448,15 +476,33 @@
           <div class="state-label" id="state-label" aria-live="polite">Not connected</div>
           <div class="state-detail" id="state-detail">Connect the board to start.</div>
           <div class="steps" id="steps" aria-hidden="true">
-            <span data-step="ready">Ready</span><span data-step="listening">Listening</span><span data-step="processing">Processing</span><span data-step="speaking">Speaking</span>
+            <span data-step="ready">Ready</span><span data-step="armed" id="step-armed" hidden>Waiting</span><span data-step="listening">Listening</span><span data-step="processing">Processing</span><span data-step="speaking">Speaking</span>
           </div>
         </div>
         <div class="talk-row">
           <button class="talk" id="talk" type="button" disabled><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></svg><span id="talk-label">Talk</span></button>
-          <div class="meter">
-            <div class="meter-label"><span>Mic level</span><span><kbd>Space</kbd> to talk</span></div>
-            <div class="meter-track"><div class="meter-fill" id="mic-fill"></div></div>
+          <label class="hands-free" id="hands-free" hidden title="The board listens by itself and records from just before you start talking until you stop. Talk still records a fixed 3 s.">
+            <span class="switch"><input id="vad" type="checkbox" disabled><span class="knob"></span></span>
+            Hands-free
+          </label>
+          <div class="meter" id="meter" title="While waiting for speech: the voice-band level, the room's noise floor (gray tick) and the level that counts as speech at this sensitivity (dark tick).">
+            <div class="meter-label"><span id="meter-name">Mic level</span><span><kbd>Space</kbd> to talk</span></div>
+            <div class="meter-track"><div class="meter-fill" id="mic-fill"></div><span class="meter-mark floor" id="meter-floor" hidden></span><span class="meter-mark threshold" id="meter-threshold" hidden></span></div>
+            <div class="meter-note" id="meter-note" hidden></div>
           </div>
+        </div>
+        <div class="vad-settings" id="vad-settings" hidden>
+          <div class="control-line">
+            <label for="vad-sensitivity" title="Higher hears quieter voices - and more of the room's noise.">Sensitivity</label>
+            <input id="vad-sensitivity" type="range" min="1" max="5" step="1" value="3" disabled>
+            <span class="value" id="vad-sensitivity-value">-</span>
+          </div>
+          <div class="control-line">
+            <label for="vad-hangover" title="How long a pause means you've finished. Longer lets you stop to think mid-sentence; shorter answers sooner.">Stop after silence</label>
+            <input id="vad-hangover" type="range" min="600" max="1500" step="100" value="1000" disabled>
+            <span class="value" id="vad-hangover-value">-</span>
+          </div>
+          <p class="control-note" id="vad-note" aria-live="polite"></p>
         </div>
         <div class="conversation">
           <div id="bubbles" aria-live="polite"></div>
@@ -600,7 +646,7 @@ const SAFE_FILE_NAME = /^[A-Za-z0-9_-][A-Za-z0-9_.-]{0,30}$/;  // a plain name, 
 
 // Status and controls (step 28) - the board's side is test/status_report_utils.h.
 const STATUS_TAGS = new Set(["@@STAGE", "@@STATE", "@@RESULT", "@@MIC_LEVEL", "@@HEARD", "@@SAID", "@@WIFI",
-                             "@@LED", "@@VOLUME", "@@LIGHT", "@@BEEP"]);
+                             "@@LED", "@@VOLUME", "@@LIGHT", "@@BEEP", "@@VAD", "@@VAD_LEVEL", "@@VAD_EVENT"]);
 const STATUS_REQUEST_DELAY_MS = 400;   // after connecting, ask for the full picture
 const NO_STATUS_HINT_MS = 4000;        // no @@STATE by then: the board runs older firmware
 const TALK_START_TIMEOUT_MS = 2500;    // LISTEN sent but no "listening" yet: unlock Talk again
@@ -610,12 +656,24 @@ const CONTROL_SEND_DELAY_MS = 250;     // slider changes are sent once dragging 
 const MAX_BUBBLES = 8;
 const LIGHT_SENSOR_MAX = 6142;         // mirrors light_sensor_utils.h's kMaxLightSensorValue
 const MIC_METER_FLOOR_DBFS = -60;
+// Hands-free (step 30) - the board's side is test/hands_free_utils.h.
+const VAD_METER_MIN_DBFS = -90;        // the voice-band level is the mic's own, before the gain: quieter than @@MIC_LEVEL
+const VAD_METER_MAX_DBFS = -10;
+const MAX_UTTERANCE_S = 10;            // mirrors vad_utils.h's kMaxUtteranceMs
+const VAD_SENSITIVITY_MAX = 5;         // mirrors vad_utils.h's kMaxSensitivity
+const VAD_NOTE_DEFAULT = "Higher sensitivity hears quieter voices - and more of the room's noise.";
+const DISCARD_TEXT = {                 // @@VAD_EVENT discarded <reason> - vad_utils.h's DiscardReason
+  short: "too short to be speech (a click, a knock?)",
+  unvoiced: "no voice in it (a cough, a laugh, running water?)",
+  steady: "too steady to be speech (a machine, a bell?)",
+};
 const TOOL_LABELS = { set_board_state: "Switching the LED", get_time_of_day: "Reading the light sensor" };
 const STATE_TEXT = {
   offline: ["Not connected", "Connect the board to start."],
   unknown: ["Connected", "Waiting for the board to report its state…"],
   booting: ["Starting up", "Running the startup checks."],
   ready: ["Ready", "Press Talk (or Space) and ask something."],
+  armed: ["Waiting for speech", "Hands-free: just start talking. Talk still records 3 s."],
   listening: ["Listening", "Recording…"],
   processing: ["Processing", "Waiting for OpenAI's answer."],
   tool: ["Processing", "Running an action on the board."],
@@ -625,8 +683,9 @@ const STATE_TEXT = {
   halted: ["Stopped", "The board stopped - see the log."],
   error: ["Error", ""],
 };
-const STEP_OF_STATE = { ready: "ready", listening: "listening", processing: "processing", tool: "processing",
+const STEP_OF_STATE = { ready: "ready", armed: "armed", listening: "listening", processing: "processing", tool: "processing",
                         speaking: "speaking", saving: "speaking" };
+const IDLE_STATES = new Set(["ready", "armed"]);  // the board takes a LISTEN in these
 
 /** The two kinds of recording the board keeps, told apart by extension
     (see the board's recording_folder_utils.h). */
@@ -1147,6 +1206,19 @@ const elements = {
   talk: document.getElementById("talk"),
   talkLabel: document.getElementById("talk-label"),
   micFill: document.getElementById("mic-fill"),
+  meterName: document.getElementById("meter-name"),
+  meterFloor: document.getElementById("meter-floor"),
+  meterThreshold: document.getElementById("meter-threshold"),
+  meterNote: document.getElementById("meter-note"),
+  handsFree: document.getElementById("hands-free"),
+  stepArmed: document.getElementById("step-armed"),
+  vad: document.getElementById("vad"),
+  vadSettings: document.getElementById("vad-settings"),
+  vadSensitivity: document.getElementById("vad-sensitivity"),
+  vadSensitivityValue: document.getElementById("vad-sensitivity-value"),
+  vadHangover: document.getElementById("vad-hangover"),
+  vadHangoverValue: document.getElementById("vad-hangover-value"),
+  vadNote: document.getElementById("vad-note"),
   bubbles: document.getElementById("bubbles"),
   result: document.getElementById("result"),
   volume: document.getElementById("volume"),
@@ -1207,6 +1279,8 @@ function freshBoardStatus() {
     led: null,               // { on, brightness, source }
     volume: null,            // { percent, muted }
     light: null,             // { value, band, eveningMin, dayMin }
+    vad: null,               // { on, sensitivity, hangoverMs } from @@VAD - null: the firmware has no hands-free
+    listenLeadS: 0,          // a hands-free recording's pre-roll, from @@VAD_EVENT started
     noStatusTimer: null,
     legacyFirmware: false,   // connected for NO_STATUS_HINT_MS with no @@STATE at all
     cycleFirstBubble: null,  // the first bubble added since the current LISTEN started
@@ -1785,7 +1859,8 @@ async function sendQuietly(command) {
 
 /** One status line from the board: "@@<tag> <rest>". */
 function handleStatusLine(tag, rest) {
-  if (tag !== "MIC_LEVEL") appendLog(`@@${tag} ${rest}`, { protocol: true });  // ~10 a second while listening - left out
+  // The levels come ~10 a second (MIC_LEVEL while recording, VAD_LEVEL while waiting for speech) - left out.
+  if (tag !== "MIC_LEVEL" && tag !== "VAD_LEVEL") appendLog(`@@${tag} ${rest}`, { protocol: true });
   const words = rest.split(" ");
   const board = state.board;
   switch (tag) {
@@ -1811,7 +1886,8 @@ function handleStatusLine(tag, rest) {
       showMicLevel(Number(words[0]));
       break;
     case "HEARD":
-      addBubble("heard", rest, board.cycleFirstBubble);  // transcription can arrive after the reply - keep it first
+      // Transcription can arrive after the reply - keep it first. Empty: OpenAI heard no words (a noise).
+      addBubble("heard", rest.trim() ? rest : "(no words)", board.cycleFirstBubble);
       break;
     case "SAID":
       addBubble("said", rest);
@@ -1837,8 +1913,34 @@ function handleStatusLine(tag, rest) {
         ? (board.volume && board.volume.muted ? "Beep played - but the speaker is muted." : "Beep played - did you hear it?")
         : "Busy - try again when the assistant is Ready.";
       break;
+    case "VAD":
+      board.vad = { on: words[0] === "on", sensitivity: Number(words[1]), hangoverMs: Number(words[2]) };
+      renderVad();
+      break;
+    case "VAD_LEVEL":
+      if (board.pipeline && board.pipeline.state === "armed") showVadLevel(Number(words[0]), Number(words[1]), Number(words[2]));
+      break;
+    case "VAD_EVENT":
+      onVadEvent(words);
+      break;
     default:
       break;
+  }
+}
+
+/** A hands-free event: "started <pre-roll ms>", "sent <speech ms>
+    <silence|length>", "discarded <reason> <ms>" or "paused <ms>". */
+function onVadEvent([kind, first, second]) {
+  const board = state.board;
+  if (kind === "started") {
+    board.listenLeadS = (Number(first) || 0) / 1000;
+  } else if (kind === "sent") {
+    const ending = second === "length" ? `stopped at the ${MAX_UTTERANCE_S} s limit` : "ended by your pause";
+    elements.vadNote.textContent = `Heard ${formatSeconds(Number(first) / 1000)} of speech - ${ending}.`;
+  } else if (kind === "discarded") {
+    elements.vadNote.textContent = `Ignored ${formatSeconds(Number(second) / 1000)} of sound - ${DISCARD_TEXT[first] || first}.`;
+  } else if (kind === "paused") {
+    elements.vadNote.textContent = `Several noises in a row - hands-free pauses for ${Math.round(Number(first) / 1000)} s.`;
   }
 }
 
@@ -1857,6 +1959,8 @@ function resetBoardStatus(shownState) {
   renderLed();
   renderVolume();
   renderLight();
+  renderVad();
+  elements.vadNote.textContent = VAD_NOTE_DEFAULT;
   updateControlsEnabled();
 }
 
@@ -1907,7 +2011,7 @@ function renderHealth() {
 function onPipelineState({ state: pipelineState, detail }) {
   const board = state.board;
   if (pipelineState === "listening") board.cycleFirstBubble = null;
-  if (board.talkPending && pipelineState !== "ready") {
+  if (board.talkPending && !IDLE_STATES.has(pipelineState)) {
     board.talkPending = false;
     clearTimeout(board.talkPendingTimer);
   }
@@ -1949,29 +2053,44 @@ function showPipelineState(shownState, detail) {
 
   clearInterval(board.listenTimer);
   if (shownState === "listening") {
-    const seconds = Number(detail) || 3;
+    // Manual (detail: its length in seconds) counts down; hands-free ("vad")
+    // counts up - it lasts until the speaker stops, MAX_UTTERANCE_S at most,
+    // pre-roll included.
+    const byVoice = detail === "vad";
+    const seconds = byVoice ? MAX_UTTERANCE_S : Number(detail) || 3;
     const startedAt = performance.now();
+    board.listenLeadS = 0;
     const tick = () => {
-      const left = Math.max(0, seconds - (performance.now() - startedAt) / 1000);
-      elements.talkLabel.textContent = `Listening… ${left.toFixed(1)}`;
-      elements.stateDetail.textContent = `Recording - ${left.toFixed(1)} s left.`;
+      const elapsed = (performance.now() - startedAt) / 1000;
+      const recorded = Math.min(seconds, (byVoice ? board.listenLeadS : 0) + elapsed);
+      elements.talk.style.setProperty("--progress", `${(recorded / seconds) * 100}%`);
+      if (byVoice) {
+        elements.talkLabel.textContent = `Listening… ${recorded.toFixed(1)}`;
+        elements.stateDetail.textContent = `Recording until you stop talking - ${recorded.toFixed(1)} s (${seconds} s at most).`;
+      } else {
+        const left = seconds - recorded;
+        elements.talkLabel.textContent = `Listening… ${left.toFixed(1)}`;
+        elements.stateDetail.textContent = `Recording - ${left.toFixed(1)} s left.`;
+      }
     };
     tick();
     board.listenTimer = setInterval(tick, 100);
   } else {
+    elements.talk.style.removeProperty("--progress");
     showMicLevel(null);
   }
   updateTalkButton();
 }
 
-/** Talk is usable only while the assistant is Ready (or the board doesn't
-    report its state at all). Locked while a LISTEN is starting. */
+/** Talk is usable only while the assistant is Ready or waiting for speech
+    (or the board doesn't report its state at all). Locked while a LISTEN is
+    starting. */
 function updateTalkButton() {
   const board = state.board;
   const listening = board.shownState === "listening";
   const noReports = link.connected && !board.pipeline && board.legacyFirmware;
   const ready = link.connected && !board.talkPending &&
-    ((board.pipeline && board.pipeline.state === "ready") || noReports);
+    ((board.pipeline && IDLE_STATES.has(board.pipeline.state)) || noReports);
   elements.talk.disabled = !ready;
   elements.talk.classList.toggle("is-listening", listening);
   if (!listening) {
@@ -1991,10 +2110,34 @@ function onTalkClick() {
   }, TALK_START_TIMEOUT_MS);
 }
 
+/** Where dbfs sits on a meter running from min to max, in percent. */
+function meterPercent(dbfs, min, max) {
+  return Number.isFinite(dbfs) ? Math.max(0, Math.min(100, ((dbfs - min) / (max - min)) * 100)) : 0;
+}
+
+/** The meter as a plain mic level (@@MIC_LEVEL, while recording) - null
+    empties it. */
 function showMicLevel(dbfs) {
-  const percent = dbfs === null || Number.isNaN(dbfs) ? 0
-    : Math.max(0, Math.min(100, ((dbfs - MIC_METER_FLOOR_DBFS) / -MIC_METER_FLOOR_DBFS) * 100));
-  elements.micFill.style.width = `${percent}%`;
+  elements.meterName.textContent = "Mic level";
+  elements.micFill.classList.remove("quiet");
+  elements.micFill.style.width = `${dbfs === null ? 0 : meterPercent(dbfs, MIC_METER_FLOOR_DBFS, 0)}%`;
+  elements.meterFloor.hidden = true;
+  elements.meterThreshold.hidden = true;
+  elements.meterNote.textContent = "";
+}
+
+/** The meter while the board waits for speech (@@VAD_LEVEL): the voice-band
+    level, green once it's loud enough to count as speech, with ticks at the
+    noise floor and at that threshold. */
+function showVadLevel(levelDbfs, floorDbfs, thresholdDbfs) {
+  elements.meterName.textContent = "Voice level";
+  elements.micFill.style.width = `${meterPercent(levelDbfs, VAD_METER_MIN_DBFS, VAD_METER_MAX_DBFS)}%`;
+  elements.micFill.classList.toggle("quiet", !(levelDbfs >= thresholdDbfs));
+  elements.meterFloor.style.left = `${meterPercent(floorDbfs, VAD_METER_MIN_DBFS, VAD_METER_MAX_DBFS)}%`;
+  elements.meterThreshold.style.left = `${meterPercent(thresholdDbfs, VAD_METER_MIN_DBFS, VAD_METER_MAX_DBFS)}%`;
+  elements.meterFloor.hidden = false;
+  elements.meterThreshold.hidden = false;
+  elements.meterNote.textContent = `Room noise ${floorDbfs} · speech from ${thresholdDbfs} dBFS`;
 }
 
 /** Adds a chat bubble - before `before` when given and still shown,
@@ -2043,6 +2186,9 @@ function updateControlsEnabled() {
   elements.eveningMin.disabled = !connected || !board.light;
   elements.dayMin.disabled = !connected || !board.light;
   elements.applyBands.disabled = !connected || !board.light;
+  elements.vad.disabled = !connected || !board.vad;
+  elements.vadSensitivity.disabled = !connected || !board.vad;
+  elements.vadHangover.disabled = !connected || !board.vad;
 }
 
 /** Sends a control command once the user pauses dragging a slider. */
@@ -2079,6 +2225,23 @@ function renderLed() {
     void elements.ledControl.offsetWidth;  // restart the animation
     elements.ledControl.classList.add("flash");
   }
+  updateControlsEnabled();
+}
+
+/** The hands-free switch and its settings, from the board's @@VAD - all
+    hidden while the board hasn't sent one (firmware before step 30). */
+function renderVad() {
+  const vad = state.board.vad;
+  elements.handsFree.hidden = !vad;
+  elements.vadSettings.hidden = !vad;
+  elements.meterNote.hidden = !vad;
+  elements.stepArmed.hidden = !(vad && vad.on);
+  elements.vad.checked = Boolean(vad && vad.on);
+  elements.vadSettings.classList.toggle("off", !(vad && vad.on));
+  if (vad && !isBeingEdited(elements.vadSensitivity)) elements.vadSensitivity.value = vad.sensitivity;
+  if (vad && !isBeingEdited(elements.vadHangover)) elements.vadHangover.value = vad.hangoverMs;
+  elements.vadSensitivityValue.textContent = vad ? `${vad.sensitivity} of ${VAD_SENSITIVITY_MAX}` : "-";
+  elements.vadHangoverValue.textContent = vad ? formatSeconds(vad.hangoverMs / 1000) : "-";
   updateControlsEnabled();
 }
 
@@ -2160,9 +2323,18 @@ elements.showProtocol.addEventListener("change", () => {
   elements.log.classList.toggle("hide-protocol", !elements.showProtocol.checked);
   if (elements.autoscroll.checked) elements.log.scrollTop = elements.log.scrollHeight;
 });
-[elements.volume, elements.ledBrightness, elements.lightValue].forEach((input) => {
+[elements.volume, elements.ledBrightness, elements.lightValue, elements.vadSensitivity, elements.vadHangover].forEach((input) => {
   input.addEventListener("pointerdown", () => { input.dataset.dragging = "true"; });
   input.addEventListener("pointerup", () => { input.dataset.dragging = "false"; });
+});
+elements.vad.addEventListener("change", () => sendCommand(`VAD ${elements.vad.checked ? "on" : "off"}`));
+elements.vadSensitivity.addEventListener("input", () => {
+  elements.vadSensitivityValue.textContent = `${elements.vadSensitivity.value} of ${VAD_SENSITIVITY_MAX}`;
+  sendSoon("vadSensitivity", `VAD_SENSITIVITY ${elements.vadSensitivity.value}`);
+});
+elements.vadHangover.addEventListener("input", () => {
+  elements.vadHangoverValue.textContent = formatSeconds(Number(elements.vadHangover.value) / 1000);
+  sendSoon("vadHangover", `VAD_HANGOVER ${elements.vadHangover.value}`);
 });
 elements.volume.addEventListener("input", () => {
   elements.volumeValue.textContent = `${elements.volume.value}%`;
