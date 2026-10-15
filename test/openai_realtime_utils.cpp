@@ -72,6 +72,18 @@ bool registerDisconnectAndMaybeGiveUp(WebSocketsClient& webSocket) {
   return false;
 }
 
+namespace esp32va_openai {
+
+uint32_t reconnectAttemptCount() {
+  return reconnect_attempts;
+}
+
+uint32_t maxConnectAttempts() {
+  return kMaxConnectAttempts;
+}
+
+}  // namespace esp32va_openai
+
 void resetReconnectBackoff() {
   reconnect_attempts = 0;
   reconnect_backoff_ms = kInitialBackoffMs;

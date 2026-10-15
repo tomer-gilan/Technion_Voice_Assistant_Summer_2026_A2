@@ -32,6 +32,24 @@ void setupI2sFullDuplex();
 uint32_t readMicChunkGained(int32_t* raw_scratch, int16_t* pcm_out, uint32_t max_samples, int32_t gain,
                              int16_t* level_min, int16_t* level_max, double* level_sum_of_squares);
 
+/** Startup mic check (step 28): reads ~0.4 s from the mic and checks it
+    isn't stuck at one value, as it is with no mic answering. Writes a short
+    human-readable result into detail_out either way. Returns true if the mic
+    looks alive. Only tells "sending audio" from "not" - a floating data line
+    might still pass. Call once from setup(), after setupI2sFullDuplex(). */
+bool checkMicrophoneSignal(char* detail_out, size_t detail_size);
+
+/** Sets the speaker volume, 0-100% (anything higher counts as 100%), or
+    silences it entirely when muted. Applied when playing audio, so the
+    replies recorded on the SD card stay exactly as OpenAI sent them. 100%
+    and not muted is how every step before 28 sounded. */
+void setPlaybackVolume(uint8_t percent, bool muted);
+
+/** Plays a short 880 Hz beep (0.3 s) at the current volume, blocking until
+    it's queued - for checking by ear that the speaker works. Only call while
+    nothing else is playing. */
+void playTestBeep();
+
 /** How much mic audio the I2S driver can hold, in milliseconds, before it
     starts dropping it. If handling one chunk takes longer than this (or
     keeps taking longer than a chunk lasts), audio is lost between reads. */

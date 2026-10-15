@@ -1,5 +1,7 @@
 #pragma once
 
+#include <stddef.h>
+
 // SD card over SPI (pins from config.h): mounting it with as little RAM as
 // possible, plus a write/read-back self-test proving the card actually
 // works rather than just mounted. Uses the ESP32 core's own SD library, so
@@ -23,5 +25,10 @@ bool mountSdCard();
     Returns true only if every step worked and the contents matched; logs
     which step failed otherwise. Call only after mountSdCard() succeeded. */
 bool runSdSelfTest();
+
+/** Writes e.g. "SDHC/SDXC, 7580 MB" - the mounted card's type and size -
+    into out, for the laptop app's SD card badge. Call only after
+    mountSdCard() succeeded. */
+void describeSdCard(char* out, size_t out_size);
 
 }  // namespace esp32va_sd_card

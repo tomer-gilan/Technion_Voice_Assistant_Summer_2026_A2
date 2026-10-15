@@ -22,14 +22,21 @@ constexpr int kMaxLightSensorValue = 4095 * 3 / 2;
     (GPIO 32-39) - ADC2 pins can't be read while Wi-Fi is running. */
 extern int g_light_sensor_value;
 
-/** Logs the starting light level and how to change it. Call once from
+/** Loads the day/evening thresholds saved by LIGHT_BANDS (or the defaults),
+    then logs the starting light level and how to change it. Call once from
     setup(); the real sensor's pin setup will go here too. */
 void setupLightSensor();
+
+/** Prints "@@LIGHT <value> <day|evening|night> <evening min> <day min>" so the
+    laptop app shows the reading and thresholds the board really uses. */
+void announceLightState();
 
 /** Handles a typed Serial command if it's a LIGHT command: "LIGHT <value>"
     sets g_light_sensor_value (0 to kMaxLightSensorValue, anything else is
     rejected with a log line), bare "LIGHT" logs the current value and its
-    part of the day. Case-insensitive. Returns true if `command` was a LIGHT
+    part of the day. "LIGHT_BANDS <evening min> <day min>" changes (and
+    saves) the thresholds. Every one of them ends with a @@LIGHT line.
+    Case-insensitive. Returns true if `command` was a LIGHT
     command (valid or not), false if it's something else for the caller to
     handle. */
 bool handleLightCommand(const char* command);

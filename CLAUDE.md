@@ -96,8 +96,16 @@ or left inline in `test.ino`:
   tool-call handling.
 - `light_sensor_utils.h`/`.cpp` — the light-level global
   (`esp32va_light_sensor::g_light_sensor_value`), its day/evening/night
-  thresholds, the `LIGHT <value>` Serial command that simulates the sensor,
-  and `get_time_of_day` tool-call handling.
+  thresholds (changeable with `LIGHT_BANDS`), the `LIGHT <value>` Serial
+  command that simulates the sensor, and `get_time_of_day` tool-call
+  handling.
+- `status_report_utils.h`/`.cpp` — the `@@STAGE` / `@@STATE` / `@@RESULT` /
+  ... status lines the laptop app reads (protocol documented in its header),
+  and the snapshot the `STATUS` command reprints.
+- `device_controls_utils.h`/`.cpp` — the `VOLUME` / `MUTE` / `BEEP` / `LED` /
+  `LED_BRIGHTNESS` Serial commands.
+- `settings_store_utils.h`/`.cpp` — settings kept across reboots in NVS flash
+  (volume, mute, LED brightness, light thresholds).
 
 `test.ino` itself should keep only what's actually under test: Wi-Fi/session
 wiring, the LISTEN cycle's mechanics, the server-event-driven state machine,
@@ -281,6 +289,13 @@ the default PowerShell execution policy blocks unsigned `.ps1` files — plain
 PowerShell session may or may not hit that block depending on the current
 policy, so the full `powershell -ExecutionPolicy Bypass -File ...` form is
 the one to reach for.
+
+**`tools/reply_audio_app.html`**: the laptop control center (Chrome/Edge, Web
+Serial): board health and the assistant's live state, a Talk button, speaker
+/ LED / light-sensor controls, the SD card recordings, and a serial terminal
+with its own log saving. It reads only `@@` lines for status - so anything
+the app shows must have a matching `@@` line in the firmware, printed
+whatever the log level. Like the logger, it holds the COM port exclusively.
 
 ### "Read log"
 When Tomer says "read log" (or similar - "read the log", "check the log")

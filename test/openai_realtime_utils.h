@@ -36,3 +36,15 @@ void resetReconnectBackoff();
     per Tomer's Guidelines - the sketch itself only needs explicit cases for
     CONNECTED/DISCONNECTED/TEXT (or whichever it actually reacts to). */
 void logGenericWsEvent(WStype_t type, uint8_t* payload, size_t length);
+
+namespace esp32va_openai {
+
+/** Disconnects counted since the last resetReconnectBackoff() - shown as
+    "reconnecting n/max" in the laptop app. */
+uint32_t reconnectAttemptCount();
+
+/** How many disconnects in a row registerDisconnectAndMaybeGiveUp() allows
+    before giving up. */
+uint32_t maxConnectAttempts();
+
+}  // namespace esp32va_openai

@@ -71,6 +71,10 @@ bool mountSdCard() {
   return true;
 }
 
+void describeSdCard(char* out, size_t out_size) {
+  snprintf(out, out_size, "%s, %u MB", cardTypeName(SD.cardType()), (unsigned)(SD.cardSize() / kBytesPerMegabyte));
+}
+
 bool runSdSelfTest() {
   File test_file = SD.open(kSelfTestPath, FILE_WRITE);
   if (!test_file) {

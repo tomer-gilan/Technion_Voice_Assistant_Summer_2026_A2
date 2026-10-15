@@ -2,9 +2,11 @@
 
 #include <Arduino.h>
 #include <driver/i2s.h>
+#include <math.h>
 #include <mbedtls/base64.h>
 #include "config.h"
 #include "log_utils.h"
+#include "status_report_utils.h"
 
 namespace {
 constexpr i2s_port_t kI2sPort = I2S_NUM_0;
@@ -50,6 +52,25 @@ bool recording_tap_active = false;
 uint32_t recording_tap_read_index = 0;
 uint32_t recording_tap_pending_bytes = 0;
 
+// Speaker volume as a Q12 fixed-point multiplier (4096 = full scale, as
+// before step 28). Set from a 0-100% slider through a square curve, so the
+// slider feels even to the ear rather than all happening in its top third.
+constexpr int32_t kVolumeUnityQ12 = 4096;
+constexpr int32_t kMaxVolumePercent = 100;
+int32_t playback_volume_q12 = kVolumeUnityQ12;
+
+// Startup mic check: skip the first part (the INMP441 needs ~85 ms after its
+// clock starts before its data is valid), then measure.
+constexpr uint32_t kMicCheckSettleSamples = kSampleRateHz / 5;   // 200 ms
+constexpr uint32_t kMicCheckMeasureSamples = kSampleRateHz / 5;  // 200 ms
+constexpr uint32_t kMicCheckReadSamples = 240;                   // 10 ms per i2s_read
+int32_t mic_check_scratch[kMicCheckReadSamples];
+
+// Test beep: a short, clearly audible tone, well below full scale.
+constexpr uint32_t kBeepFrequencyHz = 880;
+constexpr uint32_t kBeepDurationMs = 300;
+constexpr int32_t kBeepAmplitude = 8000;
+
 uint8_t decode_scratch[kDecodeOutputBufBytes];
 uint8_t tx_mulaw_bytes[kTxDrainMuLawBytes];
 int32_t tx_i2s_words[kTxDrainMuLawBytes * kOutputUpsampleFactor];
@@ -92,9 +113,73 @@ void setupI2sFullDuplex() {
     // Continuing to i2s_set_pin() after a failed install previously caused a
     // Guru Meditation crash-reboot loop for this exact driver (old step 8b).
     LOG_ERROR("i2s_driver_install failed (code %d) - halting.\n", (int)install_result);
+    esp32va_status::reportStage(esp32va_status::Stage::kMicrophone, esp32va_status::StageState::kFail,
+                                "audio driver failed to start - board halted");
+    esp32va_status::reportStage(esp32va_status::Stage::kSpeaker, esp32va_status::StageState::kFail,
+                                "audio driver failed to start - board halted");
+    esp32va_status::reportPipelineState(esp32va_status::PipelineState::kHalted, "audio driver failed to start");
     while (true) delay(1000);
   }
   i2s_set_pin(kI2sPort, &pin_config);
+}
+
+bool checkMicrophoneSignal(char* detail_out, size_t detail_size) {
+  uint32_t samples_seen = 0;
+  uint32_t samples_measured = 0;
+  int16_t lowest = INT16_MAX;
+  int16_t highest = INT16_MIN;
+  double sum = 0.0;
+  double sum_of_squares = 0.0;
+  while (samples_seen < kMicCheckSettleSamples + kMicCheckMeasureSamples) {
+    size_t bytes_read = 0;
+    i2s_read(kI2sPort, mic_check_scratch, sizeof(mic_check_scratch), &bytes_read, portMAX_DELAY);
+    uint32_t samples_read = bytes_read / sizeof(int32_t);
+    for (uint32_t i = 0; i < samples_read; i++, samples_seen++) {
+      if (samples_seen < kMicCheckSettleSamples) continue;
+      int16_t sample = static_cast<int16_t>(mic_check_scratch[i] >> 16);
+      lowest = min(lowest, sample);
+      highest = max(highest, sample);
+      sum += sample;
+      sum_of_squares += static_cast<double>(sample) * sample;
+      samples_measured++;
+    }
+  }
+
+  if (samples_measured == 0 || lowest == highest) {
+    snprintf(detail_out, detail_size, "no signal - stuck at %d. Check the mic's wires and power", (int)lowest);
+    LOG_ERROR("Mic check failed: every sample read %d - the mic isn't sending audio.\n", (int)lowest);
+    return false;
+  }
+  // Level around the mean, so the mic's own DC offset doesn't count as sound.
+  double mean = sum / samples_measured;
+  double variance = sum_of_squares / samples_measured - mean * mean;
+  double rms = variance > 0.0 ? sqrt(variance) : 0.0;
+  double level_dbfs = rms > 0.0 ? 20.0 * log10(rms / 32768.0) : -96.0;
+  snprintf(detail_out, detail_size, "signal OK, room level %.0f dBFS", level_dbfs);
+  LOG_INFO("Mic check passed - room level %.1f dBFS (samples %d to %d).\n", level_dbfs, (int)lowest, (int)highest);
+  return true;
+}
+
+void setPlaybackVolume(uint8_t percent, bool muted) {
+  int32_t clamped = min(static_cast<int32_t>(percent), kMaxVolumePercent);
+  playback_volume_q12 = muted ? 0 : clamped * clamped * kVolumeUnityQ12 / (kMaxVolumePercent * kMaxVolumePercent);
+}
+
+void playTestBeep() {
+  constexpr uint32_t kTotalSamples = kSampleRateHz * kBeepDurationMs / 1000;
+  constexpr uint32_t kChunkWords = sizeof(tx_i2s_words) / sizeof(tx_i2s_words[0]);
+  uint32_t samples_written = 0;
+  while (samples_written < kTotalSamples) {
+    uint32_t words = min(kChunkWords, kTotalSamples - samples_written);
+    for (uint32_t i = 0; i < words; i++) {
+      double phase = 2.0 * M_PI * kBeepFrequencyHz * (samples_written + i) / kSampleRateHz;
+      int32_t sample = static_cast<int32_t>(kBeepAmplitude * sin(phase)) * playback_volume_q12 / kVolumeUnityQ12;
+      tx_i2s_words[i] = sample << 16;  // same 32-bit-wide TX alignment as drainRingBufferToSpeaker()
+    }
+    size_t bytes_written = 0;
+    i2s_write(kI2sPort, tx_i2s_words, words * sizeof(int32_t), &bytes_written, portMAX_DELAY);
+    samples_written += words;
+  }
 }
 
 uint32_t micBufferCapacityMs() {
@@ -124,6 +209,9 @@ void initPlaybackRingBuffer() {
   ring_buffer = static_cast<uint8_t*>(malloc(kRingBufferBytes));
   if (ring_buffer == nullptr) {
     LOG_ERROR("Failed to allocate %u-byte ring buffer - halting.\n", (unsigned)kRingBufferBytes);
+    esp32va_status::reportStage(esp32va_status::Stage::kSpeaker, esp32va_status::StageState::kFail,
+                                "no memory for the playback buffer - board halted");
+    esp32va_status::reportPipelineState(esp32va_status::PipelineState::kHalted, "out of memory");
     while (true) delay(1000);
   }
 }
@@ -230,7 +318,8 @@ void drainRingBufferToSpeaker() {
 
   uint32_t word_index = 0;
   for (uint32_t i = 0; i < n; i++) {
-    int32_t widened = static_cast<int32_t>(ulawToLinearPcm16(tx_mulaw_bytes[i])) << 16;  // re-align for the 32-bit-wide TX bus
+    int32_t scaled = static_cast<int32_t>(ulawToLinearPcm16(tx_mulaw_bytes[i])) * playback_volume_q12 / kVolumeUnityQ12;
+    int32_t widened = scaled << 16;  // re-align for the 32-bit-wide TX bus
     for (int rep = 0; rep < kOutputUpsampleFactor; rep++) {
       tx_i2s_words[word_index++] = widened;
     }
