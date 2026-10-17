@@ -493,6 +493,19 @@
   .stage-close { position: absolute; top: 16px; right: 16px; }
   .stage-hint { position: absolute; bottom: 14px; font-size: 13px; color: var(--muted); }
 
+  /* ----- Log replay bar ----- */
+  .replay-bar {
+    position: fixed; left: 50%; bottom: 18px; transform: translateX(-50%); z-index: 40; display: flex; align-items: center;
+    gap: 12px; padding: 10px 14px; border: 1px solid var(--border); border-radius: 12px; background: var(--panel);
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.18); font-size: 14px; max-width: calc(100vw - 32px);
+  }
+  .replay-bar .replay-name { font-weight: 650; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 260px; }
+  .replay-bar progress { width: 140px; }
+  .replay-bar > * { white-space: nowrap; flex: none; }
+  .replay-bar label { display: flex; align-items: center; gap: 6px; margin: 0; }
+  .replay-bar select { width: auto; }
+  .replay-bar small { color: var(--muted); min-width: 52px; }
+
   /* ----- Demo checklist drawer ----- */
   .drawer {
     position: fixed; top: 0; right: 0; bottom: 0; z-index: 20; width: min(400px, 100vw); overflow-y: auto;
@@ -763,6 +776,8 @@
       <div class="panel-actions" style="margin-bottom:10px">
         <button id="save-log" type="button" hidden>Save log to folder…</button>
         <button id="download-log" type="button">Download log</button>
+        <button id="replay-log" type="button" title="Plays a saved log back into the app as if the board were sending it - for showing a run again or analysing it. Only while no board is connected.">Replay a log…</button>
+        <input id="replay-file" type="file" accept=".txt,.log,text/plain" hidden>
         <button id="clear-log" type="button" title="Empties the panel (and what Download log saves). A log being saved to a folder keeps everything.">Clear log</button>
         <label class="toggle"><input id="autoscroll" type="checkbox" checked> Auto-scroll</label>
         <label class="toggle" title="The status lines the app reads (@@STAGE, @@STATE, ...). Always kept in a saved or downloaded log."><input id="show-protocol" type="checkbox"> Show @@ lines</label>
@@ -788,6 +803,14 @@
   <div class="stage-exchange" id="stage-exchange"></div>
   <div class="stage-status" id="stage-status"></div>
   <div class="stage-hint">Space talks · Esc closes</div>
+</div>
+
+<div class="replay-bar" id="replay-bar" hidden role="status">
+  <span>▶ Replaying <span class="replay-name" id="replay-name"></span></span>
+  <progress id="replay-progress" max="1" value="0"></progress>
+  <small id="replay-clock"></small>
+  <label>Speed <select id="replay-speed"><option value="1">1×</option><option value="4">4×</option><option value="20">20×</option><option value="0">All at once</option></select></label>
+  <button id="replay-stop" type="button">Stop</button>
 </div>
 
 <aside class="drawer" id="demo-drawer" aria-labelledby="demo-heading" dir="rtl" lang="he">
@@ -1534,11 +1557,14 @@ function showAlert(title, detail) {
 function hideAlert() { document.getElementById("connection-alert").hidden = true; }
 
 function handleConnectionChange(connected, closedOnPurpose) {
-  if (connected) hideAlert();
-  else if (!closedOnPurpose) {
+  if (connected) {
+    hideAlert();
+    stopReplay("the board connected");
+  } else if (!closedOnPurpose) {
     showAlert("Lost the board's USB connection.",
               "Check the cable and plug it back in - the app reconnects by itself. The board itself keeps running.");
   }
+  document.getElementById("replay-log").disabled = connected;
   elements.status.classList.toggle("connected", connected);
   elements.connect.textContent = connected ? "Disconnect" : "Connect board";
   elements.baud.disabled = connected;
@@ -3056,6 +3082,108 @@ document.addEventListener("keydown", (event) => {
   }
 });
 renderDemoChecklist();
+
+// ===== Log replay =====
+
+/** Pauses longer than this (at 1×) are shortened to it, so a replay doesn't sit idle. */
+const REPLAY_MAX_GAP_MS = 3000;
+
+const replay = { lines: [], index: 0, timer: null, startMs: 0 };
+
+/** Turns a log the app saved ("[hh:mm:ss.mmm] text" per line) into
+    { atMs, text } items. Lines without a time take the previous line's time;
+    the app's own notes and sent commands are left out. */
+function parseReplayLog(text) {
+  const items = [];
+  let atMs = 0;
+  for (const raw of text.split(/\r?\n/)) {
+    const match = raw.match(/^\[(\d+):(\d\d):(\d\d)\.(\d{3})\]\s?(.*)$/);
+    let line = raw;
+    if (match) {
+      let ms = ((+match[1] * 60 + +match[2]) * 60 + +match[3]) * 1000 + +match[4];
+      while (items.length && ms < atMs - 12 * 3600 * 1000) ms += 24 * 3600 * 1000;  // the log went past midnight
+      atMs = Math.max(atMs, ms);
+      line = match[5];
+    }
+    if (!line.trim() || line.startsWith("(app)") || line.startsWith(">> ")) continue;
+    items.push({ atMs, text: line });
+  }
+  return items;
+}
+
+/** Feeds one log line to the app the way the serial link would. */
+function replayLine(text) {
+  if (!text.startsWith("@@")) {
+    appendLog(text);
+    return;
+  }
+  const space = text.indexOf(" ");
+  const tag = space < 0 ? text : text.slice(0, space);
+  if (STATUS_TAGS.has(tag)) handleStatusLine(tag.slice(2), space < 0 ? "" : text.slice(space + 1));
+  else appendLog(text, { protocol: true });
+}
+
+async function startReplay(file) {
+  if (link.port) return;
+  const items = parseReplayLog(await file.text());
+  if (!items.some((item) => item.text.startsWith("@@"))) {
+    appendLog(`(app) ${file.name} has no status lines (@@...) to replay - pick a log this app saved.`);
+    return;
+  }
+  stopReplay();
+  Object.assign(replay, { lines: items, index: 0, startMs: items[0].atMs });
+  resetBoardStatus("unknown");
+  addConversationNote(`▶ Replaying ${file.name}`, "replay");
+  appendLog(`(app) Replaying ${file.name} (${items.length} lines).`);
+  document.getElementById("replay-name").textContent = file.name;
+  document.getElementById("replay-bar").hidden = false;
+  replayStep();
+}
+
+/** Plays the next line now and schedules the one after, by the log's own timing. */
+function replayStep() {
+  const speed = Number(document.getElementById("replay-speed").value);
+  do {
+    replayLine(replay.lines[replay.index].text);
+    replay.index += 1;
+  } while (replay.index < replay.lines.length &&
+           (speed === 0 || replay.lines[replay.index].atMs === replay.lines[replay.index - 1].atMs));
+
+  const done = replay.index >= replay.lines.length;
+  const previous = replay.lines[replay.index - 1];
+  document.getElementById("replay-progress").value = replay.index / replay.lines.length;
+  document.getElementById("replay-clock").textContent = formatSeconds((previous.atMs - replay.startMs) / 1000);
+  if (done) {
+    stopReplay();
+    return;
+  }
+  const gap = Math.min(replay.lines[replay.index].atMs - previous.atMs, REPLAY_MAX_GAP_MS);
+  replay.timer = setTimeout(replayStep, gap / speed);
+}
+
+/** Ends a replay (finished, stopped, or a board connected - reason says which). */
+function stopReplay(reason = "") {
+  if (document.getElementById("replay-bar").hidden) return;
+  clearTimeout(replay.timer);
+  replay.timer = null;
+  document.getElementById("replay-bar").hidden = true;
+  const finished = replay.index >= replay.lines.length;
+  addConversationNote(finished ? "■ Replay finished" : `■ Replay stopped${reason ? ` - ${reason}` : ""}`, "replay");
+  appendLog(`(app) Replay ${finished ? "finished" : "stopped"}.`);
+}
+
+document.getElementById("replay-log").addEventListener("click", () => document.getElementById("replay-file").click());
+document.getElementById("replay-file").addEventListener("change", (event) => {
+  const file = event.target.files[0];
+  event.target.value = "";
+  if (file) startReplay(file);
+});
+document.getElementById("replay-stop").addEventListener("click", () => stopReplay());
+document.getElementById("replay-speed").addEventListener("change", () => {
+  if (!replay.timer) return;
+  clearTimeout(replay.timer);
+  replayStep();
+});
 window.addEventListener("resize", renderResponseChart);
 document.getElementById("usage-reset").addEventListener("click", () => {
   const band = usage.lightBand;
