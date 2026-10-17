@@ -3,6 +3,7 @@
 #include <Arduino.h>
 #include <stdlib.h>
 #include <strings.h>
+#include "config.h"
 #include "log_utils.h"
 #include "settings_store_utils.h"
 #include "status_report_utils.h"
@@ -29,6 +30,23 @@ constexpr char kLightCommandWord[] = "LIGHT";
 constexpr size_t kLightCommandWordLen = sizeof(kLightCommandWord) - 1;
 constexpr char kLightBandsCommandWord[] = "LIGHT_BANDS";
 constexpr size_t kLightBandsCommandWordLen = sizeof(kLightBandsCommandWord) - 1;
+
+#ifdef LIGHT_SENSOR_PIN
+constexpr uint32_t kSensorReadIntervalMs = 1000;
+constexpr int kSamplesPerReading = 8;           // averaged - an ADC reading jitters by a few counts
+constexpr int kAnnounceChange = 150;            // on the 0-6142 scale: smaller moves don't print @@LIGHT
+uint32_t last_read_ms = 0;
+int last_announced_value = -1;
+
+/** One reading of the real sensor, on the same 0-6142 scale as LIGHT. */
+int readLightSensor() {
+  long sum = 0;
+  for (int i = 0; i < kSamplesPerReading; i++) {
+    sum += analogRead(LIGHT_SENSOR_PIN);
+  }
+  return static_cast<int>(sum / kSamplesPerReading) * 3 / 2;
+}
+#endif
 
 const char kResponseCreateMessage[] = R"JSON({"type":"response.create"})JSON";
 constexpr uint32_t kToolResponseBufferSize = 256;  // function_call_output messages are tiny - no audio involved
@@ -91,8 +109,32 @@ void setupLightSensor() {
     LOG_ERROR("Saved light thresholds %d/%d don't make sense - using the defaults.\n", saved_evening_min,
               saved_day_min);
   }
+#ifdef LIGHT_SENSOR_PIN
+  g_light_sensor_value = readLightSensor();
+  last_announced_value = g_light_sensor_value;
+  last_read_ms = millis();
+  LOG_INFO("Light sensor on GPIO %d starts at %d (%s).\n", LIGHT_SENSOR_PIN, g_light_sensor_value,
+           partOfDayForLightLevel(g_light_sensor_value));
+#else
   LOG_INFO("Simulated light sensor starts at %d (%s) - type LIGHT <0-%d> to change it.\n",
            g_light_sensor_value, partOfDayForLightLevel(g_light_sensor_value), kMaxLightSensorValue);
+#endif
+}
+
+void serviceLightSensor() {
+#ifdef LIGHT_SENSOR_PIN
+  if (millis() - last_read_ms < kSensorReadIntervalMs) {
+    return;
+  }
+  last_read_ms = millis();
+  g_light_sensor_value = readLightSensor();
+  // Same string literal for the same band, so comparing the pointers is enough.
+  bool band_changed = partOfDayForLightLevel(g_light_sensor_value) != partOfDayForLightLevel(last_announced_value);
+  if (band_changed || abs(g_light_sensor_value - last_announced_value) > kAnnounceChange) {
+    last_announced_value = g_light_sensor_value;
+    announceLightState();
+  }
+#endif
 }
 
 void announceLightState() {
@@ -123,6 +165,12 @@ bool handleLightCommand(const char* command) {
     announceLightState();
     return true;
   }
+
+#ifdef LIGHT_SENSOR_PIN
+  LOG_INFO("LIGHT ignored - the real sensor on GPIO %d sets the light level.\n", LIGHT_SENSOR_PIN);
+  announceLightState();
+  return true;
+#endif
 
   // strtol() alone can't tell "0" from "not a number" - parse_end catches the latter.
   char* parse_end = nullptr;

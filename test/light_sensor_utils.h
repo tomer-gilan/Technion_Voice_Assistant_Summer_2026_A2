@@ -7,6 +7,10 @@
 // get_time_of_day tool that lets the model ask for it. The physical sensor
 // (an LDR read as analogRead(pin) * 1.5) isn't wired up yet, so for now
 // g_light_sensor_value is set by hand with the LIGHT serial command instead.
+// Once it is: wire the LDR as a divider into an ADC1 pin and add
+// "#define LIGHT_SENSOR_PIN 34" (that pin) to config.h - then the board reads
+// it every second (serviceLightSensor()) and LIGHT <value> is refused.
+// Without that define nothing changes.
 // Same split as board_state_utils.h: whether a handled tool call counts
 // towards the current LISTEN cycle's state machine stays the caller's call.
 
@@ -21,6 +25,12 @@ constexpr int kMaxLightSensorValue = 4095 * 3 / 2;
     analogRead(<pin>) * 1.5 here instead. That pin must be an ADC1 pin
     (GPIO 32-39) - ADC2 pins can't be read while Wi-Fi is running. */
 extern int g_light_sensor_value;
+
+/** With LIGHT_SENSOR_PIN defined (config.h): reads the real sensor once a
+    second (the mean of a few samples, * 1.5) into g_light_sensor_value, and
+    prints @@LIGHT when the part of the day changes or the value moves by
+    more than a little. Call every loop() pass. Without it: does nothing. */
+void serviceLightSensor();
 
 /** Loads the day/evening thresholds saved by LIGHT_BANDS (or the defaults),
     then logs the starting light level and how to change it. Call once from

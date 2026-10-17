@@ -1263,6 +1263,7 @@ void loop() {
   checkPlaybackComplete();
   checkReplyTimeout();
   esp32va_hands_free::serviceHandsFree(boardCanListen());
+  esp32va_light_sensor::serviceLightSensor();  // a no-op until LIGHT_SENSOR_PIN is defined (config.h)
   // The timer rings whenever nothing is being recorded or played - even
   // with OpenAI unreachable, so a dropped connection never swallows it -
   // but it can only be announced out loud while the session is up.
