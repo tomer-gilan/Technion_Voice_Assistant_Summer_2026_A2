@@ -371,6 +371,8 @@
   .steps span.now[data-step="listening"] { color: var(--rec); }
   .steps span.now[data-step="processing"] { color: var(--warn); }
   .steps span.now[data-step="speaking"] { color: var(--accent); }
+  .timer-chip { font-size: 12px; padding: 3px 9px; border-radius: 999px; background: var(--warn-soft); color: var(--warn); font-weight: 700; font-variant-numeric: tabular-nums; }
+  .timer-chip.ringing { animation: blink 0.5s infinite; }
   .talk-row { grid-column: 1 / -1; display: flex; gap: 14px; align-items: center; flex-wrap: wrap; }
   button.talk {
     font-size: 17px; font-weight: 650; padding: 13px 26px; border-radius: 999px; border: 0;
@@ -578,6 +580,7 @@
           <div class="state-detail" id="state-detail">Connect the board to start.</div>
           <div class="steps" id="steps" aria-hidden="true">
             <span data-step="ready">Ready</span><span data-step="armed" id="step-armed" hidden>Waiting</span><span data-step="listening">Listening</span><span data-step="processing">Processing</span><span data-step="speaking">Speaking</span>
+            <span class="timer-chip" id="timer-chip" hidden title="A timer set by voice - the board beeps and blinks the LED when it's done"></span>
           </div>
         </div>
         <div class="talk-row">
@@ -788,7 +791,7 @@ const SAFE_FILE_NAME = /^[A-Za-z0-9_-][A-Za-z0-9_.-]{0,30}$/;  // a plain name, 
 // Status and controls (step 28) - the board's side is test/status_report_utils.h.
 const STATUS_TAGS = new Set(["@@STAGE", "@@STATE", "@@RESULT", "@@MIC_LEVEL", "@@HEARD", "@@SAID", "@@WIFI",
                              "@@LED", "@@VOLUME", "@@LIGHT", "@@BEEP", "@@VAD", "@@VAD_LEVEL", "@@VAD_EVENT",
-                             "@@TIMING", "@@BOOT_TIMING"]);
+                             "@@TIMING", "@@BOOT_TIMING", "@@TIMER"]);
 const STATUS_REQUEST_DELAY_MS = 400;   // after connecting, ask for the full picture
 const NO_STATUS_HINT_MS = 4000;        // no @@STATE by then: the board runs older firmware
 const TALK_START_TIMEOUT_MS = 2500;    // LISTEN sent but no "listening" yet: unlock Talk again
@@ -810,7 +813,8 @@ const DISCARD_TEXT = {                 // @@VAD_EVENT discarded <reason> - vad_u
   steady: "too steady to be speech (a machine, a bell?)",
 };
 const TOOL_LABELS = { set_board_state: "Switching the LED", get_time_of_day: "Reading the light sensor",
-                      set_volume: "Changing the volume" };
+                      set_volume: "Changing the volume", get_current_time: "Checking the clock",
+                      set_timer: "Setting a timer" };
 const STATE_TEXT = {
   offline: ["Not connected", "Connect the board to start."],
   unknown: ["Connected", "Waiting for the board to report its state…"],
@@ -1429,6 +1433,8 @@ function freshBoardStatus() {
     cycleFirstBubble: null,  // the first bubble added since the current LISTEN started
     cycleFirstSaid: null,    // the assistant's first bubble in it - gets the response time from @@TIMING
     cycleTools: new Set(),   // tools already noted in the conversation this LISTEN
+    timer: null,             // { endsAt (performance.now() ms), totalS } from @@TIMER, null when none runs
+    timerTicker: null,
   };
 }
 
@@ -2091,6 +2097,9 @@ function handleStatusLine(tag, rest) {
       onUsageTiming(parseKeyValues(rest));
       showAnswerTime(parseKeyValues(rest));
       break;
+    case "TIMER":
+      onTimerLine(words);
+      break;
     case "BOOT_TIMING":
       usage.bootMs = Number(parseKeyValues(rest).total_ms);
       renderUsage();
@@ -2121,6 +2130,7 @@ function onVadEvent([kind, first, second]) {
 function resetBoardStatus(shownState) {
   const old = state.board;
   [old.deferTimer, old.errorTimer, old.talkPendingTimer, old.noStatusTimer].forEach(clearTimeout);
+  clearInterval(old.timerTicker);
   clearInterval(old.listenTimer);
   state.board = freshBoardStatus();
   elements.healthSummary.textContent = shownState === "offline"
@@ -2132,6 +2142,7 @@ function resetBoardStatus(shownState) {
   renderVolume();
   renderLight();
   renderVad();
+  renderTimer();
   elements.vadNote.textContent = VAD_NOTE_DEFAULT;
   updateControlsEnabled();
 }
@@ -2379,11 +2390,57 @@ function noteToolInConversation(tool) {
     addConversationNote(band
       ? `${PART_OF_DAY_ICONS[band] || "🔆"} Read the light sensor: ${band} (${board.light.value})`
       : "🔆 Read the light sensor", "tool");
+  } else if (tool === "set_timer") {
+    const timer = board.timer;
+    addConversationNote(timer ? `⏰ Timer set for ${formatDuration(timer.totalS)}` : "⏰ Timer cancelled", "tool");
+  } else if (tool === "get_current_time") {
+    addConversationNote(`🕒 Read the board's clock`, "tool");
   } else if (tool === "set_volume") {
     addConversationNote(`🔊 Volume set to ${board.volume ? board.volume.percent : "?"}% by voice`, "tool");
   } else {
     addConversationNote(`⚙️ Ran ${tool}`, "tool");
   }
+}
+
+/** "75" -> "1:15". */
+function formatDuration(seconds) {
+  return `${Math.floor(seconds / 60)}:${pad(Math.round(seconds % 60))}`;
+}
+
+/** @@TIMER <left> <total> | off | done - the voice timer (test/clock_timer_utils.h). */
+function onTimerLine([first, second]) {
+  const board = state.board;
+  if (first === "done") {
+    board.timer = null;
+    addConversationNote("⏰ Timer done - the board is ringing!", "tool");
+    const chip = document.getElementById("timer-chip");
+    chip.hidden = false;
+    chip.textContent = "⏰ Ringing!";
+    chip.classList.add("ringing");
+    setTimeout(() => { chip.classList.remove("ringing"); renderTimer(); }, 4000);
+    return;
+  }
+  board.timer = first === "off" ? null : { endsAt: performance.now() + Number(first) * 1000, totalS: Number(second) || Number(first) };
+  renderTimer();
+}
+
+/** The countdown chip next to the state - ticks once a second while a timer runs. */
+function renderTimer() {
+  const board = state.board;
+  const chip = document.getElementById("timer-chip");
+  clearInterval(board.timerTicker);
+  if (!board.timer) {
+    if (!chip.classList.contains("ringing")) chip.hidden = true;
+    return;
+  }
+  const tick = () => {
+    if (!board.timer) return;
+    const left = Math.max(0, Math.ceil((board.timer.endsAt - performance.now()) / 1000));
+    chip.hidden = false;
+    chip.textContent = `⏰ ${formatDuration(left)}`;
+  };
+  tick();
+  board.timerTicker = setInterval(tick, 1000);
 }
 
 /** Hands-free sounds that never became a question, as notes. */
@@ -2710,7 +2767,7 @@ function renderResponseChart() {
     } else {
       svg.append(svgElement("text", { class: "fail-mark", x: x + barW / 2, y: yOf(0) - 4, "text-anchor": "middle" }, "✕"));
     }
-    const icon = turn.tool === "set_board_state" ? "💡" : turn.tool === "get_time_of_day" ? "🔆" : turn.tool === "set_volume" ? "🔊" : "";
+    const icon = { set_board_state: "💡", get_time_of_day: "🔆", set_volume: "🔊", set_timer: "⏰", get_current_time: "🕒" }[turn.tool] || "";
     if (icon && sound !== null) svg.append(svgElement("text", { x: x + barW / 2, y: yOf(sound) - 4, "text-anchor": "middle", "font-size": 11 }, icon));
     if (index % labelEvery === 0 || index === turns.length - 1) {
       svg.append(svgElement("text", { class: "axis-label", x: x + barW / 2, y: height - 6, "text-anchor": "middle" }, `#${turn.n}`));
@@ -2718,7 +2775,8 @@ function renderResponseChart() {
     const hit = svgElement("rect", { class: "hit", x: left + index * slot, y: top, width: slot, height: plotH, rx: 3 });
     hit.addEventListener("pointerenter", () => {
       const seconds = (ms) => (ms === null ? "-" : `${(ms / 1000).toFixed(2)} s`);
-      const toolText = { set_board_state: "LED by voice", get_time_of_day: "part of day", set_volume: "volume by voice" }[turn.tool];
+      const toolText = { set_board_state: "LED by voice", get_time_of_day: "part of day", set_volume: "volume by voice",
+                         set_timer: "timer", get_current_time: "clock time" }[turn.tool];
       tip.innerHTML = "";
       const title = document.createElement("b");
       title.textContent = `Command #${turn.n} · ${clockStamp(turn.at).slice(0, 8)}`;
@@ -2778,6 +2836,8 @@ const EXAMPLE_PHRASES = [
   ["🧠", "What is my name?"],
   ["🔊", "Set the volume to 30 percent"],
   ["🔊", "A bit louder"],
+  ["⏰", "Set a timer for 20 seconds"],
+  ["🕒", "What time is it?"],
 ];
 document.getElementById("phrases").replaceChildren(...EXAMPLE_PHRASES.map(([icon, phrase]) => {
   const button = document.createElement("button");
@@ -2809,6 +2869,7 @@ const DEMO_SECTIONS = [
     ["handsfree", "Hands-free בלי כפתור", "מדליקים את המתג ומדברים. הוא מתחיל ועוצר לבד."],
     ["led", "הדלקת אור בקול", "<code>Turn on the light</code> ואז <code>Turn off the light</code>. הנורה במסך זוהרת."],
     ["voicevolume", "עוצמה בקול", "<code>Set the volume to 30 percent</code>, ואז <code>A bit louder</code>."],
+    ["timer", "טיימר ושעה בקול", "<code>Set a timer for 20 seconds</code>: ספירה לאחור במסך, ובסוף הלוח מצפצף ומהבהב. <code>What time is it</code>."],
     ["daynight", "יום או לילה לפי חיישן האור", "סליידר האור נמוך, <code>Is it day or night</code>, ואז מעלים ושואלים שוב."],
     ["memory", "זיכרון שיחה", "<code>My name is Omri</code> ואז <code>What is my name</code>"],
     ["transcript", "רואים מה שמע ומה ענה", "בועות השיחה, זמן התשובה ותגיות הפעולה."],
