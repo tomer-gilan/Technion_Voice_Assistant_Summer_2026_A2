@@ -150,7 +150,7 @@
 
 1. להתקין את הספריות מה-Library Manager של Arduino.
 2. ליצור את `test/config.h` עם שם ה-Wi-Fi, הסיסמה ומפתח ה-API של OpenAI. הקובץ ב-`.gitignore`, לא מעלים אותו לגיט.
-3. לפתוח את `test/test.ino` ב-Arduino IDE, לבחור ESP32 Dev Module ולצרוב. להשתמש ב-hotspot מהטלפון ולא ב-Wi-Fi של הטכניון.
+3. לפתוח את `test/test.ino` ב-Arduino IDE, לבחור ESP32 Dev Module ולצרוב. להשתמש ב-hotspot מהטלפון ולא ב-Wi-Fi של הטכניון. אפשר גם משורת הפקודה: `arduino-cli compile --fqbn esp32:esp32:esp32 test`.
 4. לפתוח את `tools/reply_audio_app.html` ב-Chrome, ללחוץ **Connect board** ולבחור את ה-COM של הלוח (115200 baud).
 5. לחכות לנורות הירוקות ולברכת הפתיחה, ואז ללחוץ **Talk** או להדליק **Hands-free**.
 
@@ -201,6 +201,8 @@
 | פנוי בזמן שיחה | כ-45KB, יציב לאורך 26 שאלות (אין דליפה) |
 | הכי מעט פנוי בזמן שיחה | 27KB |
 | הצרכן הגדול ביותר | החיבור המוצפן וה-WebSocket, כ-51KB |
+| גודל הקושחה (הגרסה הנוכחית) | 1.06MB, ‏81% מה-flash (חלוקה רגילה, 1.25MB לאפליקציה) |
+| RAM קבוע (משתנים גלובליים) | 75KB מתוך 320KB |
 
 | שמע | |
 |---|---|
