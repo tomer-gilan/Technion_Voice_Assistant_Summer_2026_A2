@@ -425,6 +425,10 @@
   .result.ok { color: var(--ok); }
   .result.fail { color: var(--error); }
 
+  .phrases { display: flex; flex-wrap: wrap; gap: 6px; }
+  .phrases button { border-radius: 999px; font-size: 13px; padding: 5px 12px; display: inline-flex; gap: 6px; align-items: center; }
+  .phrases button:hover { background: var(--accent-soft); }
+
   /* ----- Device controls ----- */
   .controls { display: flex; flex-direction: column; gap: 14px; }
   .control { display: flex; flex-direction: column; gap: 6px; padding-bottom: 14px; border-bottom: 1px solid var(--border); }
@@ -609,6 +613,7 @@
       </div>
     </section>
 
+    <div class="column">
     <section class="panel controls" aria-labelledby="controls-heading">
       <div class="panel-head" style="margin:0"><h2 id="controls-heading">Device controls</h2></div>
       <div class="control">
@@ -654,6 +659,13 @@
         <p class="control-note" id="light-note" aria-live="polite"></p>
       </div>
     </section>
+
+    <section class="panel" aria-labelledby="try-heading">
+      <div class="panel-head"><h2 id="try-heading">Try saying</h2></div>
+      <p class="hint">Click a phrase to start recording, then say it. The assistant speaks English.</p>
+      <div class="phrases" id="phrases"></div>
+    </section>
+    </div>
   </div>
 
   <section class="panel" aria-labelledby="usage-heading">
@@ -2755,6 +2767,35 @@ function onUsageExportClick() {
 }
 
 document.getElementById("usage-export").addEventListener("click", onUsageExportClick);
+
+/** Example requests for whoever is trying the assistant - [icon, phrase]. */
+const EXAMPLE_PHRASES = [
+  ["💬", "What is the capital of France?"],
+  ["💡", "Turn on the light"],
+  ["💡", "Turn off the light"],
+  ["🌗", "Is it day or night?"],
+  ["🧠", "My name is Dana"],
+  ["🧠", "What is my name?"],
+  ["🔊", "Set the volume to 30 percent"],
+  ["🔊", "A bit louder"],
+];
+document.getElementById("phrases").replaceChildren(...EXAMPLE_PHRASES.map(([icon, phrase]) => {
+  const button = document.createElement("button");
+  button.type = "button";
+  button.title = "Starts recording - then say it";
+  button.append(Object.assign(document.createElement("span"), { textContent: icon, ariaHidden: "true" }), `“${phrase}”`);
+  button.addEventListener("click", () => {
+    if (elements.talk.disabled) {
+      elements.result.className = "result";
+      elements.result.textContent = link.connected ? "Busy - try again when the assistant is Ready." : "Connect the board first.";
+      return;
+    }
+    elements.result.className = "result";
+    elements.result.textContent = `Say: “${phrase}”`;
+    onTalkClick();
+  });
+  return button;
+}));
 document.getElementById("connection-alert-close").addEventListener("click", hideAlert);
 
 // ===== Demo checklist =====
