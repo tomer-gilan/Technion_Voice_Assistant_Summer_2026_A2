@@ -99,7 +99,9 @@ or left inline in `test.ino`:
   (`esp32va_light_sensor::g_light_sensor_value`), its day/evening/night
   thresholds (changeable with `LIGHT_BANDS`), the `LIGHT <value>` Serial
   command that simulates the sensor, and `get_time_of_day` tool-call
-  handling.
+  handling. Defining `LIGHT_SENSOR_PIN` (an ADC1 pin) in `config.h` switches
+  to the real LDR: read once a second by `serviceLightSensor()`, and
+  `LIGHT <value>` is refused.
 - `status_report_utils.h`/`.cpp` — the `@@STAGE` / `@@STATE` / `@@RESULT` /
   ... status lines the laptop app reads (protocol documented in its header),
   and the snapshot the `STATUS` command reprints.

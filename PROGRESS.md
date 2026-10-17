@@ -37,6 +37,7 @@
 | `22ca52c` | הטיימר מצלצל גם כשאין חיבור ל-OpenAI (קודם הוא חיכה לחיבור). ההודעה בקול רק כשיש חיבור |
 | `d9af02e` | `How long is left on my timer?`: התשובה של `get_current_time` כוללת גם כמה זמן נשאר לטיימר |
 | `3abf862` | `What can you do?` עונה במשפט אחד מה העוזר יודע לעשות. גם בכרטיס Try saying |
+| `ff777f2` | LDR אמיתי: עם `#define LIGHT_SENSOR_PIN 34` ב-`config.h` הלוח קורא את החיישן כל שנייה. בלי השורה הזאת שום דבר לא משתנה (לא נגעתי ב-`config.h`) |
 | `7bf4cea` | `How are you doing?`: כלי חדש `get_board_status` (מודול `board_info_utils`) שמחזיר עוצמת Wi-Fi, זמן מההדלקה וזיכרון פנוי. גם ב-Try saying וב-Summary |
 | `20de4c7` | שאלה בכתב לחדר רועש: שדה מתחת ל-Talk ששולח `ASK <text>`. התשובה בקול כרגיל, וגם כלים עובדים. בבועה כתוב typed (גם ב-GUI) |
 | `348a78d` | תזכורת בקול: ל-`set_timer` יש תיאור (`label`), ובסוף העוזר אומר `Time's up - check the oven`. גם מרכז הבקרה מציג את התיאור |
@@ -58,7 +59,8 @@
 | `4f6ecce` | GIF מונפש ב-README: ארבע פקודות קוליות במרכז הבקרה (`docs/images/demo.gif`) |
 | `a8f32aa` | שאלה בכתב: מקרה קצה 20, architecture, README, המדריך המהיר ו-demo-plan. PDF-ים מחדש |
 | `97ca2ae` | `get_board_status` ב-README, ב-architecture וב-`CLAUDE.md` |
-| הבא אחריו | Self-test ב-README, ב-demo-plan ובמדריך המהיר, וצילום מסך חדש |
+| `ac12619` | Self-test ב-README, ב-demo-plan ובמדריך המהיר, וצילום מסך חדש |
+| הבא אחריו | איך מחברים LDR אמיתי (README, architecture, `CLAUDE.md`) |
 
 ## מה צריך לבדוק על הלוח
 
@@ -87,9 +89,10 @@
 7. **`What can you do?`:** עונה במשפט אחד עם הדברים שהוא יודע לעשות.
 8. **מצב הלוח:** `How are you doing?`: עונה עם עוצמת ה-Wi-Fi, כמה דקות הוא דלוק וכמה זיכרון פנוי. בשיחה מופיעה תגית 📶.
 9. **שאלה בכתב:** בשדה שמתחת ל-Talk לכתוב `What is the capital of Italy?` ו-Ask: העוזר עונה בקול, ובבועה כתוב typed. `Turn on the light` בכתב: ה-LED נדלק. Ask באמצע תשובה: מתחת לשיחה כתוב שהשאלה לא נשלחה.
-10. **שלא נשבר כלום:** `Turn on the light`, `Is it day or night?`, Hands-free, הקלטות ב-SD.
+10. **שלא נשבר כלום:** `Turn on the light`, `Is it day or night?`, Hands-free, הקלטות ב-SD. סליידר האור עדיין משנה את הערך (בלי `LIGHT_SENSOR_PIN`).
+11. **רק אם מחברים LDR:** להוסיף `#define LIGHT_SENSOR_PIN 34` ל-`config.h` (בלי commit). סליידר האור במסך זז לבד כשמכסים את החיישן, ו-`Is it day or night?` עונה לפי האור האמיתי.
 
-אם משהו מהקושחה לא עובד, אפשר לבטל רק אותו: `git revert 7bf4cea` (מצב הלוח), `git revert 20de4c7` (שאלה בכתב, מבטל גם את השדה ב-GUI), `git revert 9b6db09` (עמעום בקול), `git revert 22ca52c` (צלצול בלי חיבור), `git revert d9af02e` (כמה זמן נשאר), `git revert 348a78d` (התזכורת בקול), `git revert e0a8753` (טיימר ושעה, אחרי שביטלתם את שני אלה) או `git revert 80b1506` (עוצמה). ה-GUI ממשיך לעבוד גם בלי הכלים האלה.
+אם משהו מהקושחה לא עובד, אפשר לבטל רק אותו: `git revert ff777f2` (LDR), `git revert 7bf4cea` (מצב הלוח), `git revert 20de4c7` (שאלה בכתב, מבטל גם את השדה ב-GUI), `git revert 9b6db09` (עמעום בקול), `git revert 22ca52c` (צלצול בלי חיבור), `git revert d9af02e` (כמה זמן נשאר), `git revert 348a78d` (התזכורת בקול), `git revert e0a8753` (טיימר ושעה, אחרי שביטלתם את שני אלה) או `git revert 80b1506` (עוצמה). ה-GUI ממשיך לעבוד גם בלי הכלים האלה.
 
 ## בדיקה של מרכז הבקרה
 
@@ -110,7 +113,7 @@
 ## עוד לא נעשה
 
 - שמות הצוות ב-README ("להשלים").
-- חיישן ה-LDR עוד מדומה.
+- חיישן ה-LDR עוד לא מחובר פיזית. הקוד מוכן ומחכה ל-`LIGHT_SENSOR_PIN`.
 
 ## פקודות
 
