@@ -312,6 +312,20 @@
   .orb[data-state="speaking"], .orb[data-state="saving"] { background: var(--accent-soft); color: var(--accent); }
   .orb[data-state="speaking"]::after { animation: pulse 1.6s ease-out infinite; }
   .orb[data-state="error"], .orb[data-state="halted"] { background: var(--error-soft); color: var(--error); }
+  /* A second ring that follows the voice level (--level, 0..1) while listening or waiting for speech */
+  .orb::before {
+    content: ""; position: absolute; inset: 0; border-radius: 50%; background: currentColor; opacity: 0;
+    transform: scale(calc(1 + var(--level, 0) * 0.32)); transition: transform 0.12s ease-out, opacity 0.2s;
+  }
+  .orb[data-state="listening"]::before, .orb[data-state="armed"]::before { opacity: 0.16; }
+  .orb > svg, .orb .eq { position: relative; z-index: 1; }
+  .orb .eq { display: none; gap: 5px; align-items: center; height: 44px; }
+  .orb .eq i { width: 6px; height: 100%; border-radius: 3px; background: currentColor; animation: eq 0.9s ease-in-out infinite; transform-origin: center; }
+  .orb .eq i:nth-child(2) { animation-delay: -0.15s; } .orb .eq i:nth-child(3) { animation-delay: -0.45s; }
+  .orb .eq i:nth-child(4) { animation-delay: -0.3s; }  .orb .eq i:nth-child(5) { animation-delay: -0.6s; }
+  .orb[data-state="speaking"] > svg { display: none; }
+  .orb[data-state="speaking"] .eq { display: flex; }
+  @keyframes eq { 0%, 100% { transform: scaleY(0.25); } 50% { transform: scaleY(1); } }
   @keyframes pulse { from { transform: scale(1); opacity: 0.5; } to { transform: scale(1.22); opacity: 0; } }
   @keyframes breathe { 0%, 100% { transform: scale(1); opacity: 0.2; } 50% { transform: scale(1.1); opacity: 0.55; } }
   @keyframes spin { to { transform: rotate(360deg); } }
@@ -398,6 +412,14 @@
   .chip { font-size: 11.5px; padding: 1px 8px; border-radius: 999px; background: var(--accent-soft); color: var(--accent); font-weight: 600; }
   .flash { animation: flash 1.6s ease-out; }
   @keyframes flash { from { box-shadow: 0 0 0 4px var(--accent); } to { box-shadow: 0 0 0 0 transparent; } }
+  .bulb { width: 26px; height: 26px; vertical-align: -7px; margin-right: 4px; color: var(--muted); transition: color 0.3s, filter 0.3s; }
+  .bulb .glass { fill: transparent; transition: fill 0.3s; }
+  .bulb[data-on="true"] { color: #c98a00; filter: drop-shadow(0 0 calc(var(--glow, 1) * 9px) rgba(255, 196, 0, 0.9)); }
+  .bulb[data-on="true"] .glass { fill: rgba(255, 205, 40, calc(0.25 + var(--glow, 1) * 0.75)); }
+  .sky { display: inline-block; width: 22px; height: 22px; vertical-align: -6px; margin-right: 3px; }
+  .sky svg { width: 100%; height: 100%; display: block; }
+  .sky.changed { animation: sky-pop 0.6s ease-out; }
+  @keyframes sky-pop { 40% { transform: scale(1.5) rotate(-12deg); } }
   .bands { position: relative; display: flex; height: 26px; border-radius: 6px; overflow: hidden; font-size: 11px; }
   .bands div { display: grid; place-items: center; overflow: hidden; white-space: nowrap; }
   .band-night { background: color-mix(in srgb, var(--accent) 22%, var(--panel)); }
@@ -484,7 +506,7 @@
     <section class="panel" aria-labelledby="assistant-heading">
       <h2 id="assistant-heading" class="visually-hidden">Assistant</h2>
       <div class="assistant">
-        <div class="orb" id="orb" data-state="offline"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></svg></div>
+        <div class="orb" id="orb" data-state="offline"><span class="eq" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></svg></div>
         <div>
           <div class="state-label" id="state-label" aria-live="polite">Not connected</div>
           <div class="state-detail" id="state-detail">Connect the board to start.</div>
@@ -543,7 +565,7 @@
       </div>
       <div class="control" id="led-control">
         <div class="control-title">
-          <span>Onboard LED <span class="chip" id="led-chip" hidden>changed by voice</span></span>
+          <span><svg class="bulb" id="bulb" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path class="glass" d="M9 17.5h6M12 2.5a6.5 6.5 0 0 0-3.8 11.8c.5.4.8 1 .8 1.6v1.6h6v-1.6c0-.6.3-1.2.8-1.6A6.5 6.5 0 0 0 12 2.5z"/><path d="M10 20.5h4"/></svg>Onboard LED <span class="chip" id="led-chip" hidden>changed by voice</span></span>
           <span class="switch"><input id="led" type="checkbox" aria-label="LED on or off" disabled><span class="knob"></span></span>
         </div>
         <div class="control-line">
@@ -555,7 +577,7 @@
       <div class="control">
         <div class="control-title">
           <label for="light-value">Light sensor <span style="font-weight:400;color:var(--muted)">(simulated)</span></label>
-          <span style="font-weight:400;font-size:13px;color:var(--muted)">reads <b id="light-reading">-</b> → <b id="light-band">-</b></span>
+          <span style="font-weight:400;font-size:13px;color:var(--muted)">reads <b id="light-reading">-</b> → <span class="sky" id="light-icon" aria-hidden="true"></span><b id="light-band">-</b></span>
         </div>
         <div class="bands" aria-hidden="true">
           <div class="band-night" id="band-night">night</div><div class="band-evening" id="band-evening">evening</div><div class="band-day" id="band-day">day</div>
@@ -2166,6 +2188,7 @@ function meterPercent(dbfs, min, max) {
 /** The meter as a plain mic level (@@MIC_LEVEL, while recording) - null
     empties it. */
 function showMicLevel(dbfs) {
+  elements.orb.style.setProperty("--level", dbfs === null ? 0 : meterPercent(dbfs, MIC_METER_FLOOR_DBFS, 0) / 100);
   elements.meterName.textContent = "Mic level";
   elements.micFill.classList.remove("quiet");
   elements.micFill.style.width = `${dbfs === null ? 0 : meterPercent(dbfs, MIC_METER_FLOOR_DBFS, 0)}%`;
@@ -2179,6 +2202,7 @@ function showMicLevel(dbfs) {
     noise floor and at that threshold. */
 function showVadLevel(levelDbfs, floorDbfs, thresholdDbfs) {
   elements.meterName.textContent = "Voice level";
+  elements.orb.style.setProperty("--level", meterPercent(levelDbfs, VAD_METER_MIN_DBFS, VAD_METER_MAX_DBFS) / 100);
   elements.micFill.style.width = `${meterPercent(levelDbfs, VAD_METER_MIN_DBFS, VAD_METER_MAX_DBFS)}%`;
   elements.micFill.classList.toggle("quiet", !(levelDbfs >= thresholdDbfs));
   elements.meterFloor.style.left = `${meterPercent(floorDbfs, VAD_METER_MIN_DBFS, VAD_METER_MAX_DBFS)}%`;
@@ -2225,6 +2249,14 @@ function insertConversationItem(item, before) {
 }
 
 const PART_OF_DAY_ICONS = { day: "☀️", evening: "🌇", night: "🌙" };
+/** Drawn icons for the light sensor's part of the day (emoji differ too much between systems at that size). */
+const SKY_ICONS = {
+  day: '<svg viewBox="0 0 24 24" fill="none" stroke="#e0a100" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="4.5" fill="#ffc83a"/>' +
+       '<path d="M12 2v2.5M12 19.5V22M2 12h2.5M19.5 12H22M4.9 4.9l1.8 1.8M17.3 17.3l1.8 1.8M4.9 19.1l1.8-1.8M17.3 6.7l1.8-1.8"/></svg>',
+  evening: '<svg viewBox="0 0 24 24" fill="none" stroke="#e0662a" stroke-width="2" stroke-linecap="round"><path d="M6.5 17a5.5 5.5 0 0 1 11 0z" fill="#ff9a4d"/>' +
+           '<path d="M2 17h20M12 6.5V9M4.6 9.6l1.7 1.7M19.4 9.6l-1.7 1.7M5 20.5h14"/></svg>',
+  night: '<svg viewBox="0 0 24 24" fill="#7f8cff" stroke="#5b67d8" stroke-width="1.5" stroke-linejoin="round"><path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5z"/></svg>',
+};
 
 /** A tool call from @@STATE tool <name>, as a note: what it did on the board. */
 function noteToolInConversation(tool) {
@@ -2324,6 +2356,9 @@ function renderVolume() {
 
 function renderLed() {
   const led = state.board.led;
+  const bulb = document.getElementById("bulb");
+  bulb.dataset.on = String(Boolean(led && led.on));
+  bulb.style.setProperty("--glow", led ? Math.max(0.15, led.brightness / 100) : 1);
   elements.led.checked = Boolean(led && led.on);
   if (led && !isBeingEdited(elements.ledBrightness)) elements.ledBrightness.value = led.brightness;
   elements.ledBrightnessValue.textContent = led ? `${led.brightness}%` : "-";
@@ -2365,7 +2400,15 @@ function drawLightBands(value, eveningMin, dayMin) {
   elements.bandDay.style.width = `${((LIGHT_SENSOR_MAX - dayMin) / LIGHT_SENSOR_MAX) * 100}%`;
   elements.lightNeedle.style.left = `calc(${(value / LIGHT_SENSOR_MAX) * 100}% - 1.5px)`;
   elements.lightReading.textContent = value;
-  elements.lightBand.textContent = partOfDay(value, eveningMin, dayMin);
+  const band = partOfDay(value, eveningMin, dayMin);
+  const icon = document.getElementById("light-icon");
+  if (elements.lightBand.textContent !== band && elements.lightBand.textContent !== "-") {
+    icon.classList.remove("changed");
+    void icon.offsetWidth;  // restart the animation
+    icon.classList.add("changed");
+  }
+  icon.innerHTML = SKY_ICONS[band];
+  elements.lightBand.textContent = band;
 }
 
 function renderLight() {
@@ -2379,6 +2422,7 @@ function renderLight() {
     drawLightBands(Number(elements.lightValue.value), Number(elements.eveningMin.value), Number(elements.dayMin.value));
     elements.lightReading.textContent = "-";
     elements.lightBand.textContent = "-";
+    document.getElementById("light-icon").textContent = "";
   }
   updateControlsEnabled();
 }
