@@ -69,15 +69,16 @@
 #include "mic_capture_utils.h"
 #include "hands_free_utils.h"
 #include "vad_utils.h"
+#include "clock_timer_utils.h"
 
 namespace {
-// Unchanged from step 21 except for the get_time_of_day and set_volume tools
-// and their instructions sentences: 24kHz PCM in / 8kHz mu-law out, manual turn
+// Unchanged from step 21 except for the get_time_of_day, set_volume,
+// get_current_time and set_timer tools and their instructions sentences: 24kHz PCM in / 8kHz mu-law out, manual turn
 // control, the set_board_state tool, and the one-short-sentence instructions.
 const char kSessionUpdateMessage[] =
     R"JSON({"type":"session.update","session":{"type":"realtime","model":")JSON"
     OPENAI_MODEL
-    R"JSON(","instructions":"You are a voice assistant on an ESP32 dev board. STRICT RULE: reply in exactly ONE short sentence, no more than about 12 words - never two sentences, never a list, no exceptions even for complex questions. If the full answer would need more than that, say only the single most important part of it and drop the rest - a short incomplete answer is correct, a longer complete one is not. When the user asks you to turn the onboard LED on or off, call the set_board_state function with the requested led_on value - don't just say you did it. STRICT RULE: only call set_board_state if THIS specific message clearly and explicitly asks for a board state change - never call it because of an earlier request, a repeated pattern from the conversation so far, or silence/unclear audio; if you did not clearly hear a specific request in this turn, do not call the function and do not assume one was intended. When the user asks about the current time of day - for example what part of the day it is, or whether it is day, evening or night - call the get_time_of_day function and answer from its result, e.g. 'It is currently evening.' Never guess the time of day and never reuse an earlier get_time_of_day result: call it again for every such question, because the light level it is based on changes over time. It only tells day, evening or night, not the clock time. When the user asks to change the speaker volume, call set_volume - with percent for a specific level (e.g. 'set the volume to 30 percent' -> 30), or with step up or down for just louder or quieter - and only when THIS message clearly asks for it.","output_modalities":["audio"],"audio":{"input":{"format":{"type":"audio/pcm","rate":24000},"turn_detection":null,"transcription":{"model":"gpt-4o-mini-transcribe"}},"output":{"format":{"type":"audio/pcmu"},"voice":"alloy"}},"tools":[{"type":"function","name":"set_board_state","description":"Turns the ESP32 dev board's onboard LED on or off.","parameters":{"type":"object","properties":{"led_on":{"type":"boolean","description":"true to turn the LED on, false to turn it off"}},"required":["led_on"]}},{"type":"function","name":"get_time_of_day","description":"Returns the current part of the day - day, evening or night - judged from the board's ambient light sensor. Not a clock time.","parameters":{"type":"object","properties":{}}},{"type":"function","name":"set_volume","description":"Sets the board's speaker volume, and unmutes it. Give percent for a specific level, or step for louder/quieter by 20 percent.","parameters":{"type":"object","properties":{"percent":{"type":"integer","description":"the requested volume in percent, 0 to 100"},"step":{"type":"string","enum":["up","down"],"description":"up for louder, down for quieter - only when no specific percent was asked"}}}}],"tool_choice":"auto","reasoning":{"effort":"low"}}})JSON";
+    R"JSON(","instructions":"You are a voice assistant on an ESP32 dev board. STRICT RULE: reply in exactly ONE short sentence, no more than about 12 words - never two sentences, never a list, no exceptions even for complex questions. If the full answer would need more than that, say only the single most important part of it and drop the rest - a short incomplete answer is correct, a longer complete one is not. When the user asks you to turn the onboard LED on or off, call the set_board_state function with the requested led_on value - don't just say you did it. STRICT RULE: only call set_board_state if THIS specific message clearly and explicitly asks for a board state change - never call it because of an earlier request, a repeated pattern from the conversation so far, or silence/unclear audio; if you did not clearly hear a specific request in this turn, do not call the function and do not assume one was intended. When the user asks about the current time of day - for example what part of the day it is, or whether it is day, evening or night - call the get_time_of_day function and answer from its result, e.g. 'It is currently evening.' Never guess the time of day and never reuse an earlier get_time_of_day result: call it again for every such question, because the light level it is based on changes over time. It only tells day, evening or night, not the clock time. When the user asks to change the speaker volume, call set_volume - with percent for a specific level (e.g. 'set the volume to 30 percent' -> 30), or with step up or down for just louder or quieter - and only when THIS message clearly asks for it. When the user asks what time or date it is, call get_current_time and answer from its result. When the user asks for a timer or a reminder in some time, call set_timer with the total number of seconds (seconds 0 cancels the timer); the board rings by itself when it is done.","output_modalities":["audio"],"audio":{"input":{"format":{"type":"audio/pcm","rate":24000},"turn_detection":null,"transcription":{"model":"gpt-4o-mini-transcribe"}},"output":{"format":{"type":"audio/pcmu"},"voice":"alloy"}},"tools":[{"type":"function","name":"set_board_state","description":"Turns the ESP32 dev board's onboard LED on or off.","parameters":{"type":"object","properties":{"led_on":{"type":"boolean","description":"true to turn the LED on, false to turn it off"}},"required":["led_on"]}},{"type":"function","name":"get_time_of_day","description":"Returns the current part of the day - day, evening or night - judged from the board's ambient light sensor. Not a clock time.","parameters":{"type":"object","properties":{}}},{"type":"function","name":"set_volume","description":"Sets the board's speaker volume, and unmutes it. Give percent for a specific level, or step for louder/quieter by 20 percent.","parameters":{"type":"object","properties":{"percent":{"type":"integer","description":"the requested volume in percent, 0 to 100"},"step":{"type":"string","enum":["up","down"],"description":"up for louder, down for quieter - only when no specific percent was asked"}}}},{"type":"function","name":"get_current_time","description":"Returns the current local date and clock time from the board's clock.","parameters":{"type":"object","properties":{}}},{"type":"function","name":"set_timer","description":"Starts a timer on the board that beeps and blinks the LED when it is done. 0 cancels a running timer.","parameters":{"type":"object","properties":{"seconds":{"type":"integer","description":"how long until it rings, in seconds (1 to 3600), or 0 to cancel"}},"required":["seconds"]}}],"tool_choice":"auto","reasoning":{"effort":"low"}}})JSON";
 
 const char kCommitMessage[] = R"JSON({"type":"input_audio_buffer.commit"})JSON";
 const char kResponseCreateMessage[] = R"JSON({"type":"response.create"})JSON";
@@ -480,6 +481,10 @@ void handleServerMessage(uint8_t* payload, size_t length) {
       handled = esp32va_light_sensor::handleGetTimeOfDayCall(doc, webSocket);
     } else if (strcmp(function_name, "set_volume") == 0) {
       handled = esp32va_controls::handleSetVolumeCall(doc, webSocket);
+    } else if (strcmp(function_name, "get_current_time") == 0) {
+      handled = esp32va_clock::handleGetCurrentTimeCall(doc, webSocket);
+    } else if (strcmp(function_name, "set_timer") == 0) {
+      handled = esp32va_clock::handleSetTimerCall(doc, webSocket);
     } else {
       LOG_ERROR("Unhandled function call: %s\n", function_name);
     }
@@ -906,6 +911,7 @@ void reprintFullStatus() {
   esp32va_controls::announceControlStates();
   esp32va_light_sensor::announceLightState();
   esp32va_hands_free::announceHandsFreeState();
+  esp32va_clock::announceTimerState();
 }
 
 /** Starts a manual LISTEN (the command, or the app's Talk button) if the
@@ -1213,6 +1219,7 @@ void loop() {
   checkPlaybackComplete();
   checkReplyTimeout();
   esp32va_hands_free::serviceHandsFree(boardCanListen());
+  esp32va_clock::serviceTimer(boardCanListen());
   esp32va_wifi::monitorWifiConnection();
   updatePipelineState();
 }
