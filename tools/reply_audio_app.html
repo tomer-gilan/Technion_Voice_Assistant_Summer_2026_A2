@@ -562,6 +562,13 @@
   .demo-item .demo-how { grid-column: 2; font-size: 12.5px; color: var(--muted); }
   .demo-item code { font: 12px var(--mono); background: var(--accent-soft); color: var(--accent); padding: 0 5px; border-radius: 4px; }
   .demo-item.done { background: var(--ok-soft); border-color: transparent; }
+  .demo-item.auto .demo-title::after { content: "אוטומטי"; display: inline-block; margin-inline-start: 8px; font-weight: 400; font-size: 11.5px; color: var(--muted); }
+  .demo-toast {
+    position: fixed; bottom: 18px; left: 50%; transform: translate(-50%, 12px); z-index: 60; opacity: 0; pointer-events: none;
+    background: var(--ok-soft); color: var(--text); border: 1px solid var(--ok); border-radius: 999px;
+    padding: 7px 16px; font-size: 13.5px; box-shadow: 0 4px 14px rgba(0,0,0,0.15); transition: opacity 0.25s, transform 0.25s;
+  }
+  .demo-toast.show { opacity: 1; transform: translate(-50%, 0); }
   .demo-item.done .demo-title { text-decoration: line-through; text-decoration-color: color-mix(in srgb, var(--ok) 60%, transparent); }
   .visually-hidden { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
   @media (prefers-reduced-motion: reduce) {
@@ -876,6 +883,7 @@
   <button id="replay-stop" type="button">Stop</button>
 </div>
 
+<div class="demo-toast" id="demo-toast" dir="rtl" lang="he" role="status" aria-live="polite"></div>
 <aside class="drawer" id="demo-drawer" aria-labelledby="demo-heading" dir="rtl" lang="he">
   <div class="drawer-head">
     <h2 id="demo-heading">צ'ק-ליסט להדגמה</h2>
@@ -1623,7 +1631,10 @@ function handleConnectionChange(connected, closedOnPurpose) {
   if (connected) {
     hideAlert();
     stopReplay("the board connected");
+    if (state.portLost) setTimeout(() => autoTickDemo("reconnect"), 0);  // after link.connected is set
+    state.portLost = false;
   } else if (!closedOnPurpose) {
+    state.portLost = true;
     showAlert("Lost the board's USB connection.",
               "Check the cable and plug it back in - the app reconnects by itself. The board itself keeps running.");
   }
@@ -2181,6 +2192,7 @@ function handleStatusLine(tag, rest) {
       break;
     case "SAID":
       addBubble("said", rest);
+      autoTickDemo("transcript");
       break;
     case "WIFI":
       board.wifiRssi = Number(words[0]);
@@ -2216,10 +2228,13 @@ function handleStatusLine(tag, rest) {
       onVadEvent(words);
       noteVadEventInConversation(words);
       if (words[0] === "discarded") countUsage("noisesIgnored");
+      if (words[0] === "discarded") autoTickDemo("cough");
+      if (words[0] === "paused") autoTickDemo("manynoises");
       break;
     case "TIMING":
       onUsageTiming(parseKeyValues(rest));
       showAnswerTime(parseKeyValues(rest));
+      autoTickDemo(parseKeyValues(rest).mode === "vad" ? "handsfree" : "talk");
       break;
     case "TIMER":
       onTimerLine(words);
@@ -2312,6 +2327,7 @@ function renderHealth() {
   elements.healthSummary.textContent = failed
     ? `${failed} check${failed === 1 ? "" : "s"} failed`
     : done === all.length ? "All checks passed" : "Running startup checks…";
+  if (done === all.length) autoTickDemo("boot");
 }
 
 /** A new @@STATE from the board. */
@@ -2325,6 +2341,7 @@ function onPipelineState({ state: pipelineState, detail }) {
   if (pipelineState === "tool" && detail && !board.cycleTools.has(detail)) {
     board.cycleTools.add(detail);
     noteToolInConversation(detail);
+    if (DEMO_TOOL_ITEMS[detail]) autoTickDemo(DEMO_TOOL_ITEMS[detail]);
   }
   if (board.talkPending && !IDLE_STATES.has(pipelineState)) {
     board.talkPending = false;
@@ -2548,6 +2565,8 @@ function onTimerLine([first, second, ...rest]) {
     chip.textContent = "⏰ Ringing!";
     chip.classList.add("ringing");
     setTimeout(() => { chip.classList.remove("ringing"); renderTimer(); }, 4000);
+    autoTickDemo("timer");
+    if (!board.stages.openai || board.stages.openai.state !== "ok") autoTickDemo("timeroffline");
     return;
   }
   board.timer = first === "off" ? null
@@ -3052,9 +3071,12 @@ const DEMO_SECTIONS = [
   ]],
 ];
 const DEMO_STORAGE_KEY = "esp32va-demo-checklist";
+/** Tools whose use ticks a checklist item by itself (autoTickDemo). */
+const DEMO_TOOL_ITEMS = { set_board_state: "led", set_volume: "voicevolume", get_time_of_day: "daynight" };
 
 /** Ticked items, kept in this browser (may be unavailable - then just for this page). */
 let demoDone = new Set();
+const demoAuto = new Set();  // ticked by autoTickDemo() on this page, not by hand
 try { demoDone = new Set(JSON.parse(localStorage.getItem(DEMO_STORAGE_KEY) || "[]")); } catch (_) { /* no storage */ }
 
 function saveDemoDone() {
@@ -3070,10 +3092,11 @@ function renderDemoChecklist() {
     title.textContent = heading;
     return [title, ...items.map(([id, name, how]) => {
       const item = document.createElement("label");
-      item.className = `demo-item${demoDone.has(id) ? " done" : ""}`;
+      item.className = `demo-item${demoDone.has(id) ? " done" : ""}${demoAuto.has(id) ? " auto" : ""}`;
       const box = Object.assign(document.createElement("input"), { type: "checkbox", checked: demoDone.has(id) });
       box.addEventListener("change", () => {
         if (box.checked) demoDone.add(id); else demoDone.delete(id);
+        demoAuto.delete(id);
         saveDemoDone();
         renderDemoChecklist();
       });
@@ -3088,6 +3111,25 @@ function renderDemoChecklist() {
   const done = all.filter(([id]) => demoDone.has(id)).length;
   document.getElementById("demo-bar").style.width = `${(done / all.length) * 100}%`;
   document.getElementById("demo-count").textContent = `${done} מתוך ${all.length} הודגמו`;
+  document.getElementById("demo-open").textContent = `✓ Demo checklist ${done}/${all.length}`;
+}
+
+/** Ticks a checklist item by itself when the board just showed it working
+    (a live board only - not a replayed log), with a short note at the bottom. */
+let demoToastTimer = null;
+function autoTickDemo(id) {
+  if (!link.connected || demoDone.has(id)) return;
+  const item = DEMO_SECTIONS.flatMap(([, items]) => items).find(([itemId]) => itemId === id);
+  if (!item) return;
+  demoDone.add(id);
+  demoAuto.add(id);
+  saveDemoDone();
+  renderDemoChecklist();
+  const toast = document.getElementById("demo-toast");
+  toast.textContent = `✓ סומן בצ'ק-ליסט: ${item[1]}`;
+  toast.classList.add("show");
+  clearTimeout(demoToastTimer);
+  demoToastTimer = setTimeout(() => toast.classList.remove("show"), 3500);
 }
 
 function setDemoOpen(open) {
@@ -3101,6 +3143,7 @@ document.getElementById("demo-open").addEventListener("click", () => {
 document.getElementById("demo-close").addEventListener("click", () => setDemoOpen(false));
 document.getElementById("demo-reset").addEventListener("click", () => {
   demoDone.clear();
+  demoAuto.clear();
   saveDemoDone();
   renderDemoChecklist();
 });
@@ -3249,6 +3292,7 @@ function setSummaryOpen(open) {
     setStageOpen(false);
     setDemoOpen(false);
     renderSummary();
+    autoTickDemo("summary");
   }
 }
 
