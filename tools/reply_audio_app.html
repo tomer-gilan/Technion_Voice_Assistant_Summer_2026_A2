@@ -471,6 +471,28 @@
     width: 92px; font: 13px var(--mono); padding: 5px 7px; border-radius: 6px;
     border: 1px solid var(--border); background: var(--log-bg); color: var(--text);
   }
+  /* ----- Stage view: the assistant, big, for a room watching the laptop ----- */
+  .stage {
+    position: fixed; inset: 0; z-index: 30; background: var(--bg); display: flex; flex-direction: column;
+    align-items: center; justify-content: center; gap: 22px; padding: 32px; text-align: center;
+  }
+  .stage .orb { width: 260px; height: 260px; }
+  .stage .orb svg { width: 96px; height: 96px; }
+  .stage .orb .eq { height: 96px; gap: 10px; }
+  .stage .orb .eq i { width: 13px; border-radius: 7px; }
+  .stage .orb::after { inset: -12px; border-width: 5px; }
+  .stage-label { font-size: 56px; font-weight: 750; line-height: 1.1; }
+  .stage-detail { font-size: 22px; color: var(--muted); min-height: 1.4em; }
+  .stage-exchange { display: flex; flex-direction: column; gap: 12px; width: min(1000px, 100%); }
+  .stage-exchange .bubble { font-size: 26px; padding: 14px 22px; border-radius: 20px; max-width: 85%; text-align: left; animation: none; }
+  .stage-exchange .bubble b { font-size: 15px; }
+  .stage-status { display: flex; gap: 22px; align-items: center; font-size: 20px; color: var(--muted); }
+  .stage-status .bulb { width: 34px; height: 34px; }
+  .stage-status .sky { width: 30px; height: 30px; }
+  .stage-status .timer-chip { font-size: 20px; padding: 4px 14px; }
+  .stage-close { position: absolute; top: 16px; right: 16px; }
+  .stage-hint { position: absolute; bottom: 14px; font-size: 13px; color: var(--muted); }
+
   /* ----- Demo checklist drawer ----- */
   .drawer {
     position: fixed; top: 0; right: 0; bottom: 0; z-index: 20; width: min(400px, 100vw); overflow-y: auto;
@@ -523,6 +545,7 @@
       <option value="115200" selected>115200 baud</option>
       <option value="921600">921600 baud</option>
     </select>
+    <button id="stage-open" type="button" title="A big view of the assistant for people watching from a distance (key F)">⛶ Stage view</button>
     <button id="demo-open" type="button" aria-controls="demo-drawer" aria-expanded="false">✓ Demo checklist</button>
     <button id="connect" class="primary" type="button">Connect board</button>
     <span id="status" class="status-pill" role="status">Not connected</span>
@@ -754,6 +777,18 @@
   </section>
   </div>
 </main>
+
+<div class="stage" id="stage" hidden role="dialog" aria-label="Stage view">
+  <button class="stage-close" id="stage-close" type="button">Close (Esc)</button>
+  <div class="orb" id="stage-orb" data-state="offline"><span class="eq" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></svg></div>
+  <div>
+    <div class="stage-label" id="stage-label"></div>
+    <div class="stage-detail" id="stage-detail"></div>
+  </div>
+  <div class="stage-exchange" id="stage-exchange"></div>
+  <div class="stage-status" id="stage-status"></div>
+  <div class="stage-hint">Space talks · Esc closes</div>
+</div>
 
 <aside class="drawer" id="demo-drawer" aria-labelledby="demo-heading" dir="rtl" lang="he">
   <div class="drawer-head">
@@ -2948,6 +2983,78 @@ document.getElementById("demo-reset").addEventListener("click", () => {
   renderDemoChecklist();
 });
 document.addEventListener("keydown", (event) => { if (event.key === "Escape") setDemoOpen(false); });
+
+// ===== Stage view =====
+
+let stageTicker = null;
+
+/** Copies what the main view shows into the stage view: the orb, the state,
+    the last thing said each way, the LED, the part of the day and the timer. */
+function syncStage() {
+  const orb = document.getElementById("stage-orb");
+  orb.dataset.state = elements.orb.dataset.state;
+  orb.style.setProperty("--level", elements.orb.style.getPropertyValue("--level") || 0);
+  document.getElementById("stage-label").textContent = elements.stateLabel.textContent;
+  document.getElementById("stage-detail").textContent = elements.stateDetail.textContent;
+
+  const last = (kind) => [...elements.bubbles.querySelectorAll(`.bubble.${kind}`)].pop();
+  const exchange = document.getElementById("stage-exchange");
+  const shown = [last("heard"), last("said")].filter(Boolean)
+    .sort((a, b) => (a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING ? -1 : 1));
+  const key = shown.map((bubble) => bubble.textContent).join("|");
+  if (exchange.dataset.key !== key) {
+    exchange.dataset.key = key;
+    exchange.replaceChildren(...shown.map((bubble) => {
+      const copy = bubble.cloneNode(true);
+      copy.querySelectorAll("time").forEach((time) => time.remove());
+      return copy;
+    }));
+  }
+
+  const status = document.getElementById("stage-status");
+  const parts = [];
+  const led = state.board.led;
+  if (led) {
+    const bulb = document.getElementById("bulb").cloneNode(true);
+    bulb.removeAttribute("id");
+    const item = document.createElement("span");
+    item.append(bulb, led.on ? "LED on" : "LED off");
+    parts.push(item);
+  }
+  if (state.board.light) {
+    const item = document.createElement("span");
+    item.innerHTML = `<span class="sky">${SKY_ICONS[state.board.light.band] || ""}</span>`;
+    item.append(state.board.light.band);
+    parts.push(item);
+  }
+  if (state.board.volume) parts.push(Object.assign(document.createElement("span"),
+    { textContent: state.board.volume.muted ? "🔇 muted" : `🔊 ${state.board.volume.percent}%` }));
+  const chip = document.getElementById("timer-chip");
+  if (!chip.hidden) parts.push(Object.assign(chip.cloneNode(true), { id: "" }));
+  status.replaceChildren(...parts);
+}
+
+function setStageOpen(open) {
+  const stage = document.getElementById("stage");
+  stage.hidden = !open;
+  clearInterval(stageTicker);
+  if (open) {
+    setDemoOpen(false);
+    if (document.activeElement) document.activeElement.blur();  // so Space talks instead of re-pressing the button
+    syncStage();
+    stageTicker = setInterval(syncStage, 100);
+  }
+}
+
+document.getElementById("stage-open").addEventListener("click", () => setStageOpen(true));
+document.getElementById("stage-close").addEventListener("click", () => setStageOpen(false));
+document.addEventListener("keydown", (event) => {
+  if (event.key === "Escape") setStageOpen(false);
+  if ((event.key === "f" || event.key === "F") && !event.ctrlKey && !event.metaKey && !event.altKey &&
+      !(event.target.closest && event.target.closest("input, textarea, select, [contenteditable]"))) {
+    setStageOpen(document.getElementById("stage").hidden);
+  }
+});
 renderDemoChecklist();
 window.addEventListener("resize", renderResponseChart);
 document.getElementById("usage-reset").addEventListener("click", () => {
