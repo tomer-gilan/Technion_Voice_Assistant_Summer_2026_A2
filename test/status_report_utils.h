@@ -24,7 +24,7 @@
 //
 // Other modules add their own state lines the same way (@@LED, @@VOLUME in
 // device_controls_utils.h, @@LIGHT in light_sensor_utils.h, @@BOOT_TIMING /
-// @@TIMING in measurement_utils.h, @@HEAP in heap_diagnostics_utils.h, @@VAD /
+// @@TIMING in measurement_utils.h, @@TIMER / @@CLOCK in clock_timer_utils.h, @@HEAP in heap_diagnostics_utils.h, @@VAD /
 // @@VAD_LEVEL / @@VAD_EVENT in hands_free_utils.h). The STATUS
 // serial command reprints all of them, so an app that connects mid-session
 // gets the full picture.

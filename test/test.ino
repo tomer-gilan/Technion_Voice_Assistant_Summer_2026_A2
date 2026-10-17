@@ -909,7 +909,7 @@ bool commandPausesHandsFree(const char* command) {
 
 /** Prints everything the laptop app shows about the board right now: every
     startup check, the assistant's state, Wi-Fi signal, volume, LED, the
-    light sensor and hands-free - the answer to STATUS. */
+    light sensor, hands-free, the timer and the clock - the answer to STATUS. */
 void reprintFullStatus() {
   esp32va_status::reprintStatusSnapshot();
   esp32va_wifi::reportWifiSignal();
@@ -917,6 +917,7 @@ void reprintFullStatus() {
   esp32va_light_sensor::announceLightState();
   esp32va_hands_free::announceHandsFreeState();
   esp32va_clock::announceTimerState();
+  esp32va_clock::announceClock();
 }
 
 /** Starts a manual LISTEN (the command, or the app's Talk button) if the
@@ -976,7 +977,8 @@ void askTypedQuestion(const String& text) {
 
 /** Checks Serial for a typed command. LIST / GET / DELETE <name> / DELETE_ALL answer the laptop
     app (see sd_file_transfer_utils.h) - with @@BUSY unless idle. STATUS
-    reprints the board's whole status (status_report_utils.h). VOLUME / MUTE
+    reprints the board's whole status (status_report_utils.h), CLOCK just
+    the board's local time (clock_timer_utils.h). VOLUME / MUTE
     / BEEP / LED / LED_BRIGHTNESS control the hardware
     (device_controls_utils.h), LIGHT [<value>] / LIGHT_BANDS set/show the
     simulated light sensor (light_sensor_utils.h), VAD / VAD_SENSITIVITY /
@@ -1003,6 +1005,10 @@ void checkForSerialCommand() {
     reprintFullStatus();
     handled = true;
   }
+  if (!handled && command.equalsIgnoreCase("CLOCK")) {
+    esp32va_clock::announceClock();
+    handled = true;
+  }
   if (!handled) {
     handled = esp32va_controls::handleControlCommand(command.c_str(), isIdleForFileTransfer()) ||
               esp32va_light_sensor::handleLightCommand(command.c_str()) ||
@@ -1019,7 +1025,7 @@ void checkForSerialCommand() {
     return;
   }
   if (!command.equalsIgnoreCase("LISTEN")) {
-    Serial.printf("Unknown command \"%s\" - expected LISTEN, ASK <text>, STATUS, VAD on|off, VAD_SENSITIVITY <1-5>, VAD_HANGOVER <600-1500>, LIGHT <0-%d>, LIGHT_BANDS <evening> <day>, VOLUME <0-100>, MUTE on|off, BEEP, LED on|off, LED_BRIGHTNESS <0-100>, LIST, GET <name>, DELETE <name> or DELETE_ALL [replies|commands].\n",
+    Serial.printf("Unknown command \"%s\" - expected LISTEN, ASK <text>, STATUS, CLOCK, VAD on|off, VAD_SENSITIVITY <1-5>, VAD_HANGOVER <600-1500>, LIGHT <0-%d>, LIGHT_BANDS <evening> <day>, VOLUME <0-100>, MUTE on|off, BEEP, LED on|off, LED_BRIGHTNESS <0-100>, LIST, GET <name>, DELETE <name> or DELETE_ALL [replies|commands].\n",
              command.c_str(), esp32va_light_sensor::kMaxLightSensorValue);
     return;
   }

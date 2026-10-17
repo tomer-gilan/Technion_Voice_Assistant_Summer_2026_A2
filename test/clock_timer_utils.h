@@ -22,6 +22,7 @@
 //   @@TIMER <seconds left> <seconds total> [label] - set, and in the STATUS reply
 //   @@TIMER off                                    - cancelled, or none running (STATUS)
 //   @@TIMER done [label]                           - it just rang
+//   @@CLOCK <HH:MM> <unix time> | unset            - the board's local time (STATUS, CLOCK)
 
 namespace esp32va_clock {
 
@@ -50,5 +51,10 @@ void sendTimerAnnouncement(WebSocketsClient& webSocket);
 
 /** Prints the current @@TIMER line - part of the STATUS reply. */
 void announceTimerState();
+
+/** Prints @@CLOCK with the board's local time, so the laptop app can spot a
+    wrong time zone before the demo - part of the STATUS reply, and the
+    answer to the CLOCK serial command. */
+void announceClock();
 
 }  // namespace esp32va_clock

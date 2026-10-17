@@ -316,6 +316,7 @@
   .selftest li[data-result="warn"] .st-icon { color: var(--warn); }
   .selftest li[data-result="fail"] .st-icon { color: var(--error); }
   .selftest li[data-result="fail"] .st-detail { color: var(--error); }
+  .selftest li:is([data-result="warn"], [data-result="fail"]) .st-detail { white-space: normal; }  /* a problem is read in full */
   .check {
     display: flex; gap: 10px; align-items: flex-start; min-width: 0;
     padding: 10px 12px; border-radius: 8px; border: 1px solid var(--border); background: var(--bg);
@@ -3291,6 +3292,20 @@ const SELF_TESTS = [
     } catch (error) {
       return [error.kind === "busy" ? "warn" : "fail", error.message];
     }
+  }],
+  ["Board clock", async () => {
+    sendQuietly("CLOCK");
+    const words = await waitForStatus("CLOCK");
+    if (!words) return ["warn", "this firmware can't report it - ask \"What time is it?\" instead"];
+    if (words[0] === "unset") return ["fail", "not set - the board never reached the time server"];
+    const [hours, minutes] = words[0].split(":").map(Number);
+    const now = new Date();
+    let diff = (hours * 60 + minutes) - (now.getHours() * 60 + now.getMinutes());
+    diff = ((diff + 720) % 1440 + 1440) % 1440 - 720;  // to -12 h .. +12 h
+    if (Math.abs(diff) <= 2) return ["ok", `${words[0]}, same as this laptop`];
+    const hoursOff = Math.round(Math.abs(diff) / 60);
+    const off = hoursOff ? `${hoursOff} h` : `${Math.abs(diff)} min`;
+    return ["warn", `${words[0]} - ${off} ${diff < 0 ? "behind" : "ahead of"} this laptop - set TIMEZONE_POSIX (README)`];
   }],
   ["OpenAI", async () => {
     const openai = state.board.stages.openai;

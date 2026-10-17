@@ -184,4 +184,15 @@ void announceTimerState() {
   }
 }
 
+void announceClock() {
+  time_t now = time(nullptr);
+  struct tm local_time;
+  localtime_r(&now, &local_time);
+  if (local_time.tm_year + 1900 < kEarliestPlausibleYear) {
+    esp32va_status::printProtocolLine("@@CLOCK unset");
+  } else {
+    esp32va_status::printProtocolLine("@@CLOCK %02d:%02d %ld", local_time.tm_hour, local_time.tm_min, (long)now);
+  }
+}
+
 }  // namespace esp32va_clock
