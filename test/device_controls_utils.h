@@ -42,6 +42,10 @@ bool handleControlCommand(const char* command, bool idle_for_beep);
     (logged) if call_id is missing or the arguments say neither. */
 bool handleSetVolumeCall(JsonDocument& doc, WebSocketsClient& webSocket);
 
+/** Sets the LED's brightness (0-100%) and saves it, like LED_BRIGHTNESS -
+    for set_board_state's brightness_percent (board_state_utils.h). */
+void setAndSaveLedBrightness(uint8_t percent);
+
 /** Prints the current @@VOLUME and @@LED lines - part of the STATUS reply. */
 void announceControlStates();
 

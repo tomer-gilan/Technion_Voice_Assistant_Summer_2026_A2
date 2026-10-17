@@ -2,8 +2,10 @@
 
 #include <Arduino.h>
 #include <esp_arduino_version.h>
+#include <math.h>
 #include <string.h>
 #include "config.h"
+#include "device_controls_utils.h"
 #include "log_utils.h"
 #include "status_report_utils.h"
 
@@ -100,14 +102,28 @@ bool handleSetBoardStateCall(JsonDocument& doc, WebSocketsClient& webSocket) {
     return false;
   }
   bool led_on = args_doc["led_on"] | false;
+  JsonVariant brightness_value = args_doc["brightness_percent"];
+  bool brightness_given = brightness_value.is<int>() || brightness_value.is<float>();
+  if (brightness_given) {
+    long brightness = constrain(lroundf(brightness_value.as<float>()), 0L, 100L);
+    esp32va_controls::setAndSaveLedBrightness(static_cast<uint8_t>(brightness));
+  }
 
   setLed(led_on);
-  LOG_INFO("LED turned %s (voice command).\n", led_on ? "on" : "off");
+  LOG_INFO("LED turned %s at %u%% (voice command).\n", led_on ? "on" : "off",
+           (unsigned)esp32va_board::ledBrightnessPercent());
   esp32va_board::announceLedState("voice");
 
+  char output[48];
+  if (led_on && brightness_given) {
+    snprintf(output, sizeof(output), "LED turned on at %u percent brightness",
+             (unsigned)esp32va_board::ledBrightnessPercent());
+  } else {
+    snprintf(output, sizeof(output), "LED turned %s", led_on ? "on" : "off");
+  }
   snprintf(tool_response_message, kToolResponseBufferSize,
-           R"JSON({"type":"conversation.item.create","item":{"type":"function_call_output","call_id":"%s","output":"LED turned %s"}})JSON",
-           call_id, led_on ? "on" : "off");
+           R"JSON({"type":"conversation.item.create","item":{"type":"function_call_output","call_id":"%s","output":"%s"}})JSON",
+           call_id, output);
   webSocket.sendTXT(tool_response_message);
   webSocket.sendTXT(kResponseCreateMessage);
   LOG_DEBUG("Sent function_call_output - asked the model for a spoken confirmation.\n");

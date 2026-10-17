@@ -19,8 +19,9 @@ void setupBoardState();
 void setLed(bool on);
 
 /** Handles a finalized response.function_call_arguments.done event for the
-    registered set_board_state tool: parses the requested led_on value,
-    drives the onboard LED, and sends the required function_call_output plus
+    registered set_board_state tool: parses the requested led_on value (and
+    brightness_percent, 0-100, if given - "dim the light to 30 percent";
+    saved like the app's slider), drives the onboard LED, and sends the required function_call_output plus
     a follow-up response.create back over webSocket so the model can give
     its spoken confirmation. Also announces the change as "@@LED ... voice",
     so the laptop app's switch follows a spoken request. Any function name other than set_board_state,

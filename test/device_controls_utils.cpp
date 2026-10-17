@@ -162,6 +162,11 @@ bool handleControlCommand(const char* command, bool idle_for_beep) {
   return false;
 }
 
+void setAndSaveLedBrightness(uint8_t percent) {
+  esp32va_board::setLedBrightness(percent);
+  esp32va_settings::saveSetting(kLedBrightnessSettingKey, esp32va_board::ledBrightnessPercent());
+}
+
 bool handleSetVolumeCall(JsonDocument& doc, WebSocketsClient& webSocket) {
   const char* call_id = doc["call_id"] | (const char*)nullptr;
   const char* arguments_json = doc["arguments"] | "{}";

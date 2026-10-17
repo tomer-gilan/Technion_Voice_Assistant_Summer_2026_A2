@@ -2509,7 +2509,8 @@ function noteToolInConversation(tool) {
   const board = state.board;
   if (tool === "set_board_state") {
     const on = Boolean(board.led && board.led.on);
-    addConversationNote(`💡 LED turned ${on ? "on" : "off"} by voice`, "tool");
+    const dimmed = on && board.led.brightness < 100 ? ` at ${board.led.brightness}%` : "";
+    addConversationNote(`💡 LED turned ${on ? "on" : "off"}${dimmed} by voice`, "tool");
   } else if (tool === "get_time_of_day") {
     const band = board.light ? board.light.band : null;
     addConversationNote(band
@@ -2962,7 +2963,7 @@ const EXAMPLE_PHRASES = [
   ["❓", "What can you do?"],
   ["💬", "What is the capital of France?"],
   ["💡", "Turn on the light"],
-  ["💡", "Turn off the light"],
+  ["💡", "Dim the light to 30 percent"],
   ["🌗", "Is it day or night?"],
   ["🧠", "My name is Dana"],
   ["🧠", "What is my name?"],
@@ -3000,7 +3001,7 @@ const DEMO_SECTIONS = [
     ["boot", "הדלקה ונורות תקינות", "Connect board, כל הנורות ירוקות וברכת פתיחה."],
     ["talk", "שאלה בלחיצה", "Talk או רווח: <code>What is the capital of France</code>"],
     ["handsfree", "Hands-free בלי כפתור", "מדליקים את המתג ומדברים. הוא מתחיל ועוצר לבד."],
-    ["led", "הדלקת אור בקול", "<code>Turn on the light</code> ואז <code>Turn off the light</code>. הנורה במסך זוהרת."],
+    ["led", "הדלקת אור בקול", "<code>Turn on the light</code>, <code>Dim the light to 30 percent</code>, ואז <code>Turn off the light</code>. הנורה במסך זוהרת לפי הבהירות."],
     ["voicevolume", "עוצמה בקול", "<code>Set the volume to 30 percent</code>, ואז <code>A bit louder</code>."],
     ["timer", "טיימר ושעה בקול", "<code>Set a timer for 20 seconds</code>: ספירה לאחור במסך, ובסוף הלוח מצפצף ומהבהב. <code>What time is it</code>."],
     ["daynight", "יום או לילה לפי חיישן האור", "סליידר האור נמוך, <code>Is it day or night</code>, ואז מעלים ושואלים שוב."],
@@ -3022,7 +3023,7 @@ const DEMO_SECTIONS = [
     ["longspeech", "משפט ארוך מ-10 שניות", "ההקלטה נעצרת ב-10 שניות ועונה."],
     ["wifi", "ניתוק Wi-Fi", "מכבים hotspot לכמה שניות. נורית OpenAI חוזרת לירוק."],
     ["badlight", "ערך אור לא חוקי", "<code>LIGHT 99999</code> בטרמינל נדחה."],
-    ["cantdo", "בקשה שאי אפשר לבצע", "<code>Can you put the light on fifty percent</code>: עונה שה-LED רק נדלק או נכבה."],
+    ["cantdo", "בקשה שאי אפשר לבצע", "<code>Make the light blue</code>: עונה שה-LED הוא בצבע אחד."],
     ["volrange", "עוצמה מחוץ לטווח", "<code>Set the volume to 150 percent</code>: נעצר על 100%."],
     ["sd", "בלי כרטיס SD", "מוציאים SD ועושים Reset. נורית SD אדומה."],
     ["reconnect", "ניתוק מרכז הבקרה", "מנתקים את כבל ה-USB: באנר אדום. מחברים שוב והכל חוזר."],
