@@ -307,6 +307,15 @@
 
   /* ----- Board health (step 28) ----- */
   .health { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 10px; }
+  .selftest { margin-top: 12px; border-top: 1px solid var(--border); padding-top: 10px; }
+  .selftest-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; font-weight: 600; font-size: 14px; margin-bottom: 6px; }
+  .selftest ol { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 6px 14px; }
+  .selftest li { display: grid; grid-template-columns: 20px auto 1fr; gap: 8px; align-items: baseline; font-size: 13px; }
+  .selftest li .st-detail { color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .selftest li[data-result="ok"] .st-icon { color: var(--ok); }
+  .selftest li[data-result="warn"] .st-icon { color: var(--warn); }
+  .selftest li[data-result="fail"] .st-icon { color: var(--error); }
+  .selftest li[data-result="fail"] .st-detail { color: var(--error); }
   .check {
     display: flex; gap: 10px; align-items: flex-start; min-width: 0;
     padding: 10px 12px; border-radius: 8px; border: 1px solid var(--border); background: var(--bg);
@@ -627,7 +636,8 @@
   <section class="panel" aria-labelledby="health-heading">
     <div class="panel-head">
       <h2 id="health-heading">Board health</h2>
-      <span id="health-summary" class="hint" role="status">Connect the board to see its startup checks.</span>
+      <span class="panel-actions"><span id="health-summary" class="hint" role="status">Connect the board to see its startup checks.</span>
+        <button id="selftest-run" type="button" disabled title="Checks every part once more before a demo: blinks the LED, beeps, reads the light sensor and lists the SD card">Self-test</button></span>
     </div>
     <div class="health">
       <div class="check" id="check-wifi" data-state="unknown">
@@ -650,6 +660,10 @@
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round" aria-hidden="true"><path d="M7 18a4.5 4.5 0 0 1-.5-9A6 6 0 0 1 18 9.5a4 4 0 0 1-.5 8.5z"/></svg>
         <div><div class="check-name"><span class="lamp"></span>OpenAI</div><div class="check-detail">-</div></div>
       </div>
+    </div>
+    <div class="selftest" id="selftest" hidden>
+      <div class="selftest-head"><span id="selftest-title">Self-test</span><button id="selftest-close" type="button" aria-label="Close the self-test results">✕</button></div>
+      <ol id="selftest-list"></ol>
     </div>
   </section>
 
@@ -2167,12 +2181,32 @@ async function sendQuietly(command) {
   } catch (_) { /* not connected any more - nothing to ask */ }
 }
 
+/** Promises waiting for a status line (the self-test's answers). */
+const statusWaiters = new Set();
+let selfTestRunning = false;  // runSelfTest() below
+
+/** Resolves with the next @@<tag> line's words that pass test, or null after timeoutMs. */
+function waitForStatus(tag, test = () => true, timeoutMs = 2500) {
+  return new Promise((resolve) => {
+    const waiter = { tag, test, resolve };
+    waiter.timer = setTimeout(() => { statusWaiters.delete(waiter); resolve(null); }, timeoutMs);
+    statusWaiters.add(waiter);
+  });
+}
+
 /** One status line from the board: "@@<tag> <rest>". */
 function handleStatusLine(tag, rest) {
   // The levels come ~10 a second (MIC_LEVEL while recording, VAD_LEVEL while waiting for speech) - left out.
   if (tag !== "MIC_LEVEL" && tag !== "VAD_LEVEL") appendLog(`@@${tag} ${rest}`, { protocol: true });
   const words = rest.split(" ");
   const board = state.board;
+  for (const waiter of [...statusWaiters]) {
+    if (waiter.tag === tag && waiter.test(words)) {
+      clearTimeout(waiter.timer);
+      statusWaiters.delete(waiter);
+      waiter.resolve(words);
+    }
+  }
   switch (tag) {
     case "STAGE":
       board.stages[words[0]] = { state: words[1], detail: words.slice(2).join(" ") };
@@ -2443,6 +2477,7 @@ function updateTalkButton() {
   const ready = link.connected && !board.talkPending &&
     ((board.pipeline && IDLE_STATES.has(board.pipeline.state)) || noReports);
   elements.talk.disabled = !ready;
+  document.getElementById("selftest-run").disabled = !ready || noReports || selfTestRunning;
   elements.askText.disabled = elements.askSend.disabled = !ready || noReports;
   elements.talk.classList.toggle("is-listening", listening);
   if (!listening) {
@@ -3200,6 +3235,107 @@ document.getElementById("demo-reset").addEventListener("click", () => {
   renderDemoChecklist();
 });
 document.addEventListener("keydown", (event) => { if (event.key === "Escape") setDemoOpen(false); });
+
+// ===== Self-test =====
+
+/** Checks before a demo, each one -> [result ("ok" | "warn" | "fail"), detail].
+    Only status commands the board already has (no new firmware needed). */
+const SELF_TESTS = [
+  ["Startup checks", async () => {
+    const stages = ["sd", "mic", "speaker", "wifi", "time", "openai"].map((name) => state.board.stages[name]);
+    const failed = stages.filter((stage) => stage && stage.state === "fail").length;
+    const done = stages.filter((stage) => stage && stage.state === "ok").length;
+    return failed ? ["fail", `${failed} failed - see the cards above`]
+      : done === stages.length ? ["ok", "all green"] : ["warn", "still starting"];
+  }],
+  ["Wi-Fi signal", async () => {
+    const rssi = state.board.wifiRssi;
+    if (rssi === null) return ["warn", "no reading yet"];
+    return rssi >= -67 ? ["ok", `${rssi} dBm - good`] : rssi >= -75 ? ["warn", `${rssi} dBm - weak, move the phone closer`]
+      : ["fail", `${rssi} dBm - too weak, move the phone closer`];
+  }],
+  ["LED", async () => {
+    const wasOn = Boolean(state.board.led && state.board.led.on);
+    sendQuietly(wasOn ? "LED off" : "LED on");
+    const first = await waitForStatus("LED", (words) => words[0] === (wasOn ? "off" : "on"));
+    await new Promise((resolve) => setTimeout(resolve, 700));
+    sendQuietly(wasOn ? "LED on" : "LED off");
+    const back = await waitForStatus("LED", (words) => words[0] === (wasOn ? "on" : "off"));
+    return first && back ? ["ok", "blinked once - did you see it?"] : ["fail", "the board didn't answer the LED command"];
+  }],
+  ["Speaker", async () => {
+    sendQuietly("BEEP");
+    const words = await waitForStatus("BEEP");
+    if (!words) return ["fail", "no answer to BEEP"];
+    if (words[0] !== "played") return ["warn", "busy - try again when Ready"];
+    return state.board.volume && state.board.volume.muted ? ["warn", "beeped, but the speaker is muted"]
+      : ["ok", `beeped at ${state.board.volume ? state.board.volume.percent : "?"}% - did you hear it?`];
+  }],
+  ["Light sensor", async () => {
+    sendQuietly("LIGHT");
+    const words = await waitForStatus("LIGHT");
+    return words ? ["ok", `reads ${words[0]} - ${words[1]}`] : ["fail", "no answer to LIGHT"];
+  }],
+  ["SD card", async () => {
+    try {
+      const files = await link.list();
+      showRecordings(files);
+      return ["ok", `${files.length} recording${files.length === 1 ? "" : "s"} on the card`];
+    } catch (error) {
+      return [error.kind === "busy" ? "warn" : "fail", error.message];
+    }
+  }],
+  ["OpenAI", async () => {
+    const openai = state.board.stages.openai;
+    return openai && openai.state === "ok" ? ["ok", "session ready"] : ["fail", openai ? openai.detail || openai.state : "no report yet"];
+  }],
+];
+const SELF_TEST_ICONS = { run: "…", ok: "✓", warn: "!", fail: "✗" };
+
+/** Runs SELF_TESTS one after another, showing each result as it comes. */
+async function runSelfTest() {
+  if (selfTestRunning || !link.connected) return;
+  selfTestRunning = true;
+  updateTalkButton();
+  const box = document.getElementById("selftest");
+  const list = document.getElementById("selftest-list");
+  const title = document.getElementById("selftest-title");
+  box.hidden = false;
+  title.textContent = "Self-test - running…";
+  const rows = SELF_TESTS.map(([name]) => {
+    const row = document.createElement("li");
+    row.dataset.result = "run";
+    row.innerHTML = '<span class="st-icon"></span><b></b><span class="st-detail"></span>';
+    row.querySelector(".st-icon").textContent = SELF_TEST_ICONS.run;
+    row.querySelector("b").textContent = name;
+    return row;
+  });
+  list.replaceChildren(...rows);
+  const counts = { ok: 0, warn: 0, fail: 0 };
+  for (const [index, [, check]] of SELF_TESTS.entries()) {
+    let result = "fail";
+    let detail = "";
+    try {
+      [result, detail] = await check();
+    } catch (error) {
+      detail = error.message;
+    }
+    if (!link.connected) { result = "fail"; detail = "the board disconnected"; }
+    counts[result]++;
+    rows[index].dataset.result = result;
+    rows[index].querySelector(".st-icon").textContent = SELF_TEST_ICONS[result];
+    rows[index].querySelector(".st-detail").textContent = detail;
+    rows[index].title = detail;
+  }
+  title.textContent = counts.fail ? `Self-test - ${counts.fail} problem${counts.fail === 1 ? "" : "s"}`
+    : counts.warn ? `Self-test - passed, ${counts.warn} to look at` : "Self-test - all passed";
+  appendLog(`(app) ${title.textContent}.`);
+  selfTestRunning = false;
+  updateTalkButton();
+}
+
+document.getElementById("selftest-run").addEventListener("click", runSelfTest);
+document.getElementById("selftest-close").addEventListener("click", () => { document.getElementById("selftest").hidden = true; });
 
 // ===== Stage view =====
 
