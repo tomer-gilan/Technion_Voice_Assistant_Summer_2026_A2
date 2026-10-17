@@ -94,7 +94,7 @@ or left inline in `test.ino`:
 - `log_utils.h`/`.cpp` — the leveled logging macros (see Logging Doctrine
   below).
 - `board_state_utils.h`/`.cpp` — the onboard LED and `set_board_state`
-  tool-call handling.
+  tool-call handling (on/off, plus an optional brightness_percent).
 - `light_sensor_utils.h`/`.cpp` — the light-level global
   (`esp32va_light_sensor::g_light_sensor_value`), its day/evening/night
   thresholds (changeable with `LIGHT_BANDS`), the `LIGHT <value>` Serial

@@ -36,7 +36,7 @@ flowchart LR
 | `mic_capture_utils` | משימה נפרדת (FreeRTOS) שקוראת את המיקרופון בלי הפסקה |
 | `vad_utils` | גלאי הקול: מחליט מתי מישהו התחיל ומתי סיים לדבר |
 | `hands_free_utils` | מצב Hands-free: מקשיב לבד כשהלוח פנוי ושולח רק דיבור אמיתי |
-| `board_state_utils` | ה-LED והכלי `set_board_state` |
+| `board_state_utils` | ה-LED (כולל בהירות) והכלי `set_board_state` |
 | `light_sensor_utils` | חיישן האור (עוד מדומה) והכלי `get_time_of_day` |
 | `device_controls_utils` | פקודות עוצמה, השתקה, צפצוף ו-LED מהמחשב, והכלי `set_volume` |
 | `clock_timer_utils` | הכלים `get_current_time` ו-`set_timer`, הצלצול של הטיימר, וההודעה בקול כשהוא נגמר |

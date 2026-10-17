@@ -21,7 +21,7 @@
 |---|---|---|
 | מה הוא יודע | `What can you do?` | הוא מפרט במשפט אחד |
 | שאלה כללית | `What is the capital of France?` | עונה בקול תוך כשנייה |
-| אור | `Turn on the light` | ה-LED נדלק והנורה במסך זוהרת |
+| אור | `Turn on the light` ואז `Dim the light to 30 percent` | ה-LED נדלק ומתעמעם, והנורה במסך זוהרת בהתאם |
 | עוצמה | `Set the volume to 30 percent` ואז `A bit louder` | הסליידר זז והוא מאשר |
 | תזכורת | `Remind me in 30 seconds to check the oven` | ספירה לאחור, ובסוף צפצופים, LED מהבהב ו-`Time's up - check the oven` |
 | שעה | `What time is it?` | השעה והתאריך מהשעון של הלוח |

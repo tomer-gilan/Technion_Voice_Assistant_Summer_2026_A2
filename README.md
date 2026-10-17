@@ -14,7 +14,7 @@
 
 - **שיחה בלחיצה:** לוחצים Talk (או רווח) ומדברים 3 שניות.
 - **Hands-free:** בלי כפתור. גלאי קול (VAD) על ה-ESP32 מתחיל להקליט כשמתחילים לדבר ועוצר כשמפסיקים.
-- **שליטה בלוח בקול:** `Turn on the light`, `Set the volume to 30 percent`, `A bit louder`.
+- **שליטה בלוח בקול:** `Turn on the light`, `Dim the light to 30 percent`, `Set the volume to 30 percent`, `A bit louder`.
 - **טיימר, תזכורת ושעון:** `Set a timer for 20 seconds` (בסוף הלוח מצפצף וה-LED מהבהב), `Remind me in 30 seconds to check the oven` (בסוף העוזר גם אומר בקול על מה התזכורת), `What time is it?`.
 - **חלק היום:** השאלה `Is it day or night?` נענית לפי חיישן האור (יום, ערב או לילה).
 - **זיכרון שיחה:** זוכר מה אמרת קודם, למשל את השם שלך.
@@ -118,7 +118,7 @@
 
 | כלי | מה הוא עושה | דוגמה |
 |---|---|---|
-| `set_board_state` | מדליק או מכבה את ה-LED | `Turn on the light` |
+| `set_board_state` | מדליק או מכבה את ה-LED, ואפשר גם לקבוע בהירות | `Turn on the light`, `Dim the light to 30 percent` |
 | `get_time_of_day` | קורא את חיישן האור ומחזיר יום, ערב או לילה | `Is it day or night?` |
 | `set_volume` | קובע עוצמה באחוזים, או מגביר / מנמיך ב-20% | `Set the volume to 30 percent`, `Louder` |
 | `get_current_time` | מחזיר את התאריך והשעה מהשעון של הלוח (מסונכרן מהאינטרנט) | `What time is it?` |
