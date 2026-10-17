@@ -30,6 +30,7 @@
 |---|---|
 | `80b1506` | כלי קולי `set_volume`: עוצמה באחוזים (`Set the volume to 30 percent`) או מגביר / מנמיך ב-20% |
 | `e0a8753` | מודול חדש `clock_timer_utils`: הכלים `get_current_time` (מה השעה) ו-`set_timer` (טיימר שמצפצף ומהבהב) |
+| `22ca52c` | הטיימר מצלצל גם כשאין חיבור ל-OpenAI (קודם הוא חיכה לחיבור). ההודעה בקול רק כשיש חיבור |
 | `d9af02e` | `How long is left on my timer?`: התשובה של `get_current_time` כוללת גם כמה זמן נשאר לטיימר |
 | `3abf862` | `What can you do?` עונה במשפט אחד מה העוזר יודע לעשות. גם בכרטיס Try saying |
 | `348a78d` | תזכורת בקול: ל-`set_timer` יש תיאור (`label`), ובסוף העוזר אומר `Time's up - check the oven`. גם מרכז הבקרה מציג את התיאור |
@@ -45,6 +46,8 @@
 | `31cfb95` | התזכורת בקול ב-README, בסיפור משתמש 6, ב-architecture וב-demo-plan |
 | `56ad2cd` | מדריך מהיר לבוחנים בדף אחד: `docs/quick-start.md` ו-PDF |
 | `273be3c` | צילום מסך חדש ב-README, ותמונות של Stage view ו-Summary |
+| `6b64b11` | דיאגרמת חיבורים צבעונית עם כל הפינים (`docs/images/wiring.png`) |
+| הבא אחריו | מקרה קצה 19: טיימר בלי אינטרנט |
 
 ## מה צריך לבדוק על הלוח
 
@@ -66,12 +69,13 @@
    - טיימר שנגמר באמצע תשובה מצלצל רק אחרי שהתשובה נגמרת.
    - `How long is left on my timer?` באמצע ספירה: עונה בערך כמו המסך.
    - `Cancel the timer`: הספירה נעלמת.
+   - טיימר של 30 שניות ואז לכבות את ה-hotspot: הלוח עדיין מצפצף בזמן (בלי הודעה בקול).
    - `Remind me in 30 seconds to check the oven`: בספירה כתוב `check the oven`. בסוף, אחרי הצפצופים, העוזר אומר `Time's up - check the oven` ובמסך כתוב Saying that the timer is done.
    - עם Hands-free דלוק: ההודעה בקול לא מתחילה הקלטה.
 6. **`What can you do?`:** עונה במשפט אחד עם הדברים שהוא יודע לעשות.
 7. **שלא נשבר כלום:** `Turn on the light`, `Is it day or night?`, Hands-free, הקלטות ב-SD.
 
-אם משהו מהקושחה לא עובד, אפשר לבטל רק אותו: `git revert d9af02e` (כמה זמן נשאר), `git revert 348a78d` (התזכורת בקול), `git revert e0a8753` (טיימר ושעה, אחרי שביטלתם את שני אלה) או `git revert 80b1506` (עוצמה). ה-GUI ממשיך לעבוד גם בלי הכלים האלה.
+אם משהו מהקושחה לא עובד, אפשר לבטל רק אותו: `git revert 22ca52c` (צלצול בלי חיבור), `git revert d9af02e` (כמה זמן נשאר), `git revert 348a78d` (התזכורת בקול), `git revert e0a8753` (טיימר ושעה, אחרי שביטלתם את שני אלה) או `git revert 80b1506` (עוצמה). ה-GUI ממשיך לעבוד גם בלי הכלים האלה.
 
 ## בדיקה של מרכז הבקרה
 
