@@ -38,8 +38,9 @@ bool handleGetCurrentTimeCall(JsonDocument& doc, WebSocketsClient& webSocket);
 bool handleSetTimerCall(JsonDocument& doc, WebSocketsClient& webSocket);
 
 /** Call every loop() pass. board_idle: nothing is being recorded, sent,
-    played or saved. Rings a due timer once the board is idle - a timer that
-    comes due mid-reply waits for the reply to end. Returns true right after
+    played or saved (OpenAI being reachable isn't needed). Rings a due timer
+    once the board is idle - a timer that comes due mid-reply waits for the
+    reply to end. Returns true right after
     it rang, so the caller can have it announced (sendTimerAnnouncement()). */
 bool serviceTimer(bool board_idle);
 

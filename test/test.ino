@@ -1220,7 +1220,11 @@ void loop() {
   checkPlaybackComplete();
   checkReplyTimeout();
   esp32va_hands_free::serviceHandsFree(boardCanListen());
-  if (esp32va_clock::serviceTimer(boardCanListen())) {
+  // The timer rings whenever nothing is being recorded or played - even
+  // with OpenAI unreachable, so a dropped connection never swallows it -
+  // but it can only be announced out loud while the session is up.
+  bool board_quiet = isIdleForFileTransfer() && !response_in_flight && !speech_in_progress;
+  if (esp32va_clock::serviceTimer(board_quiet) && session_ready) {
     esp32va_clock::sendTimerAnnouncement(webSocket);
     unprompted_speech_detail = "timer";
     response_in_flight = true;  // like the greeting: hands-free waits for it to be heard
