@@ -126,6 +126,10 @@ or left inline in `test.ino`:
   mic may listen (the half-duplex cooldown, the pause after repeated
   noises), and the `@@VAD` / `@@VAD_LEVEL` / `@@VAD_EVENT` lines.
 
+(The `ASK <text>` typed question lives in `test.ino` itself, next to the
+greeting and the timer announcement: like them it is a response nobody
+recorded, so it drives the same `response_in_flight` state.)
+
 `test.ino` itself should keep only what's actually under test: Wi-Fi/session
 wiring, the LISTEN cycle's mechanics, the server-event-driven state machine,
 and the PASS/FAIL/HALT verdict logic — i.e. whatever the current step's PASS
