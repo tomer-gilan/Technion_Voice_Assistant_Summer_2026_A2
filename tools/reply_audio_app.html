@@ -356,11 +356,24 @@
   .vad-settings.off .control-line { opacity: 0.6; }
   kbd { font: 12px var(--mono); border: 1px solid var(--border); border-bottom-width: 2px; border-radius: 4px; padding: 0 5px; }
   .conversation { grid-column: 1 / -1; display: flex; flex-direction: column; gap: 6px; border-top: 1px solid var(--border); padding-top: 12px; }
-  #bubbles { display: flex; flex-direction: column; gap: 6px; max-height: 220px; overflow-y: auto; }
-  .bubble { font-size: 14px; padding: 7px 11px; border-radius: 10px; max-width: 90%; overflow-wrap: anywhere; }
-  .bubble.heard { background: var(--bg); border: 1px solid var(--border); align-self: flex-start; }
-  .bubble.said { background: var(--accent-soft); align-self: flex-end; }
-  .bubble b { display: block; font-size: 12px; font-weight: 600; color: var(--muted); }
+  .conversation-head { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+  .conversation-head h3 { margin: 0; font-size: 13px; font-weight: 600; color: var(--muted); }
+  .conversation-head button { font-size: 12px; padding: 3px 10px; }
+  #bubbles { display: flex; flex-direction: column; gap: 6px; max-height: 340px; overflow-y: auto; scroll-behavior: smooth; }
+  .bubble { font-size: 14px; padding: 7px 11px; border-radius: 12px; max-width: 90%; overflow-wrap: anywhere; animation: pop-in 0.25s ease-out; }
+  .bubble.heard { background: var(--bg); border: 1px solid var(--border); align-self: flex-start; border-bottom-left-radius: 4px; }
+  .bubble.heard.empty { font-style: italic; color: var(--muted); }
+  .bubble.said { background: var(--accent-soft); align-self: flex-end; border-bottom-right-radius: 4px; }
+  .bubble b { display: flex; justify-content: space-between; gap: 12px; font-size: 12px; font-weight: 600; color: var(--muted); }
+  .bubble b time { font-weight: 400; font-variant-numeric: tabular-nums; }
+  .bubble .answer-time { display: block; margin-top: 3px; font-size: 11.5px; color: var(--muted); font-variant-numeric: tabular-nums; }
+  .action {
+    align-self: center; font-size: 12px; padding: 2px 10px; border-radius: 999px; border: 1px solid var(--border);
+    background: var(--panel); color: var(--muted); animation: pop-in 0.25s ease-out; max-width: 95%; text-align: center;
+  }
+  .action.tool { color: var(--text); border-color: var(--warn); background: var(--warn-soft); font-weight: 600; }
+  .action.fail { color: var(--error); border-color: var(--error); background: var(--error-soft); }
+  @keyframes pop-in { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
   .result { font-size: 13px; color: var(--muted); margin: 0; }
   .result.ok { color: var(--ok); }
   .result.fail { color: var(--error); }
@@ -505,6 +518,7 @@
           <p class="control-note" id="vad-note" aria-live="polite"></p>
         </div>
         <div class="conversation">
+          <div class="conversation-head"><h3>Conversation</h3><button id="clear-conversation" type="button">Clear</button></div>
           <div id="bubbles" aria-live="polite"></div>
           <p class="result" id="result">No conversation yet.</p>
         </div>
@@ -665,7 +679,7 @@ const TALK_START_TIMEOUT_MS = 2500;    // LISTEN sent but no "listening" yet: un
 const TOOL_MIN_SHOWN_MS = 1200;        // a tool call is over in milliseconds - keep it readable
 const ERROR_SHOWN_MS = 3000;           // how long a failed LISTEN shows as an error
 const CONTROL_SEND_DELAY_MS = 250;     // slider changes are sent once dragging pauses
-const MAX_BUBBLES = 8;
+const MAX_BUBBLES = 60;               // conversation items kept on screen (bubbles and action notes)
 const LIGHT_SENSOR_MAX = 6142;         // mirrors light_sensor_utils.h's kMaxLightSensorValue
 const MIC_METER_FLOOR_DBFS = -60;
 // Hands-free (step 30) - the board's side is test/hands_free_utils.h.
@@ -1296,6 +1310,8 @@ function freshBoardStatus() {
     noStatusTimer: null,
     legacyFirmware: false,   // connected for NO_STATUS_HINT_MS with no @@STATE at all
     cycleFirstBubble: null,  // the first bubble added since the current LISTEN started
+    cycleFirstSaid: null,    // the assistant's first bubble in it - gets the response time from @@TIMING
+    cycleTools: new Set(),   // tools already noted in the conversation this LISTEN
   };
 }
 
@@ -1899,7 +1915,7 @@ function handleStatusLine(tag, rest) {
       break;
     case "HEARD":
       // Transcription can arrive after the reply - keep it first. Empty: OpenAI heard no words (a noise).
-      addBubble("heard", rest.trim() ? rest : "(no words)", board.cycleFirstBubble);
+      addBubble("heard", rest.trim() ? rest : "(no words - just a sound)", board.cycleFirstBubble);
       break;
     case "SAID":
       addBubble("said", rest);
@@ -1936,10 +1952,12 @@ function handleStatusLine(tag, rest) {
       break;
     case "VAD_EVENT":
       onVadEvent(words);
+      noteVadEventInConversation(words);
       if (words[0] === "discarded") countUsage("noisesIgnored");
       break;
     case "TIMING":
       onUsageTiming(parseKeyValues(rest));
+      showAnswerTime(parseKeyValues(rest));
       break;
     case "BOOT_TIMING":
       usage.bootMs = Number(parseKeyValues(rest).total_ms);
@@ -2032,7 +2050,15 @@ function renderHealth() {
 /** A new @@STATE from the board. */
 function onPipelineState({ state: pipelineState, detail }) {
   const board = state.board;
-  if (pipelineState === "listening") board.cycleFirstBubble = null;
+  if (pipelineState === "listening") {
+    board.cycleFirstBubble = null;
+    board.cycleFirstSaid = null;
+    board.cycleTools.clear();
+  }
+  if (pipelineState === "tool" && detail && !board.cycleTools.has(detail)) {
+    board.cycleTools.add(detail);
+    noteToolInConversation(detail);
+  }
   if (board.talkPending && !IDLE_STATES.has(pipelineState)) {
     board.talkPending = false;
     clearTimeout(board.talkPendingTimer);
@@ -2162,21 +2188,81 @@ function showVadLevel(levelDbfs, floorDbfs, thresholdDbfs) {
   elements.meterNote.textContent = `Room noise ${floorDbfs} · speech from ${thresholdDbfs} dBFS`;
 }
 
-/** Adds a chat bubble - before `before` when given and still shown,
-    otherwise at the end. */
+/** Adds a chat bubble with the time it arrived - before `before` when given
+    and still shown, otherwise at the end. */
 function addBubble(kind, text, before = null) {
   const bubble = document.createElement("div");
   bubble.className = `bubble ${kind}`;
+  if (kind === "heard" && text.startsWith("(no words")) bubble.classList.add("empty");
   const who = document.createElement("b");
-  who.textContent = kind === "heard" ? "You said" : "Assistant";
+  const time = document.createElement("time");
+  time.textContent = clockStamp(new Date()).slice(0, 8);
+  who.append(document.createTextNode(kind === "heard" ? "You" : "Assistant"), time);
   bubble.append(who, document.createTextNode(text));
-  if (before && before.isConnected) elements.bubbles.insertBefore(bubble, before);
-  else elements.bubbles.appendChild(bubble);
-  if (!state.board.cycleFirstBubble || !state.board.cycleFirstBubble.isConnected || bubble.nextSibling === state.board.cycleFirstBubble) {
-    state.board.cycleFirstBubble = bubble;
+  if (kind === "said" && !state.board.cycleFirstSaid) state.board.cycleFirstSaid = bubble;
+  insertConversationItem(bubble, before);
+}
+
+/** Adds a small centered note to the conversation - what the board did
+    (a tool), or what happened to a sound (ignored, failed). */
+function addConversationNote(text, kind = "") {
+  const note = document.createElement("div");
+  note.className = `action ${kind}`.trim();
+  note.textContent = text;
+  insertConversationItem(note, null);
+}
+
+/** Puts a bubble or note into the conversation, keeping the current LISTEN's
+    first item known (a late transcription goes before it), and the list short. */
+function insertConversationItem(item, before) {
+  if (before && before.isConnected) elements.bubbles.insertBefore(item, before);
+  else elements.bubbles.appendChild(item);
+  if (!state.board.cycleFirstBubble || !state.board.cycleFirstBubble.isConnected || item.nextSibling === state.board.cycleFirstBubble) {
+    state.board.cycleFirstBubble = item;
   }
   while (elements.bubbles.childElementCount > MAX_BUBBLES) elements.bubbles.firstChild.remove();
   elements.bubbles.scrollTop = elements.bubbles.scrollHeight;
+}
+
+const PART_OF_DAY_ICONS = { day: "☀️", evening: "🌇", night: "🌙" };
+
+/** A tool call from @@STATE tool <name>, as a note: what it did on the board. */
+function noteToolInConversation(tool) {
+  const board = state.board;
+  if (tool === "set_board_state") {
+    const on = Boolean(board.led && board.led.on);
+    addConversationNote(`💡 LED turned ${on ? "on" : "off"} by voice`, "tool");
+  } else if (tool === "get_time_of_day") {
+    const band = board.light ? board.light.band : null;
+    addConversationNote(band
+      ? `${PART_OF_DAY_ICONS[band] || "🔆"} Read the light sensor: ${band} (${board.light.value})`
+      : "🔆 Read the light sensor", "tool");
+  } else if (tool === "set_volume") {
+    addConversationNote(`🔊 Volume set to ${board.volume ? board.volume.percent : "?"}% by voice`, "tool");
+  } else {
+    addConversationNote(`⚙️ Ran ${tool}`, "tool");
+  }
+}
+
+/** Hands-free sounds that never became a question, as notes. */
+function noteVadEventInConversation([kind, first, second]) {
+  if (kind === "discarded") {
+    addConversationNote(`🔇 Ignored a sound (${formatSeconds(Number(second) / 1000)}) - ${DISCARD_TEXT[first] || first}`);
+  } else if (kind === "paused") {
+    addConversationNote(`⏸ Several noises in a row - hands-free paused for ${Math.round(Number(first) / 1000)} s`);
+  }
+}
+
+/** Adds "answered in X s" under the assistant's first bubble of the LISTEN
+    that @@TIMING just measured. */
+function showAnswerTime(fields) {
+  const bubble = state.board.cycleFirstSaid;
+  const firstAudioMs = Number(fields.first_audio_after_rec_ms);
+  if (!bubble || !bubble.isConnected || !(firstAudioMs >= 0) || bubble.querySelector(".answer-time")) return;
+  const line = document.createElement("span");
+  line.className = "answer-time";
+  line.textContent = `⏱ answered in ${(firstAudioMs / 1000).toFixed(2)} s` + (fields.mode === "vad" ? " · hands-free" : "");
+  bubble.appendChild(line);
 }
 
 function showResult(passed, listenNumber, reason) {
@@ -2184,6 +2270,7 @@ function showResult(passed, listenNumber, reason) {
   elements.result.textContent = passed ? `LISTEN #${listenNumber} passed.` : `LISTEN #${listenNumber} failed: ${reason}`;
   if (!passed) {
     const board = state.board;
+    addConversationNote(`⚠️ LISTEN #${listenNumber} failed: ${reason || "no reason given"}`, "fail");
     showPipelineState("error", reason);
     clearTimeout(board.errorTimer);
     board.errorTimer = setTimeout(() => {
@@ -2409,6 +2496,13 @@ renderUsage();
 // ===== Wiring =====
 
 elements.connect.addEventListener("click", onConnectClick);
+document.getElementById("clear-conversation").addEventListener("click", () => {
+  elements.bubbles.replaceChildren();
+  state.board.cycleFirstBubble = null;
+  state.board.cycleFirstSaid = null;
+  elements.result.className = "result";
+  elements.result.textContent = "No conversation yet.";
+});
 elements.refresh.addEventListener("click", () => scheduleListRefresh(0));
 elements.deleteAll.addEventListener("click", onDeleteAllClick);
 elements.tabs.forEach((tab) => tab.addEventListener("click", () => selectTab(tab.dataset.kind)));
