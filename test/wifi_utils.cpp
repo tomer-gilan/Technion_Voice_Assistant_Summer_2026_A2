@@ -63,7 +63,15 @@ void syncSystemTime() {
   // TIMEZONE_UTC_OFFSET_SEC only affects localtime_r() elsewhere (e.g. step
   // 22's greeting) - SNTP itself, and this function's own gmtime()-based log
   // line below, are unaffected and stay in UTC.
+  // Optional: a POSIX TZ string in config.h (e.g. #define TIMEZONE_POSIX
+  // "IST-2IDT,M3.5.5/2,M10.5.0" for Israel) also follows summer time, which
+  // matters now that "What time is it?" reads this clock. Without it, the
+  // fixed offset is used as before.
+#ifdef TIMEZONE_POSIX
+  configTzTime(TIMEZONE_POSIX, "pool.ntp.org", "time.nist.gov");
+#else
   configTime(TIMEZONE_UTC_OFFSET_SEC, 0, "pool.ntp.org", "time.nist.gov");
+#endif
 
   unsigned long started_ms = millis();
   unsigned long last_report_ms = started_ms;
