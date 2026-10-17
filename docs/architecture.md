@@ -39,7 +39,7 @@ flowchart LR
 | `board_state_utils` | ה-LED והכלי `set_board_state` |
 | `light_sensor_utils` | חיישן האור (עוד מדומה) והכלי `get_time_of_day` |
 | `device_controls_utils` | פקודות עוצמה, השתקה, צפצוף ו-LED מהמחשב, והכלי `set_volume` |
-| `clock_timer_utils` | הכלים `get_current_time` ו-`set_timer`, והצלצול של הטיימר |
+| `clock_timer_utils` | הכלים `get_current_time` ו-`set_timer`, הצלצול של הטיימר, וההודעה בקול כשהוא נגמר |
 | `greeting_utils` | משפט פתיחה אקראי כשהחיבור מוכן |
 | `settings_store_utils` | שמירת הגדרות בזיכרון הקבוע (NVS), כך שהן נשארות אחרי כיבוי |
 | `sd_card_utils` | חיבור כרטיס ה-SD ובדיקה שהוא באמת כותב וקורא |
@@ -99,7 +99,7 @@ stateDiagram-v2
 | `listening` | מקליט ושולח ל-OpenAI |
 | `processing` | ההקלטה נגמרה, מחכה לתשובה |
 | `tool` | מבצע כלי (למשל מדליק LED). הפרטים אומרים איזה |
-| `speaking` | מנגן את התשובה |
+| `speaking` | מנגן את התשובה. הפרטים `greeting` או `timer` כשהוא מדבר בלי שאלו אותו |
 | `saving` | מסיים לשמור את התשובה ל-SD |
 | `reconnecting` | החיבור ל-OpenAI נפל ומתחבר מחדש |
 | `halted` | נעצר בגלל תקלה (למשל אין מספיק זיכרון). צריך Reset |
@@ -123,7 +123,7 @@ stateDiagram-v2
 | `@@VOLUME` | `@@VOLUME 30 unmuted` | עוצמת הרמקול והאם מושתק |
 | `@@BEEP` | `@@BEEP played` | צפצוף הבדיקה נוגן, או `busy` |
 | `@@LIGHT` | `@@LIGHT 4000 day 1000 3000` | קריאת חיישן האור, חלק היום והספים |
-| `@@TIMER` | `@@TIMER 45 60` | 45 מתוך 60 שניות נשארו. גם `off` ו-`done` |
+| `@@TIMER` | `@@TIMER 45 60 check the oven` | 45 מתוך 60 שניות נשארו, ועל מה התזכורת (אם יש). גם `off`, ו-`done` כשהוא מצלצל |
 | `@@VAD` | `@@VAD on 3 900` | Hands-free דלוק או כבוי, רגישות (1-5) וכמה מילישניות שקט מסיימות משפט |
 | `@@VAD_LEVEL` | `@@VAD_LEVEL -48 -55 -40` | הרעש עכשיו, רעש הרקע והסף, בזמן ש-Hands-free מקשיב |
 | `@@VAD_EVENT` | `@@VAD_EVENT discarded short 180` | דיבור התחיל (`started`), נשלח (`sent`), נזרק כי לא נשמע כמו דיבור (`discarded short\|unvoiced\|steady`), או השהיה אחרי הרבה רעש (`paused`) |

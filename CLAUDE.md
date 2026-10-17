@@ -106,8 +106,8 @@ or left inline in `test.ino`:
 - `device_controls_utils.h`/`.cpp` — the `VOLUME` / `MUTE` / `BEEP` / `LED` /
   `LED_BRIGHTNESS` Serial commands, and the `set_volume` tool call.
 - `clock_timer_utils.h`/`.cpp` — the `get_current_time` and `set_timer` tool
-  calls, the timer ringing (LED blinks + beeps) once the board is idle, and
-  the `@@TIMER` lines.
+  calls, the timer ringing (LED blinks + beeps) once the board is idle, the
+  spoken "Time's up - <label>" announcement after it, and the `@@TIMER` lines.
 - `settings_store_utils.h`/`.cpp` — settings kept across reboots in NVS flash
   (volume, mute, LED brightness, light thresholds).
 - `measurement_utils.h`/`.cpp` — the `@@BOOT_TIMING` / `@@TIMING` measurement

@@ -15,7 +15,7 @@
 - **שיחה בלחיצה:** לוחצים Talk (או רווח) ומדברים 3 שניות.
 - **Hands-free:** בלי כפתור. גלאי קול (VAD) על ה-ESP32 מתחיל להקליט כשמתחילים לדבר ועוצר כשמפסיקים.
 - **שליטה בלוח בקול:** `Turn on the light`, `Set the volume to 30 percent`, `A bit louder`.
-- **טיימר ושעון:** `Set a timer for 20 seconds` (בסוף הלוח מצפצף וה-LED מהבהב), `What time is it?`.
+- **טיימר, תזכורת ושעון:** `Set a timer for 20 seconds` (בסוף הלוח מצפצף וה-LED מהבהב), `Remind me in 30 seconds to check the oven` (בסוף העוזר גם אומר בקול על מה התזכורת), `What time is it?`.
 - **חלק היום:** השאלה `Is it day or night?` נענית לפי חיישן האור (יום, ערב או לילה).
 - **זיכרון שיחה:** זוכר מה אמרת קודם, למשל את השם שלך.
 - **מרכז בקרה בדפדפן:**
@@ -107,7 +107,7 @@
 | `get_time_of_day` | קורא את חיישן האור ומחזיר יום, ערב או לילה | `Is it day or night?` |
 | `set_volume` | קובע עוצמה באחוזים, או מגביר / מנמיך ב-20% | `Set the volume to 30 percent`, `Louder` |
 | `get_current_time` | מחזיר את התאריך והשעה מהשעון של הלוח (מסונכרן מהאינטרנט) | `What time is it?` |
-| `set_timer` | מפעיל טיימר של 1 עד 3600 שניות, או מבטל אותו | `Set a timer for 20 seconds` |
+| `set_timer` | מפעיל טיימר של 1 עד 3600 שניות, או מבטל אותו. עם תיאור קצר הוא תזכורת, שהעוזר אומר בקול כשהזמן נגמר | `Set a timer for 20 seconds`, `Remind me in 5 minutes to check the oven` |
 
 ![מה קורה כשמבקשים להדליק את האור](docs/images/led-sequence.png)
 
