@@ -504,6 +504,7 @@
   .stage-status .sky { width: 30px; height: 30px; }
   .stage-status .timer-chip { font-size: 20px; padding: 4px 14px; }
   .stage-close { position: absolute; top: 16px; right: 16px; }
+  .summary-save { position: absolute; top: 16px; right: 118px; }
   .stage-hint { position: absolute; bottom: 14px; font-size: 13px; color: var(--muted); }
 
   /* ----- Session summary: the end of the demo, big ----- */
@@ -873,6 +874,7 @@
 
 <div class="stage summary" id="summary" hidden role="dialog" aria-label="Session summary">
   <button class="stage-close" id="summary-close" type="button">Close (Esc)</button>
+  <button class="summary-save" id="summary-save" type="button" title="One HTML file with these numbers, the response-time chart, every command and the conversation">Save report</button>
   <h2 class="summary-title">This session</h2>
   <p class="summary-sub" id="summary-sub"></p>
   <div class="summary-tiles" id="summary-tiles"></div>
@@ -3485,6 +3487,65 @@ function setSummaryOpen(open) {
   }
 }
 
+/** Saves the session as one self-contained HTML page: the summary, the
+    response-time chart, a table of every command and the conversation -
+    for the project's results, or to show a run again later. */
+function onSaveReportClick() {
+  renderSummary();
+  const css = [...document.querySelectorAll("style")].map((style) => style.textContent).join("\n");
+  const summary = document.getElementById("summary").cloneNode(true);
+  summary.removeAttribute("id");
+  summary.hidden = false;
+  summary.querySelectorAll("button").forEach((button) => button.remove());
+  summary.querySelectorAll("[id]").forEach((element) => element.removeAttribute("id"));
+  const chart = document.getElementById("response-chart").cloneNode(true);
+  chart.removeAttribute("id");
+  const conversation = elements.bubbles.cloneNode(true);
+  conversation.removeAttribute("id");
+  const escape = (text) => String(text).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
+  const seconds = (ms) => (ms === null ? "-" : (ms / 1000).toFixed(2));
+  const rows = usage.history.map((turn) => `<tr><td>${turn.n}</td><td>${escape(clockStamp(turn.at).slice(0, 8))}</td>` +
+    `<td>${turn.mode === "vad" ? "hands-free" : "Talk"}</td><td>${escape(turn.tool === "-" ? "" : turn.tool)}</td>` +
+    `<td>${escape(turn.result)}</td><td>${seconds(turn.serverMs)}</td><td>${seconds(turn.firstSoundMs)}</td><td>${seconds(turn.doneMs)}</td></tr>`).join("");
+  const board = state.board;
+  const facts = [
+    board.wifiRssi !== null ? `Wi-Fi ${board.wifiRssi} dBm` : "",
+    usage.bootMs ? `startup ${(usage.bootMs / 1000).toFixed(1)} s` : "",
+    link.connected ? elements.status.textContent : "",
+  ].filter(Boolean).join(" · ");
+  const page = `<!doctype html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Voice assistant session ${escape(fileStamp(new Date()))}</title>
+<style>${css}
+body { padding: 0 0 40px; }
+.report { max-width: 1100px; margin: 0 auto; padding: 0 16px; display: flex; flex-direction: column; gap: 22px; }
+.report .summary { position: static; inset: auto; padding: 32px 0 0; overflow: visible; }
+.report h2.part { font-size: 18px; margin: 10px 0 0; }
+.report table { border-collapse: collapse; width: 100%; font-size: 13px; font-variant-numeric: tabular-nums; }
+.report th, .report td { border-bottom: 1px solid var(--border); padding: 5px 8px; text-align: left; }
+.report th { color: var(--muted); font-weight: 600; }
+.report .bubbles { max-height: none; overflow: visible; display: flex; flex-direction: column; gap: 8px; }
+.report .bubble { animation: none; }
+.report .facts { color: var(--muted); text-align: center; margin: -12px 0 0; }
+</style></head><body><div class="report">
+${summary.outerHTML}
+<p class="facts">${escape(clockStamp(new Date()).slice(0, 8))} · ${escape(new Date().toDateString())}${facts ? ` · ${escape(facts)}` : ""}</p>
+<h2 class="part">Response time per command</h2>
+${chart.outerHTML}
+<h2 class="part">Every command</h2>
+<table><thead><tr><th>#</th><th>time</th><th>how</th><th>tool</th><th>result</th><th>to OpenAI's first reply (s)</th><th>to first sound (s)</th><th>to end of reply (s)</th></tr></thead>
+<tbody>${rows || '<tr><td colspan="8">No commands yet.</td></tr>'}</tbody></table>
+<h2 class="part">Conversation</h2>
+<div class="bubbles">${conversation.innerHTML}</div>
+<p class="facts">Saved from the ESP32 voice assistant's control center (tools/reply_audio_app.html).</p>
+</div></body></html>`;
+  const url = URL.createObjectURL(new Blob([page], { type: "text/html" }));
+  const anchor = Object.assign(document.createElement("a"), { href: url, download: `esp32_session_report_${fileStamp(new Date())}.html` });
+  anchor.click();
+  setTimeout(() => URL.revokeObjectURL(url), 5000);
+}
+
+document.getElementById("summary-save").addEventListener("click", onSaveReportClick);
 document.getElementById("summary-open").addEventListener("click", () => setSummaryOpen(true));
 document.getElementById("summary-close").addEventListener("click", () => setSummaryOpen(false));
 document.addEventListener("keydown", (event) => { if (event.key === "Escape") setSummaryOpen(false); });
