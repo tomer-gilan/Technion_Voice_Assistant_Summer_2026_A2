@@ -108,6 +108,8 @@ or left inline in `test.ino`:
 - `clock_timer_utils.h`/`.cpp` — the `get_current_time` and `set_timer` tool
   calls, the timer ringing (LED blinks + beeps) once the board is idle, the
   spoken "Time's up - <label>" announcement after it, and the `@@TIMER` lines.
+- `board_info_utils.h`/`.cpp` — the read-only `get_board_status` tool call
+  ("How are you doing?"): Wi-Fi signal, uptime and free heap in one sentence.
 - `settings_store_utils.h`/`.cpp` — settings kept across reboots in NVS flash
   (volume, mute, LED brightness, light thresholds).
 - `measurement_utils.h`/`.cpp` — the `@@BOOT_TIMING` / `@@TIMING` measurement

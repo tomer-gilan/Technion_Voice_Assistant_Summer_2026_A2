@@ -40,6 +40,7 @@ flowchart LR
 | `light_sensor_utils` | חיישן האור (עוד מדומה) והכלי `get_time_of_day` |
 | `device_controls_utils` | פקודות עוצמה, השתקה, צפצוף ו-LED מהמחשב, והכלי `set_volume` |
 | `clock_timer_utils` | הכלים `get_current_time` ו-`set_timer`, הצלצול של הטיימר, וההודעה בקול כשהוא נגמר |
+| `board_info_utils` | הכלי `get_board_status`: עוצמת ה-Wi-Fi, זמן מההדלקה וזיכרון פנוי |
 | `greeting_utils` | משפט פתיחה אקראי כשהחיבור מוכן |
 | `settings_store_utils` | שמירת הגדרות בזיכרון הקבוע (NVS), כך שהן נשארות אחרי כיבוי |
 | `sd_card_utils` | חיבור כרטיס ה-SD ובדיקה שהוא באמת כותב וקורא |
@@ -152,7 +153,7 @@ stateDiagram-v2
 
 ## כלי חדש בשלושה צעדים
 
-ככה הוספנו את `set_volume`, `get_current_time` ו-`set_timer`:
+ככה הוספנו את `set_volume`, `get_current_time`, `set_timer` ו-`get_board_status`:
 
 1. מוסיפים את הכלי לרשימת הכלים בהודעת ההגדרות של הסשן (`kSessionUpdateMessage` ב-`test.ino`): שם, תיאור באנגלית למודל, וסכמת JSON של הפרמטרים.
 2. כותבים פונקציה במודול המתאים שקוראת את הפרמטרים, מבצעת, מדפיסה שורת `@@` ושולחת ל-OpenAI את התוצאה (`function_call_output`) ובקשה לענות (`response.create`).

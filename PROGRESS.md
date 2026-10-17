@@ -36,6 +36,7 @@
 | `22ca52c` | הטיימר מצלצל גם כשאין חיבור ל-OpenAI (קודם הוא חיכה לחיבור). ההודעה בקול רק כשיש חיבור |
 | `d9af02e` | `How long is left on my timer?`: התשובה של `get_current_time` כוללת גם כמה זמן נשאר לטיימר |
 | `3abf862` | `What can you do?` עונה במשפט אחד מה העוזר יודע לעשות. גם בכרטיס Try saying |
+| `7bf4cea` | `How are you doing?`: כלי חדש `get_board_status` (מודול `board_info_utils`) שמחזיר עוצמת Wi-Fi, זמן מההדלקה וזיכרון פנוי. גם ב-Try saying וב-Summary |
 | `20de4c7` | שאלה בכתב לחדר רועש: שדה מתחת ל-Talk ששולח `ASK <text>`. התשובה בקול כרגיל, וגם כלים עובדים. בבועה כתוב typed (גם ב-GUI) |
 | `348a78d` | תזכורת בקול: ל-`set_timer` יש תיאור (`label`), ובסוף העוזר אומר `Time's up - check the oven`. גם מרכז הבקרה מציג את התיאור |
 
@@ -54,14 +55,15 @@
 | `64afc6a` | מקרה קצה 19: טיימר בלי אינטרנט |
 | `3dcca38` | העמעום בסיפור משתמש 4, במדריך המהיר וב-README. מקרה קצה 16 עכשיו `Make the light blue` |
 | `4f6ecce` | GIF מונפש ב-README: ארבע פקודות קוליות במרכז הבקרה (`docs/images/demo.gif`) |
-| הבא אחריו | שאלה בכתב: מקרה קצה 20, architecture, README, המדריך המהיר ו-demo-plan. PDF-ים מחדש |
+| `a8f32aa` | שאלה בכתב: מקרה קצה 20, architecture, README, המדריך המהיר ו-demo-plan. PDF-ים מחדש |
+| הבא אחריו | `get_board_status` ב-README, ב-architecture וב-`CLAUDE.md` |
 
 ## מה צריך לבדוק על הלוח
 
 לא יכולתי לקמפל או לצרוב. בדקתי את קוד ה-C++ החדש רק בבדיקת תחביר במחשב מול ArduinoJson 7.4.3, ואת ה-JSON של הסשן בפרסר. לכן:
 
-1. **קומפילציה:** לפתוח את `test/test.ino` ב-Arduino IDE ולעשות Verify. הקבצים `clock_timer_utils.cpp/.h` חדשים ונכנסים לבד.
-2. **הדלקה:** כל הנורות ירוקות וברכת הפתיחה נשמעת. הודעת ההגדרות לסשן גדלה מכ-2.4KB לכ-4KB. אם נורית OpenAI לא נהיית ירוקה, זה החשוד הראשון.
+1. **קומפילציה:** לפתוח את `test/test.ino` ב-Arduino IDE ולעשות Verify. הקבצים `clock_timer_utils.cpp/.h` ו-`board_info_utils.cpp/.h` חדשים ונכנסים לבד.
+2. **הדלקה:** כל הנורות ירוקות וברכת הפתיחה נשמעת. הודעת ההגדרות לסשן גדלה מכ-2.4KB לכ-4.9KB (שישה כלים). אם נורית OpenAI לא נהיית ירוקה, זה החשוד הראשון.
 3. **אור בקול:** `Dim the light to 30 percent`: סליידר הבהירות זז ל-30% וה-LED מתעמעם. Reset ללוח: הבהירות נשארת. `Make the light blue`: עונה שאי אפשר.
 4. **עוצמה בקול:**
    - `Set the volume to 30 percent`: הסליידר זז ל-30% והעוזר מאשר בקול.
@@ -81,10 +83,11 @@
    - `Remind me in 30 seconds to check the oven`: בספירה כתוב `check the oven`. בסוף, אחרי הצפצופים, העוזר אומר `Time's up - check the oven` ובמסך כתוב Saying that the timer is done.
    - עם Hands-free דלוק: ההודעה בקול לא מתחילה הקלטה.
 7. **`What can you do?`:** עונה במשפט אחד עם הדברים שהוא יודע לעשות.
-8. **שאלה בכתב:** בשדה שמתחת ל-Talk לכתוב `What is the capital of Italy?` ו-Ask: העוזר עונה בקול, ובבועה כתוב typed. `Turn on the light` בכתב: ה-LED נדלק. Ask באמצע תשובה: מתחת לשיחה כתוב שהשאלה לא נשלחה.
-9. **שלא נשבר כלום:** `Turn on the light`, `Is it day or night?`, Hands-free, הקלטות ב-SD.
+8. **מצב הלוח:** `How are you doing?`: עונה עם עוצמת ה-Wi-Fi, כמה דקות הוא דלוק וכמה זיכרון פנוי. בשיחה מופיעה תגית 📶.
+9. **שאלה בכתב:** בשדה שמתחת ל-Talk לכתוב `What is the capital of Italy?` ו-Ask: העוזר עונה בקול, ובבועה כתוב typed. `Turn on the light` בכתב: ה-LED נדלק. Ask באמצע תשובה: מתחת לשיחה כתוב שהשאלה לא נשלחה.
+10. **שלא נשבר כלום:** `Turn on the light`, `Is it day or night?`, Hands-free, הקלטות ב-SD.
 
-אם משהו מהקושחה לא עובד, אפשר לבטל רק אותו: `git revert 20de4c7` (שאלה בכתב, מבטל גם את השדה ב-GUI), `git revert 9b6db09` (עמעום בקול), `git revert 22ca52c` (צלצול בלי חיבור), `git revert d9af02e` (כמה זמן נשאר), `git revert 348a78d` (התזכורת בקול), `git revert e0a8753` (טיימר ושעה, אחרי שביטלתם את שני אלה) או `git revert 80b1506` (עוצמה). ה-GUI ממשיך לעבוד גם בלי הכלים האלה.
+אם משהו מהקושחה לא עובד, אפשר לבטל רק אותו: `git revert 7bf4cea` (מצב הלוח), `git revert 20de4c7` (שאלה בכתב, מבטל גם את השדה ב-GUI), `git revert 9b6db09` (עמעום בקול), `git revert 22ca52c` (צלצול בלי חיבור), `git revert d9af02e` (כמה זמן נשאר), `git revert 348a78d` (התזכורת בקול), `git revert e0a8753` (טיימר ושעה, אחרי שביטלתם את שני אלה) או `git revert 80b1506` (עוצמה). ה-GUI ממשיך לעבוד גם בלי הכלים האלה.
 
 ## בדיקה של מרכז הבקרה
 

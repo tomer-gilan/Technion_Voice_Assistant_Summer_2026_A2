@@ -17,6 +17,7 @@
 - **שליטה בלוח בקול:** `Turn on the light`, `Dim the light to 30 percent`, `Set the volume to 30 percent`, `A bit louder`.
 - **טיימר, תזכורת ושעון:** `Set a timer for 20 seconds` (בסוף הלוח מצפצף וה-LED מהבהב), `Remind me in 30 seconds to check the oven` (בסוף העוזר גם אומר בקול על מה התזכורת), `What time is it?`.
 - **חלק היום:** השאלה `Is it day or night?` נענית לפי חיישן האור (יום, ערב או לילה).
+- **מצב הלוח:** `How are you doing?` והוא מספר על עצמו: עוצמת ה-Wi-Fi, כמה זמן הוא דלוק וכמה זיכרון פנוי.
 - **זיכרון שיחה:** זוכר מה אמרת קודם, למשל את השם שלך.
 - **מרכז בקרה בדפדפן:**
   - נורות תקינות לכל רכיב, והמצב הנוכחי (מחכה, מקשיב, חושב, מדבר).
@@ -127,6 +128,7 @@
 | `get_time_of_day` | קורא את חיישן האור ומחזיר יום, ערב או לילה | `Is it day or night?` |
 | `set_volume` | קובע עוצמה באחוזים, או מגביר / מנמיך ב-20% | `Set the volume to 30 percent`, `Louder` |
 | `get_current_time` | מחזיר את התאריך והשעה מהשעון של הלוח (מסונכרן מהאינטרנט) | `What time is it?` |
+| `get_board_status` | מחזיר את עוצמת ה-Wi-Fi, כמה דקות הלוח דלוק וכמה זיכרון פנוי | `How are you doing?`, `How is the Wi-Fi signal?` |
 | `set_timer` | מפעיל טיימר של 1 עד 3600 שניות, או מבטל אותו. עם תיאור קצר הוא תזכורת, שהעוזר אומר בקול כשהזמן נגמר | `Set a timer for 20 seconds`, `Remind me in 5 minutes to check the oven` |
 
 ![מה קורה כשמבקשים להדליק את האור](docs/images/led-sequence.png)
