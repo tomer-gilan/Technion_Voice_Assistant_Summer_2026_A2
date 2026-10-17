@@ -24,7 +24,7 @@ constexpr size_t kToolResponseBufferSize = 384;  // the JSON around it, a ~40-ch
 char tool_response_message[kToolResponseBufferSize];
 
 constexpr size_t kMaxLabelLength = 48;  // "check the oven" - a few words, said back out loud
-constexpr size_t kAnnouncementBufferSize = kMaxLabelLength + 160;  // template text + JSON punctuation, generous margin
+constexpr size_t kAnnouncementBufferSize = kMaxLabelLength + 200;  // the ~130-char template plus the spoken text (at most kMaxLabelLength + 32)
 // The announcement's text goes inside a JSON string: setTimerLabel() keeps
 // only characters that need no escaping.
 constexpr char kAnnouncementTemplate[] =
