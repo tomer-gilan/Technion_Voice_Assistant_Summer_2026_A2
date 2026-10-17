@@ -125,6 +125,7 @@ stateDiagram-v2
 | `@@BEEP` | `@@BEEP played` | צפצוף הבדיקה נוגן, או `busy` |
 | `@@LIGHT` | `@@LIGHT 4000 day 1000 3000` | קריאת חיישן האור, חלק היום והספים |
 | `@@TIMER` | `@@TIMER 45 60 check the oven` | 45 מתוך 60 שניות נשארו, ועל מה התזכורת (אם יש). גם `off`, ו-`done` כשהוא מצלצל |
+| `@@CLOCK` | `@@CLOCK 14:05 1792235100` | השעה המקומית של הלוח (ו-Unix time). `unset` אם השעון לא סונכרן. ה-Self-test משווה אותה לשעה במחשב |
 | `@@VAD` | `@@VAD on 3 900` | Hands-free דלוק או כבוי, רגישות (1-5) וכמה מילישניות שקט מסיימות משפט |
 | `@@VAD_LEVEL` | `@@VAD_LEVEL -48 -55 -40` | הרעש עכשיו, רעש הרקע והסף, בזמן ש-Hands-free מקשיב |
 | `@@VAD_EVENT` | `@@VAD_EVENT discarded short 180` | דיבור התחיל (`started`), נשלח (`sent`), נזרק כי לא נשמע כמו דיבור (`discarded short\|unvoiced\|steady`), או השהיה אחרי הרבה רעש (`paused`) |
@@ -145,6 +146,7 @@ stateDiagram-v2
 | `LISTEN` | מקליט 3 שניות ושולח (כמו הכפתור Talk) |
 | `ASK <text>` | שולח שאלה כתובה, עד 200 תווים. התשובה נאמרת בקול כרגיל, בלי הקלטה ובלי `@@TIMING`. הלוח מחזיר את הטקסט כ-`@@HEARD` |
 | `STATUS` | מדפיס מחדש את כל שורות הסטטוס |
+| `CLOCK` | מדפיס רק את `@@CLOCK` |
 | `VOLUME <0-100>`, `MUTE on\|off`, `BEEP` | הרמקול |
 | `LED on\|off`, `LED_BRIGHTNESS <0-100>` | ה-LED |
 | `LIGHT <0-6142>`, `LIGHT_BANDS <evening> <day>` | חיישן האור המדומה והספים שלו |

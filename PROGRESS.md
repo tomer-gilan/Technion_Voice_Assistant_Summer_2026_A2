@@ -43,6 +43,7 @@
 | `ff777f2` | LDR אמיתי: עם `#define LIGHT_SENSOR_PIN 34` ב-`config.h` הלוח קורא את החיישן כל שנייה. בלי השורה הזאת שום דבר לא משתנה (לא נגעתי ב-`config.h`) |
 | `7bf4cea` | `How are you doing?`: כלי חדש `get_board_status` (מודול `board_info_utils`) שמחזיר עוצמת Wi-Fi, זמן מההדלקה וזיכרון פנוי. גם ב-Try saying וב-Summary |
 | `20de4c7` | שאלה בכתב לחדר רועש: שדה מתחת ל-Talk ששולח `ASK <text>`. התשובה בקול כרגיל, וגם כלים עובדים. בבועה כתוב typed (גם ב-GUI) |
+| `1f64f27` | בדיקת שעון: הלוח מדפיס `@@CLOCK` (גם בפקודה `CLOCK`), וה-Self-test מזהיר אם הוא בהפרש של שעה מהמחשב ומפנה ל-`TIMEZONE_POSIX` |
 | `dd56064` | שעון קיץ: עם `#define TIMEZONE_POSIX "IST-2IDT,M3.5.5/2,M10.5.0"` ב-`config.h` השעה נכונה גם בקיץ. בלי השורה הכל כמו קודם (לא נגעתי ב-`config.h`) |
 | `348a78d` | תזכורת בקול: ל-`set_timer` יש תיאור (`label`), ובסוף העוזר אומר `Time's up - check the oven`. גם מרכז הבקרה מציג את התיאור |
 
@@ -71,7 +72,8 @@
 | `38cef7d` | שעון ההדגמה ב-demo-plan וב-README |
 | `0c58290` | מסמך חדש `docs/versions.md`: כל השלבים 02-30 והשיפורים, בטבלאות |
 | `56be7ba` | QR לריפו ב-GitHub במדריך המהיר (גם ב-PDF), כדי שהבוחנים יגיעו לקוד מהדף המודפס |
-| הבא אחריו | `TIMEZONE_POSIX` ב-README, ב-`CLAUDE.md` ובבדיקה 5 על הלוח |
+| `d01585b` | `TIMEZONE_POSIX` ב-README, ב-`CLAUDE.md` ובבדיקה 5 על הלוח |
+| הבא אחריו | `@@CLOCK` ו-`CLOCK` ב-architecture, ב-README ובבדיקות על הלוח |
 
 ## מה צריך לבדוק על הלוח
 
@@ -110,7 +112,7 @@
 10. **שלא נשבר כלום:** `Turn on the light`, `Is it day or night?`, Hands-free, הקלטות ב-SD. סליידר האור עדיין משנה את הערך (בלי `LIGHT_SENSOR_PIN`).
 11. **רק אם מחברים LDR:** להוסיף `#define LIGHT_SENSOR_PIN 34` ל-`config.h` (בלי commit). סליידר האור במסך זז לבד כשמכסים את החיישן, ו-`Is it day or night?` עונה לפי האור האמיתי.
 
-אם משהו מהקושחה לא עובד, אפשר לבטל רק אותו: `git revert ff777f2` (LDR), `git revert 7bf4cea` (מצב הלוח), `git revert 20de4c7` (שאלה בכתב, מבטל גם את השדה ב-GUI), `git revert 9b6db09` (עמעום בקול), `git revert 22ca52c` (צלצול בלי חיבור), `git revert d9af02e` (כמה זמן נשאר), `git revert 348a78d` (התזכורת בקול), `git revert e0a8753` (טיימר ושעה, אחרי שביטלתם את שני אלה) או `git revert 80b1506` (עוצמה). ה-GUI ממשיך לעבוד גם בלי הכלים האלה.
+אם משהו מהקושחה לא עובד, אפשר לבטל רק אותו: `git revert 1f64f27` (בדיקת השעון, גם השורה ב-Self-test), `git revert dd56064` (שעון קיץ), `git revert ff777f2` (LDR), `git revert 7bf4cea` (מצב הלוח), `git revert 20de4c7` (שאלה בכתב, מבטל גם את השדה ב-GUI), `git revert 9b6db09` (עמעום בקול), `git revert 22ca52c` (צלצול בלי חיבור), `git revert d9af02e` (כמה זמן נשאר), `git revert 348a78d` (התזכורת בקול), `git revert e0a8753` (טיימר ושעה, אחרי שביטלתם את שני אלה) או `git revert 80b1506` (עוצמה). ה-GUI ממשיך לעבוד גם בלי הכלים האלה.
 
 ## בדיקה של מרכז הבקרה
 
@@ -120,7 +122,7 @@
 - **Summary:** אחרי כמה שאלות, כפתור Summary בחלונית Statistics. המספרים צריכים להתאים לחלונית.
 - **Tour:** כפתור Tour למעלה, לעבור על 9 התחנות עם החצים. אחרי Connect גם מתג ה-Hands-free מסומן.
 - **Save report:** אחרי כמה שאלות, Summary ואז Save report. נפתח קובץ HTML עם הסיכום, הגרף, טבלה וכל השיחה.
-- **Self-test:** אחרי Connect, כפתור Self-test למעלה מימין. ה-LED מהבהב פעם אחת וחוזר למצב שהיה, נשמע צפצוף, ובסוף כתוב all passed.
+- **Self-test:** אחרי Connect, כפתור Self-test למעלה מימין. ה-LED מהבהב פעם אחת וחוזר למצב שהיה, נשמע צפצוף, ובסוף כתוב all passed. בשורה Board clock כתובה השעה של הלוח (`same as this laptop`). אם כתוב `1 h behind`, להוסיף את `TIMEZONE_POSIX` (בדיקה 5).
 - **צ'ק-ליסט אוטומטי:** אחרי Connect ושאלה אחת, Demo checklist מראה כמה פריטים מסומנים (גם על הכפתור), ולידם כתוב "אוטומטי".
 - **Save בשיחה:** אחרי כמה שאלות, Save מוריד קובץ `.txt` עם הבועות, זמני התגובה וההערות.
 - **Replay a log:** בלי לוח מחובר, Replay a log… בטרמינל ולבחור לוג ששמרתם (למשל `docs/measurements/esp32_log_2026-10-15.txt`). השיחה, המצב והסטטיסטיקה מתמלאים. חיבור לוח עוצר את הניגון.
