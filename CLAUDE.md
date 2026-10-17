@@ -82,7 +82,9 @@ the sanctioned way Arduino splits one sketch across multiple files). Reusable
 plumbing — anything that isn't the actual LISTEN-cycle test logic under
 test — belongs in one of these modules, not copy-pasted into every new test
 or left inline in `test.ino`:
-- `wifi_utils.h`/`.cpp` — Wi-Fi connect, SNTP time sync.
+- `wifi_utils.h`/`.cpp` — Wi-Fi connect, SNTP time sync. Uses the fixed
+  `TIMEZONE_UTC_OFFSET_SEC`, or `configTzTime()` when `config.h` defines an
+  optional `TIMEZONE_POSIX` string (summer time handled automatically).
 - `openai_realtime_utils.h`/`.cpp` — WSS connection setup, root CA, auth
   header, reconnect backoff, generic WebSocket event logging.
 - `i2s_audio_utils.h`/`.cpp` — full-duplex mic+speaker I2S setup, gained mic

@@ -150,7 +150,7 @@
 ## איך מריצים
 
 1. להתקין את הספריות מה-Library Manager של Arduino.
-2. ליצור את `test/config.h` עם שם ה-Wi-Fi, הסיסמה ומפתח ה-API של OpenAI. הקובץ ב-`.gitignore`, לא מעלים אותו לגיט.
+2. ליצור את `test/config.h` עם שם ה-Wi-Fi, הסיסמה ומפתח ה-API של OpenAI. הקובץ ב-`.gitignore`, לא מעלים אותו לגיט. כדי שהשעון יעבור לבד לשעון קיץ, אפשר להוסיף לו `#define TIMEZONE_POSIX "IST-2IDT,M3.5.5/2,M10.5.0"`. בלי השורה הזאת משתמשים ב-`TIMEZONE_UTC_OFFSET_SEC` הקבוע.
 3. לפתוח את `test/test.ino` ב-Arduino IDE, לבחור ESP32 Dev Module ולצרוב. להשתמש ב-hotspot מהטלפון ולא ב-Wi-Fi של הטכניון. אפשר גם משורת הפקודה: `arduino-cli compile --fqbn esp32:esp32:esp32 test`.
 4. לפתוח את `tools/reply_audio_app.html` ב-Chrome, ללחוץ **Connect board** ולבחור את ה-COM של הלוח (115200 baud).
 5. לחכות לנורות הירוקות ולברכת הפתיחה, ואז ללחוץ **Talk** או להדליק **Hands-free**.
