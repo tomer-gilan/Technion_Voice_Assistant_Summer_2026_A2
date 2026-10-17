@@ -1,4 +1,4 @@
-<div dir=`rtl`>
+<div dir="rtl">
 
 # סיפורי משתמש (User Stories) - עוזר קולי על ESP32
 

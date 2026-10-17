@@ -1,4 +1,4 @@
-<div dir=`rtl`>
+<div dir="rtl">
 
 # מקרי קצה - עוזר קולי על ESP32
 

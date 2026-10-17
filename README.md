@@ -1,4 +1,4 @@
-<div dir=`rtl`>
+<div dir="rtl">
 
 # עוזר קולי על ESP32
 
@@ -33,7 +33,7 @@
 
 המיקרופון והמגבר חולקים את אותם קווי שעון של I2S (full duplex על פורט I2S אחד).
 
-<div dir=`ltr`>
+<div dir="ltr">
 
 ```
                  ESP32-WROOM-32
