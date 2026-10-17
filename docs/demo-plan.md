@@ -16,6 +16,7 @@
 
 - [ ] להדליק hotspot בטלפון, לחבר את הלוח ל-USB, לפתוח את `tools/reply_audio_app.html` ב-Chrome וללחוץ Connect board.
 - [ ] לחכות שכל הנורות ירוקות ולשמוע את ברכת הפתיחה.
+- [ ] ללחוץ Self-test (ליד Board health): ה-LED מהבהב, צפצוף, וכל השורות עם ✓.
 - [ ] לנקות: Clear בשיחה, Reset בסטטיסטיקה, Reset ב-Demo checklist.
 - [ ] להתחיל ממצב רגיל: עוצמה כ-60%, LED כבוי, Hands-free כבוי, סליידר האור על day.
 - [ ] אם יש מסך גדול או מקרן: Stage view (מקש F) כשמדגימים שיחה.
