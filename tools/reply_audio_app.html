@@ -951,7 +951,7 @@ const DISCARD_TEXT = {                 // @@VAD_EVENT discarded <reason> - vad_u
 };
 const TOOL_LABELS = { set_board_state: "Switching the LED", get_time_of_day: "Reading the light sensor",
                       set_volume: "Changing the volume", get_current_time: "Checking the clock",
-                      set_timer: "Setting a timer" };
+                      set_timer: "Setting a timer", get_board_status: "Checking the board" };
 const STATE_TEXT = {
   offline: ["Not connected", "Connect the board to start."],
   unknown: ["Connected", "Waiting for the board to report its state…"],
@@ -2586,6 +2586,8 @@ function noteToolInConversation(tool) {
     addConversationNote(!timer ? "⏰ Timer cancelled"
       : timer.label ? `⏰ Reminder set: ${timer.label}, in ${formatDuration(timer.totalS)}`
       : `⏰ Timer set for ${formatDuration(timer.totalS)}`, "tool");
+  } else if (tool === "get_board_status") {
+    addConversationNote(`📶 Checked the board: Wi-Fi${board.wifiRssi !== null ? ` ${board.wifiRssi} dBm` : ""}, memory, uptime`, "tool");
   } else if (tool === "get_current_time") {
     addConversationNote(`🕒 Read the board's clock`, "tool");
   } else if (tool === "set_volume") {
@@ -2966,7 +2968,7 @@ function renderResponseChart() {
     } else {
       svg.append(svgElement("text", { class: "fail-mark", x: x + barW / 2, y: yOf(0) - 4, "text-anchor": "middle" }, "✕"));
     }
-    const icon = { set_board_state: "💡", get_time_of_day: "🔆", set_volume: "🔊", set_timer: "⏰", get_current_time: "🕒" }[turn.tool] || "";
+    const icon = { set_board_state: "💡", get_time_of_day: "🔆", set_volume: "🔊", set_timer: "⏰", get_current_time: "🕒", get_board_status: "📶" }[turn.tool] || "";
     if (icon && sound !== null) svg.append(svgElement("text", { x: x + barW / 2, y: yOf(sound) - 4, "text-anchor": "middle", "font-size": 11 }, icon));
     if (index % labelEvery === 0 || index === turns.length - 1) {
       svg.append(svgElement("text", { class: "axis-label", x: x + barW / 2, y: height - 6, "text-anchor": "middle" }, `#${turn.n}`));
@@ -2975,7 +2977,7 @@ function renderResponseChart() {
     hit.addEventListener("pointerenter", () => {
       const seconds = (ms) => (ms === null ? "-" : `${(ms / 1000).toFixed(2)} s`);
       const toolText = { set_board_state: "LED by voice", get_time_of_day: "part of day", set_volume: "volume by voice",
-                         set_timer: "timer", get_current_time: "clock time" }[turn.tool];
+                         set_timer: "timer", get_current_time: "clock time", get_board_status: "board status" }[turn.tool];
       tip.innerHTML = "";
       const title = document.createElement("b");
       title.textContent = `Command #${turn.n} · ${clockStamp(turn.at).slice(0, 8)}`;
@@ -3060,6 +3062,7 @@ const EXAMPLE_PHRASES = [
   ["⏰", "Set a timer for 20 seconds"],
   ["📝", "Remind me in 30 seconds to check the oven"],
   ["🕒", "What time is it?"],
+  ["📶", "How are you doing?"],
 ];
 document.getElementById("phrases").replaceChildren(...EXAMPLE_PHRASES.map(([icon, phrase]) => {
   const button = document.createElement("button");
@@ -3321,6 +3324,7 @@ function renderSummary() {
     chip("🔊", "Changed the volume", toolCount("set_volume")),
     chip("🕒", "Told the time", toolCount("get_current_time")),
     chip("⏰", "Set a timer", toolCount("set_timer")),
+    chip("📶", "Checked the board", toolCount("get_board_status")),
     chip("🤫", "Ignored a noise", usage.noisesIgnored),
   );
 
