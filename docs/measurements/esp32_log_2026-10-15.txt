@@ -1,0 +1,740 @@
+[11:46:26.037] (app) Connected (CP210x, 115200 baud).
+[11:46:26.061] ets Jul 29 2019 12:21:46
+[11:46:26.065] 
+[11:46:26.066] rst:0x1 (POWERON_RESET),boot:0x13 (SPI_FAST_FLASH_BOOT)
+[11:46:26.069] configsip: 0, SPIWP:0xee
+[11:46:26.070] clk_drv:0x00,q_drv:0x00,d_drv:0x00,cs0_drv:0x00,hd_drv:0x00,wp_drv:0x00
+[11:46:26.071] mode:DIO, clock div:1
+[11:46:26.071] load:0x3fff0030,len:1184
+[11:46:26.072] load:0x40078000,len:13260
+[11:46:26.072] load:0x40080400,len:3028
+[11:46:26.072] entry 0x400805e4
+[11:46:26.453] @@STATE booting
+[11:46:26.453] @@STAGE sd pending
+[11:46:26.457] @@STAGE mic pending
+[11:46:26.459] @@STAGE speaker pending
+[11:46:26.459] @@STAGE wifi pending
+[11:46:26.460] >> STATUS
+[11:46:26.461] @@STAGE time pending
+[11:46:26.463] @@STAGE openai pending
+[11:46:26.467] @@STATE booting
+[11:46:26.469] @@HEAP free=215276 largest=110580 lowest=209936 stage=boot
+[11:46:26.472] @@LIGHT 4000 day 1000 3000
+[11:46:26.473] @@STAGE mic active
+[11:46:26.476] @@VOLUME 54 unmuted
+[11:46:26.478] @@LED off 100 status
+[11:46:26.483] @@STAGE speaker ok ready - check it by ear with Test beep
+[11:46:26.879] @@STAGE mic ok signal OK, room level -36 dBFS
+[11:46:26.887] @@HEAP free=151356 largest=110580 lowest=150880 stage=after ring buffer + I2S
+[11:46:26.888] @@STAGE sd active mounting
+[11:46:26.995] @@HEAP free=139900 largest=110580 lowest=134872 stage=after SD + recorder setup
+[11:46:27.000] @@STAGE sd ok SDHC/SDXC, 15262 MB, self-test passed
+[11:46:27.067] Connecting to Wi-Fi "iphone itamar"...
+[11:46:27.072] @@STAGE wifi active connecting to iphone itamar
+[11:46:27.457] .
+[11:46:27.461] Wi-Fi connected. IP address: 172.20.10.4
+[11:46:27.464] @@STAGE wifi ok 172.20.10.4
+[11:46:27.465] @@WIFI -45
+[11:46:27.467] Syncing time...
+[11:46:27.468] @@STAGE time active
+[11:46:28.959] .....
+[11:46:28.963] Time synced: Thu Oct 15 08:46:29 2026
+[11:46:28.966] @@STAGE time ok
+[11:46:28.971] @@HEAP free=89116 largest=86004 lowest=86168 stage=after Wi-Fi + time sync
+[11:46:28.974] Connecting to OpenAI Realtime API...
+[11:46:28.977] @@STAGE openai active connecting
+[11:46:32.232] @@STAGE sd ok SDHC/SDXC, 15262 MB, self-test passed
+[11:46:32.236] @@STAGE mic ok signal OK, room level -36 dBFS
+[11:46:32.241] @@STAGE speaker ok ready - check it by ear with Test beep
+[11:46:32.244] @@STAGE wifi ok 172.20.10.4
+[11:46:32.245] @@STAGE time ok
+[11:46:32.249] @@STAGE openai active connecting
+[11:46:32.249] @@STATE booting
+[11:46:32.250] @@WIFI -45
+[11:46:32.252] @@VOLUME 54 unmuted
+[11:46:32.254] @@LED off 100 status
+[11:46:32.257] @@LIGHT 4000 day 1000 3000
+[11:46:32.877] @@STAGE openai active setting up the session
+[11:46:33.183] @@HEAP free=38208 largest=36852 lowest=35308 stage=OpenAI session ready
+[11:46:33.186] Ready - type LISTEN to talk.
+[11:46:33.189] @@STAGE openai ok session ready
+[11:46:33.203] @@BOOT_TIMING hw_ms=466 sd_ms=174 wifi_ms=409 time_ms=1502 connect_ms=3914 session_ms=314 total_ms=6779 heap_free=38208 heap_lowest=35308 heap_largest=36852 rssi=-45
+[11:46:33.204] @@STATE ready
+[11:46:33.982] Streaming transcript: What's up?
+[11:46:33.985] @@STATE speaking greeting
+[11:46:34.177] 
+[11:46:34.178] @@SAID What's up?
+[11:46:34.560] @@STATE ready
+[11:46:37.459] @@WIFI -39
+[11:46:47.458] @@WIFI -40
+[11:46:49.571] >> VOLUME 95
+[11:46:49.581] @@VOLUME 95 unmuted
+[11:46:52.974] >> LISTEN
+[11:46:52.979] @@STATE listening 3
+[11:46:52.991] LISTEN #1: recording 3s and streaming to OpenAI...
+[11:46:56.106] Done streaming - waiting for reply...
+[11:46:56.116] [ERROR] [captureAndStreamAudio:594] Mic audio was probably dropped this LISTEN - handling couldn't keep up with the mic.
+[11:46:56.159] @@STATE processing
+[11:46:56.929] You said: "What is one plus one?"
+[11:46:56.932] @@HEARD What is one plus one?
+[11:46:57.286] Streaming transcript: One plus one
+[11:46:57.287] @@STATE speaking
+[11:46:57.476]  equals two.@@WIFI -48
+[11:46:57.712] 
+[11:46:57.715] @@SAID One plus one equals two.
+[11:46:59.610] ===== LISTEN #1 PASSED =====
+[11:46:59.623] Type LISTEN to continue the conversation.
+[11:46:59.623] @@RESULT pass 1
+[11:46:59.660] @@TIMING n=1 result=pass first_event_after_rec_ms=210 heard_after_rec_ms=824 first_text_after_rec_ms=865 first_audio_after_rec_ms=1138 tool=- tool_after_rec_ms=-1 tool_roundtrip_ms=-1 response_done_after_rec_ms=1775 playback_done_after_rec_ms=3506 rec_ms=3125 sent_bytes=193410 upload_kbps=886 reply_audio_bytes=20007 reply_audio_ms=2500 pauses=0 heard_chars=21 mic_peak_dbfs=-0.8 mic_rms_dbfs=-19.1 clipped=0 chunk_max_ms=265 chunk_avg_ms=78 heap_free=45272 heap_lowest=29224 heap_largest=40948 rssi=-52
+[11:46:59.666] @@HEAP free=45272 largest=40948 lowest=29224 stage=at verdict
+[11:46:59.668] ===== MEASUREMENTS PASSED =====
+[11:46:59.677] Check the @@BOOT_TIMING and @@TIMING lines above, then keep running LISTEN cycles to collect more.
+[11:46:59.678] @@STATE ready
+[11:47:03.295] >> LISTEN
+[11:47:03.299] @@STATE listening 3
+[11:47:03.311] LISTEN #2: recording 3s and streaming to OpenAI...
+[11:47:06.539] Done streaming - waiting for reply...
+[11:47:06.550] [ERROR] [captureAndStreamAudio:594] Mic audio was probably dropped this LISTEN - handling couldn't keep up with the mic.
+[11:47:06.586] @@STATE processing
+[11:47:07.286] You said: "Oi, daj."
+[11:47:07.287] @@HEARD Oi, daj.
+[11:47:07.477] Streaming transcript: I can’t control it unless
+[11:47:07.478] @@WIFI -44
+[11:47:07.531] @@STATE speaking
+[11:47:10.237]  you explicitly ask to turn it on or off.
+[11:47:10.244] @@SAID I can’t control it unless you explicitly ask to turn it on or off.
+[11:47:12.047] ===== LISTEN #2 PASSED =====
+[11:47:12.051] Type LISTEN to continue the conversation.
+[11:47:12.052] @@RESULT pass 2
+[11:47:12.097] @@TIMING n=2 result=pass first_event_after_rec_ms=224 heard_after_rec_ms=749 first_text_after_rec_ms=786 first_audio_after_rec_ms=945 tool=- tool_after_rec_ms=-1 tool_roundtrip_ms=-1 response_done_after_rec_ms=3864 playback_done_after_rec_ms=5509 rec_ms=3239 sent_bytes=193410 upload_kbps=890 reply_audio_bytes=37611 reply_audio_ms=4701 pauses=1 heard_chars=8 mic_peak_dbfs=-13.1 mic_rms_dbfs=-29.2 clipped=0 chunk_max_ms=389 chunk_avg_ms=77 heap_free=45272 heap_lowest=29224 heap_largest=40948 rssi=-45
+[11:47:12.098] @@STATE ready
+[11:47:13.436] >> LISTEN
+[11:47:13.441] @@STATE listening 3
+[11:47:13.453] LISTEN #3: recording 3s and streaming to OpenAI...
+[11:47:16.476] Done streaming - waiting for reply...
+[11:47:16.486] [ERROR] [captureAndStreamAudio:594] Mic audio was probably dropped this LISTEN - handling couldn't keep up with the mic.
+[11:47:16.523] @@STATE processing
+[11:47:17.203] You said: "בת כמה אני?"
+[11:47:17.214] @@HEARD בת כמה אני?
+[11:47:17.472] Streaming transcript: Let me handle the LED
+[11:47:17.474] @@STATE speaking
+[11:47:17.483]  control@@WIFI -44
+[11:47:18.346]  first.
+[11:47:18.350] @@SAID Let me handle the LED control first.
+[11:47:18.498] @@LED on 100 voice
+[11:47:18.549] @@STATE tool set_board_state
+[11:47:18.708] @@STATE speaking
+[11:47:20.186] Streaming transcript: The LED is now on.
+[11:47:20.188] @@SAID The LED is now on.
+[11:47:22.547] ===== LISTEN #3 PASSED =====
+[11:47:22.551] Type LISTEN to continue the conversation.
+[11:47:22.552] @@RESULT pass 3
+[11:47:22.597] @@TIMING n=3 result=pass first_event_after_rec_ms=232 heard_after_rec_ms=728 first_text_after_rec_ms=837 first_audio_after_rec_ms=961 tool=set_board_state tool_after_rec_ms=2024 tool_roundtrip_ms=131 response_done_after_rec_ms=3877 playback_done_after_rec_ms=6072 rec_ms=3033 sent_bytes=193410 upload_kbps=953 reply_audio_bytes=42015 reply_audio_ms=5251 pauses=0 heard_chars=19 mic_peak_dbfs=-6.0 mic_rms_dbfs=-22.8 clipped=0 chunk_max_ms=183 chunk_avg_ms=73 heap_free=45272 heap_lowest=29224 heap_largest=40948 rssi=-40
+[11:47:22.599] @@STATE ready
+[11:47:26.383] >> LED off
+[11:47:26.387] @@LED off 100 gui
+[11:47:27.480] @@WIFI -44
+[11:47:28.334] >> LISTEN
+[11:47:28.338] @@STATE listening 3
+[11:47:28.350] LISTEN #4: recording 3s and streaming to OpenAI...
+[11:47:31.416] Done streaming - waiting for reply...
+[11:47:31.427] [ERROR] [captureAndStreamAudio:594] Mic audio was probably dropped this LISTEN - handling couldn't keep up with the mic.
+[11:47:31.470] @@STATE processing
+[11:47:32.365] Streaming transcript: Turning it off now.
+[11:47:32.366] @@STATE speaking
+[11:47:32.370] You said: "Szepériál Bobszfog."
+[11:47:32.373] @@HEARD Szepériál Bobszfog.
+[11:47:32.996] 
+[11:47:32.998] @@SAID Turning it off now.
+[11:47:33.160] @@LED off 100 voice
+[11:47:33.196] @@STATE tool set_board_state
+[11:47:33.369] @@STATE speaking
+[11:47:34.300] Streaming transcript: It’s off now.
+[11:47:34.300] @@SAID It’s off now.
+[11:47:34.971] ===== LISTEN #4 PASSED =====
+[11:47:34.975] Type LISTEN to continue the conversation.
+[11:47:34.976] @@RESULT pass 4
+[11:47:35.021] @@TIMING n=4 result=pass first_event_after_rec_ms=329 heard_after_rec_ms=954 first_text_after_rec_ms=785 first_audio_after_rec_ms=912 tool=set_board_state tool_after_rec_ms=1744 tool_roundtrip_ms=129 response_done_after_rec_ms=3049 playback_done_after_rec_ms=3555 rec_ms=3077 sent_bytes=193410 upload_kbps=947 reply_audio_bytes=20808 reply_audio_ms=2601 pauses=0 heard_chars=21 mic_peak_dbfs=-6.3 mic_rms_dbfs=-25.0 clipped=0 chunk_max_ms=173 chunk_avg_ms=75 heap_free=45272 heap_lowest=28060 heap_largest=40948 rssi=-40
+[11:47:35.023] @@STATE ready
+[11:47:37.129] >> LISTEN
+[11:47:37.133] @@STATE listening 3
+[11:47:37.151] LISTEN #5: recording 3s and streaming to OpenAI...
+[11:47:40.093] Done streaming - waiting for reply...
+[11:47:40.134] @@WIFI -42
+[11:47:40.134] @@STATE processing
+[11:47:41.135] Streaming transcript: Sure,
+[11:47:41.136] @@STATE speaking
+[11:47:41.160]  I’ll take careYou said: "kama libi."
+[11:47:41.162] @@HEARD kama libi.
+[11:47:42.120]  of that.
+[11:47:42.123] @@SAID Sure, I’ll take care of that.
+[11:47:42.284] @@LED on 100 voice
+[11:47:42.321] @@STATE tool set_board_state
+[11:47:42.501] @@STATE speaking
+[11:47:43.589] Streaming transcript: The LED is on.
+[11:47:43.591] @@SAID The LED is on.
+[11:47:45.383] ===== LISTEN #5 PASSED =====
+[11:47:45.387] Type LISTEN to continue the conversation.
+[11:47:45.388] @@RESULT pass 5
+[11:47:45.434] @@TIMING n=5 result=pass first_event_after_rec_ms=257 heard_after_rec_ms=1068 first_text_after_rec_ms=819 first_audio_after_rec_ms=999 tool=set_board_state tool_after_rec_ms=2192 tool_roundtrip_ms=129 response_done_after_rec_ms=3658 playback_done_after_rec_ms=5291 rec_ms=2958 sent_bytes=193410 upload_kbps=1018 reply_audio_bytes=35211 reply_audio_ms=4401 pauses=0 heard_chars=10 mic_peak_dbfs=-5.0 mic_rms_dbfs=-22.3 clipped=0 chunk_max_ms=110 chunk_avg_ms=71 heap_free=45272 heap_lowest=28060 heap_largest=40948 rssi=-51
+[11:47:45.435] @@STATE ready
+[11:47:46.534] >> LISTEN
+[11:47:46.539] @@STATE listening 3
+[11:47:46.555] LISTEN #6: recording 3s and streaming to OpenAI...
+[11:47:49.483] Done streaming - waiting for reply...
+[11:47:49.525] @@STATE processing
+[11:47:50.128] @@WIFI -49
+[11:47:50.531] Streaming transcript: SpongeBob’sYou said: "Tell me about SpongeBob."
+[11:47:50.532] 
+[11:47:50.534] @@HEARD Tell me about SpongeBob.
+[11:47:51.422]  a@@STATE speaking
+[11:47:52.574]  cheerful sea sponge who runs a Krusty Krab restaurant.
+[11:47:52.582] @@SAID SpongeBob’s a cheerful sea sponge who runs a Krusty Krab restaurant.
+[11:47:55.145] ===== LISTEN #6 PASSED =====
+[11:47:55.149] Type LISTEN to continue the conversation.
+[11:47:55.150] @@RESULT pass 6
+[11:47:55.194] @@TIMING n=6 result=pass first_event_after_rec_ms=490 heard_after_rec_ms=1049 first_text_after_rec_ms=1016 first_audio_after_rec_ms=1902 tool=- tool_after_rec_ms=-1 tool_roundtrip_ms=-1 response_done_after_rec_ms=3256 playback_done_after_rec_ms=5663 rec_ms=2942 sent_bytes=193410 upload_kbps=1021 reply_audio_bytes=31209 reply_audio_ms=3901 pauses=0 heard_chars=24 mic_peak_dbfs=-0.0 mic_rms_dbfs=-12.0 clipped=15 chunk_max_ms=95 chunk_avg_ms=69 heap_free=45272 heap_lowest=28060 heap_largest=40948 rssi=-56
+[11:47:55.195] @@STATE ready
+[11:48:00.127] @@WIFI -53
+[11:48:03.054] >> LISTEN
+[11:48:03.058] @@STATE listening 3
+[11:48:03.070] LISTEN #7: recording 3s and streaming to OpenAI...
+[11:48:06.146] Done streaming - waiting for reply...
+[11:48:06.155] [ERROR] [captureAndStreamAudio:594] Mic audio was probably dropped this LISTEN - handling couldn't keep up with the mic.
+[11:48:06.192] @@STATE processing
+[11:48:06.972] You said: "Сапеглияла по екчелану."
+[11:48:06.978] @@HEARD Сапеглияла по екчелану.
+[11:48:07.218] Streaming transcript: Okay,
+[11:48:07.219] @@STATE speaking
+[11:48:08.044]  let me switch that off for you.
+[11:48:08.049] @@SAID Okay, let me switch that off for you.
+[11:48:08.208] @@LED off 100 voice
+[11:48:08.244] @@STATE tool set_board_state
+[11:48:08.419] @@STATE speaking
+[11:48:09.692] Streaming transcript: All set, it’s off.
+[11:48:09.695] @@SAID All set, it’s off.
+[11:48:10.130] @@WIFI -46
+[11:48:10.544] ===== LISTEN #7 PASSED =====
+[11:48:10.548] Type LISTEN to continue the conversation.
+[11:48:10.549] @@RESULT pass 7
+[11:48:10.595] @@TIMING n=7 result=pass first_event_after_rec_ms=315 heard_after_rec_ms=826 first_text_after_rec_ms=931 first_audio_after_rec_ms=1037 tool=set_board_state tool_after_rec_ms=2065 tool_roundtrip_ms=130 response_done_after_rec_ms=3704 playback_done_after_rec_ms=4400 rec_ms=3085 sent_bytes=193410 upload_kbps=896 reply_audio_bytes=28011 reply_audio_ms=3501 pauses=0 heard_chars=43 mic_peak_dbfs=-0.0 mic_rms_dbfs=-11.7 clipped=0 chunk_max_ms=225 chunk_avg_ms=79 heap_free=45120 heap_lowest=28060 heap_largest=40948 rssi=-47
+[11:48:10.597] @@STATE ready
+[11:48:17.529] >> LISTEN
+[11:48:17.533] @@STATE listening 3
+[11:48:17.545] LISTEN #8: recording 3s and streaming to OpenAI...
+[11:48:21.032] Done streaming - waiting for reply...
+[11:48:21.041] [ERROR] [captureAndStreamAudio:594] Mic audio was probably dropped this LISTEN - handling couldn't keep up with the mic.
+[11:48:21.077] @@WIFI -49
+[11:48:21.081] @@STATE processing
+[11:48:21.820] You said: "אתה יודע לענות כשאתה לא יודע."
+[11:48:21.825] @@HEARD אתה יודע לענות כשאתה לא יודע.
+[11:48:22.033] Streaming transcript: I answer honestly and
+[11:48:22.035] @@STATE speaking
+[11:48:23.106]  say I don’t know when I’m unsure.
+[11:48:23.111] @@SAID I answer honestly and say I don’t know when I’m unsure.
+[11:48:25.356] ===== LISTEN #8 PASSED =====
+[11:48:25.359] Type LISTEN to continue the conversation.
+[11:48:25.361] @@RESULT pass 8
+[11:48:25.405] @@TIMING n=8 result=pass first_event_after_rec_ms=212 heard_after_rec_ms=787 first_text_after_rec_ms=844 first_audio_after_rec_ms=966 tool=- tool_after_rec_ms=-1 tool_roundtrip_ms=-1 response_done_after_rec_ms=2231 playback_done_after_rec_ms=4326 rec_ms=3496 sent_bytes=193410 upload_kbps=685 reply_audio_bytes=28008 reply_audio_ms=3501 pauses=0 heard_chars=52 mic_peak_dbfs=-1.4 mic_rms_dbfs=-13.4 clipped=0 chunk_max_ms=465 chunk_avg_ms=94 heap_free=45160 heap_lowest=27844 heap_largest=40948 rssi=-53
+[11:48:25.406] @@STATE ready
+[11:48:31.074] @@WIFI -51
+[11:48:35.886] >> LISTEN
+[11:48:35.891] @@STATE listening 3
+[11:48:35.903] LISTEN #9: recording 3s and streaming to OpenAI...
+[11:48:39.031] Done streaming - waiting for reply...
+[11:48:39.040] [ERROR] [captureAndStreamAudio:594] Mic audio was probably dropped this LISTEN - handling couldn't keep up with the mic.
+[11:48:39.077] @@STATE processing
+[11:48:39.866] You said: "kuko Imli i Tamara diskoze."
+[11:48:39.869] @@HEARD kuko Imli i Tamara diskoze.
+[11:48:40.095] Streaming transcript: I can’t help with
+[11:48:40.097] @@STATE speaking
+[11:48:40.917]  that—let’s keep it kind instead.
+[11:48:40.922] @@SAID I can’t help with that—let’s keep it kind instead.
+[11:48:41.079] @@WIFI -57
+[11:48:42.767] ===== LISTEN #9 PASSED =====
+[11:48:42.772] Type LISTEN to continue the conversation.
+[11:48:42.773] @@RESULT pass 9
+[11:48:42.817] @@TIMING n=9 result=pass first_event_after_rec_ms=299 heard_after_rec_ms=836 first_text_after_rec_ms=878 first_audio_after_rec_ms=1023 tool=- tool_after_rec_ms=-1 tool_roundtrip_ms=-1 response_done_after_rec_ms=2058 playback_done_after_rec_ms=3738 rec_ms=3138 sent_bytes=193410 upload_kbps=945 reply_audio_bytes=22809 reply_audio_ms=2851 pauses=0 heard_chars=27 mic_peak_dbfs=-1.7 mic_rms_dbfs=-12.3 clipped=0 chunk_max_ms=262 chunk_avg_ms=75 heap_free=45160 heap_lowest=27844 heap_largest=40948 rssi=-56
+[11:48:42.818] @@STATE ready
+[11:48:44.462] >> LISTEN
+[11:48:44.467] @@STATE listening 3
+[11:48:44.480] LISTEN #10: recording 3s and streaming to OpenAI...
+[11:48:47.512] Done streaming - waiting for reply...
+[11:48:47.522] [ERROR] [captureAndStreamAudio:594] Mic audio was probably dropped this LISTEN - handling couldn't keep up with the mic.
+[11:48:47.606] @@STATE processing
+[11:48:48.352] Streaming transcript: Got it,You said: "My name is Itama. Can you remember that?"
+[11:48:48.352] 
+[11:48:48.356] @@HEARD My name is Itama. Can you remember that?
+[11:48:48.498]  It@@STATE speaking
+[11:48:49.671] amar—I’ll remember you for this conversation.
+[11:48:49.677] @@SAID Got it, Itamar—I’ll remember you for this conversation.
+[11:48:51.103] @@WIFI -53
+[11:48:51.904] ===== LISTEN #10 PASSED =====
+[11:48:51.908] Type LISTEN to continue the conversation.
+[11:48:51.910] @@RESULT pass 10
+[11:48:51.953] @@TIMING n=10 result=pass first_event_after_rec_ms=317 heard_after_rec_ms=839 first_text_after_rec_ms=831 first_audio_after_rec_ms=935 tool=- tool_after_rec_ms=-1 tool_roundtrip_ms=-1 response_done_after_rec_ms=2324 playback_done_after_rec_ms=4394 rec_ms=3043 sent_bytes=193410 upload_kbps=906 reply_audio_bytes=28809 reply_audio_ms=3601 pauses=0 heard_chars=40 mic_peak_dbfs=-6.4 mic_rms_dbfs=-18.7 clipped=0 chunk_max_ms=186 chunk_avg_ms=77 heap_free=45160 heap_lowest=27844 heap_largest=40948 rssi=-54
+[11:48:51.955] @@STATE ready
+[11:48:53.079] >> LISTEN
+[11:48:53.083] @@STATE listening 3
+[11:48:53.102] LISTEN #11: recording 3s and streaming to OpenAI...
+[11:48:56.055] Done streaming - waiting for reply...
+[11:48:56.066] [ERROR] [captureAndStreamAudio:594] Mic audio was probably dropped this LISTEN - handling couldn't keep up with the mic.
+[11:48:56.104] @@STATE processing
+[11:48:56.842] You said: "So what's my name?"
+[11:48:56.845] @@HEARD So what's my name?
+[11:48:57.182] Streaming transcript: Your name is Itamar.
+[11:48:57.184] @@STATE speaking
+[11:48:59.712] 
+[11:48:59.714] @@SAID Your name is Itamar.
+[11:48:59.777] ===== LISTEN #11 PASSED =====
+[11:48:59.782] Type LISTEN to continue the conversation.
+[11:48:59.784] @@RESULT pass 11
+[11:48:59.827] @@TIMING n=11 result=pass first_event_after_rec_ms=272 heard_after_rec_ms=788 first_text_after_rec_ms=1001 first_audio_after_rec_ms=1091 tool=- tool_after_rec_ms=-1 tool_roundtrip_ms=-1 response_done_after_rec_ms=3674 playback_done_after_rec_ms=3721 rec_ms=2970 sent_bytes=193410 upload_kbps=917 reply_audio_bytes=14805 reply_audio_ms=1850 pauses=0 heard_chars=18 mic_peak_dbfs=-4.8 mic_rms_dbfs=-15.0 clipped=0 chunk_max_ms=167 chunk_avg_ms=76 heap_free=44692 heap_lowest=27844 heap_largest=40948 rssi=-58
+[11:48:59.828] @@STATE ready
+[11:49:01.102] @@WIFI -61
+[11:49:05.920] >> LISTEN
+[11:49:05.925] @@STATE listening 3
+[11:49:05.941] LISTEN #12: recording 3s and streaming to OpenAI...
+[11:49:09.004] Done streaming - waiting for reply...
+[11:49:09.015] [ERROR] [captureAndStreamAudio:594] Mic audio was probably dropped this LISTEN - handling couldn't keep up with the mic.
+[11:49:09.068] @@STATE processing
+[11:49:09.742] You said: "Turn on the light."
+[11:49:09.745] @@HEARD Turn on the light.
+[11:49:09.967] @@LED on 100 voice
+[11:49:09.972] @@STATE tool set_board_state
+[11:49:09.983] @@STATE processing
+[11:49:10.912] Streaming transcript: The LED is on.
+[11:49:10.913] @@STATE speaking
+[11:49:11.102] @@WIFI -53
+[11:49:11.302] 
+[11:49:11.304] @@SAID The LED is on.
+[11:49:12.391] ===== LISTEN #12 PASSED =====
+[11:49:12.395] Type LISTEN to continue the conversation.
+[11:49:12.399] @@RESULT pass 12
+[11:49:12.442] @@TIMING n=12 result=pass first_event_after_rec_ms=227 heard_after_rec_ms=740 first_text_after_rec_ms=1669 first_audio_after_rec_ms=1872 tool=set_board_state tool_after_rec_ms=965 tool_roundtrip_ms=13 response_done_after_rec_ms=2468 playback_done_after_rec_ms=3388 rec_ms=3077 sent_bytes=193410 upload_kbps=875 reply_audio_bytes=13206 reply_audio_ms=1650 pauses=0 heard_chars=18 mic_peak_dbfs=-6.2 mic_rms_dbfs=-22.3 clipped=0 chunk_max_ms=228 chunk_avg_ms=79 heap_free=45160 heap_lowest=27844 heap_largest=40948 rssi=-62
+[11:49:12.443] @@STATE ready
+[11:49:13.079] >> LISTEN
+[11:49:13.083] @@STATE listening 3
+[11:49:13.095] LISTEN #13: recording 3s and streaming to OpenAI...
+[11:49:16.067] Done streaming - waiting for reply...
+[11:49:16.104] @@STATE processing
+[11:49:17.320] Streaming transcript: I think you’re asking something
+[11:49:17.322] @@STATE speaking
+[11:49:18.188] —could you clarify what you mean?You said: "יכול להיות... כאילו, אולי יכול להיות משהו."
+[11:49:18.201] @@HEARD יכול להיות... כאילו, אולי יכול להיות משהו.
+[11:49:18.409] 
+[11:49:18.416] @@SAID I think you’re asking something—could you clarify what you mean?
+[11:49:20.653] ===== LISTEN #13 PASSED =====
+[11:49:20.656] Type LISTEN to continue the conversation.
+[11:49:20.658] @@RESULT pass 13
+[11:49:20.702] @@TIMING n=13 result=pass first_event_after_rec_ms=227 heard_after_rec_ms=2117 first_text_after_rec_ms=960 first_audio_after_rec_ms=1217 tool=- tool_after_rec_ms=-1 tool_roundtrip_ms=-1 response_done_after_rec_ms=2491 playback_done_after_rec_ms=4587 rec_ms=2982 sent_bytes=193410 upload_kbps=894 reply_audio_bytes=28008 reply_audio_ms=3501 pauses=0 heard_chars=73 mic_peak_dbfs=-13.8 mic_rms_dbfs=-24.1 clipped=0 chunk_max_ms=141 chunk_avg_ms=79 heap_free=45160 heap_lowest=27844 heap_largest=40948 rssi=-57
+[11:49:20.703] @@STATE ready
+[11:49:21.101] @@WIFI -58
+[11:49:31.101] @@WIFI -38
+[11:49:41.100] @@WIFI -39
+[11:49:51.220] @@WIFI -40
+[11:50:01.189] @@WIFI -47
+[11:50:11.189] @@WIFI -51
+[11:50:11.466] >> LISTEN
+[11:50:11.471] @@STATE listening 3
+[11:50:11.483] LISTEN #14: recording 3s and streaming to OpenAI...
+[11:50:14.542] Done streaming - waiting for reply...
+[11:50:14.552] [ERROR] [captureAndStreamAudio:594] Mic audio was probably dropped this LISTEN - handling couldn't keep up with the mic.
+[11:50:14.589] @@STATE processing
+[11:50:15.892] Streaming transcript: I can’tYou said: "Can you put the light on fifty percent?"
+[11:50:15.894] 
+[11:50:15.898] @@HEARD Can you put the light on fifty percent?
+[11:50:16.223]  set@@STATE speaking
+[11:50:17.364]  it to 50 percent. It’s only on or off.
+[11:50:17.370] @@SAID I can’t set it to 50 percent. It’s only on or off.
+[11:50:20.087] ===== LISTEN #14 PASSED =====
+[11:50:20.091] Type LISTEN to continue the conversation.
+[11:50:20.092] @@RESULT pass 14
+[11:50:20.137] @@TIMING n=14 result=pass first_event_after_rec_ms=326 heard_after_rec_ms=1350 first_text_after_rec_ms=1095 first_audio_after_rec_ms=1605 tool=- tool_after_rec_ms=-1 tool_roundtrip_ms=-1 response_done_after_rec_ms=2988 playback_done_after_rec_ms=5546 rec_ms=3069 sent_bytes=193410 upload_kbps=865 reply_audio_bytes=32412 reply_audio_ms=4051 pauses=0 heard_chars=39 mic_peak_dbfs=-5.7 mic_rms_dbfs=-18.6 clipped=0 chunk_max_ms=219 chunk_avg_ms=79 heap_free=45160 heap_lowest=27844 heap_largest=40948 rssi=-48
+[11:50:20.138] @@STATE ready
+[11:50:21.188] @@WIFI -51
+[11:50:23.458] >> LED_BRIGHTNESS 24
+[11:50:23.466] @@LED on 24 gui
+[11:50:26.069] >> LED_BRIGHTNESS 43
+[11:50:26.078] @@LED on 43 gui
+[11:50:28.128] >> LED_BRIGHTNESS 100
+[11:50:28.136] @@LED on 100 gui
+[11:50:31.188] @@WIFI -45
+[11:50:32.714] >> LIGHT 4885
+[11:50:32.720] @@LIGHT 4885 day 1000 3000
+[11:50:34.383] >> LIGHT 342
+[11:50:34.388] @@LIGHT 342 night 1000 3000
+[11:50:34.863] >> LIGHT 363
+[11:50:34.869] @@LIGHT 363 night 1000 3000
+[11:50:41.187] @@WIFI -44
+[11:50:42.462] >> LIGHT 331
+[11:50:42.468] @@LIGHT 331 night 1000 3000
+[11:50:51.187] @@WIFI -43
+[11:51:01.187] @@WIFI -45
+[11:51:06.617] >> LED off
+[11:51:06.621] @@LED off 100 gui
+[11:51:11.185] @@WIFI -41
+[11:51:21.185] @@WIFI -38
+[11:51:31.183] @@WIFI -39
+[11:51:41.184] @@WIFI -54
+[11:51:51.183] @@WIFI -56
+[11:52:01.183] @@WIFI -53
+[11:52:11.182] @@WIFI -43
+[11:52:21.181] @@WIFI -37
+[11:52:31.181] @@WIFI -43
+[11:52:41.180] @@WIFI -42
+[11:52:51.180] @@WIFI -39
+[11:53:01.180] @@WIFI -35
+[11:53:11.179] @@WIFI -37
+[11:53:21.178] @@WIFI -42
+[11:53:31.178] @@WIFI -40
+[11:53:41.177] @@WIFI -38
+[11:53:51.177] @@WIFI -39
+[11:53:53.050] >> LISTEN
+[11:53:53.055] @@STATE listening 3
+[11:53:53.067] LISTEN #15: recording 3s and streaming to OpenAI...
+[11:53:56.137] Done streaming - waiting for reply...
+[11:53:56.148] [ERROR] [captureAndStreamAudio:594] Mic audio was probably dropped this LISTEN - handling couldn't keep up with the mic.
+[11:53:56.184] @@STATE processing
+[11:53:57.185] Streaming transcript: Only if youYou said: "If I will tell you a song, can you know what song it is?"
+[11:53:57.187] 
+[11:53:57.194] @@HEARD If I will tell you a song, can you know what song it is?
+[11:53:57.349]  quote or@@STATE speaking
+[11:53:58.217]  describe it clearly.
+[11:53:58.221] @@SAID Only if you quote or describe it clearly.
+[11:53:59.962] ===== LISTEN #15 PASSED =====
+[11:53:59.965] Type LISTEN to continue the conversation.
+[11:53:59.968] @@RESULT pass 15
+[11:54:00.012] @@TIMING n=15 result=pass first_event_after_rec_ms=218 heard_after_rec_ms=1046 first_text_after_rec_ms=1031 first_audio_after_rec_ms=1168 tool=- tool_after_rec_ms=-1 tool_roundtrip_ms=-1 response_done_after_rec_ms=2230 playback_done_after_rec_ms=3826 rec_ms=3081 sent_bytes=193410 upload_kbps=827 reply_audio_bytes=22407 reply_audio_ms=2800 pauses=0 heard_chars=56 mic_peak_dbfs=-9.3 mic_rms_dbfs=-22.8 clipped=0 chunk_max_ms=226 chunk_avg_ms=82 heap_free=45112 heap_lowest=27844 heap_largest=40948 rssi=-40
+[11:54:00.013] @@STATE ready
+[11:54:01.177] @@WIFI -43
+[11:54:11.176] @@WIFI -51
+[11:54:11.866] >> LISTEN
+[11:54:11.869] @@STATE listening 3
+[11:54:11.881] LISTEN #16: recording 3s and streaming to OpenAI...
+[11:54:14.913] Done streaming - waiting for reply...
+[11:54:14.923] [ERROR] [captureAndStreamAudio:594] Mic audio was probably dropped this LISTEN - handling couldn't keep up with the mic.
+[11:54:14.966] @@STATE processing
+[11:54:16.132] You said: "Hit me baby one more time."
+[11:54:16.135] @@HEARD Hit me baby one more time.
+[11:54:16.736] Streaming transcript: That’s “...Baby One
+[11:54:16.738] @@STATE speaking
+[11:54:17.766]  More Time” by Britney Spears.
+[11:54:17.771] @@SAID That’s “...Baby One More Time” by Britney Spears.
+[11:54:20.461] ===== LISTEN #16 PASSED =====
+[11:54:20.464] Type LISTEN to continue the conversation.
+[11:54:20.467] @@RESULT pass 16
+[11:54:20.512] @@TIMING n=16 result=pass first_event_after_rec_ms=288 heard_after_rec_ms=1220 first_text_after_rec_ms=1225 first_audio_after_rec_ms=1783 tool=- tool_after_rec_ms=-1 tool_roundtrip_ms=-1 response_done_after_rec_ms=3017 playback_done_after_rec_ms=5550 rec_ms=3041 sent_bytes=193410 upload_kbps=861 reply_audio_bytes=31209 reply_audio_ms=3901 pauses=0 heard_chars=26 mic_peak_dbfs=-4.1 mic_rms_dbfs=-19.1 clipped=0 chunk_max_ms=178 chunk_avg_ms=79 heap_free=45112 heap_lowest=27364 heap_largest=40948 rssi=-50
+[11:54:20.513] @@STATE ready
+[11:54:21.175] @@WIFI -47
+[11:54:22.282] >> LISTEN
+[11:54:22.285] @@STATE listening 3
+[11:54:22.303] LISTEN #17: recording 3s and streaming to OpenAI...
+[11:54:25.564] Done streaming - waiting for reply...
+[11:54:25.575] [ERROR] [captureAndStreamAudio:594] Mic audio was probably dropped this LISTEN - handling couldn't keep up with the mic.
+[11:54:25.653] @@STATE processing
+[11:54:26.426] Streaming transcript: I can’t sing,You said: "Can you sing it to me?"
+[11:54:26.427] 
+[11:54:26.429] @@HEARD Can you sing it to me?
+[11:54:26.506]  but@@STATE speaking
+[11:54:27.900]  I can help with the lyrics or talk more about the song.
+[11:54:27.908] @@SAID I can’t sing, but I can help with the lyrics or talk more about the song.
+[11:54:30.686] ===== LISTEN #17 PASSED =====
+[11:54:30.689] Type LISTEN to continue the conversation.
+[11:54:30.691] @@RESULT pass 17
+[11:54:30.735] @@TIMING n=17 result=pass first_event_after_rec_ms=285 heard_after_rec_ms=863 first_text_after_rec_ms=809 first_audio_after_rec_ms=904 tool=- tool_after_rec_ms=-1 tool_roundtrip_ms=-1 response_done_after_rec_ms=2503 playback_done_after_rec_ms=5123 rec_ms=3276 sent_bytes=193410 upload_kbps=723 reply_audio_bytes=34812 reply_audio_ms=4351 pauses=0 heard_chars=22 mic_peak_dbfs=-14.8 mic_rms_dbfs=-24.1 clipped=0 chunk_max_ms=284 chunk_avg_ms=90 heap_free=45112 heap_lowest=27344 heap_largest=40948 rssi=-48
+[11:54:30.736] @@STATE ready
+[11:54:31.175] @@WIFI -49
+[11:54:32.860] >> LISTEN
+[11:54:32.865] @@STATE listening 3
+[11:54:32.881] LISTEN #18: recording 3s and streaming to OpenAI...
+[11:54:35.908] Done streaming - waiting for reply...
+[11:54:35.918] [ERROR] [captureAndStreamAudio:594] Mic audio was probably dropped this LISTEN - handling couldn't keep up with the mic.
+[11:54:35.963] @@STATE processing
+[11:54:36.623] Streaming transcript: Sure—whatYou said: "Can you read me the..."
+[11:54:36.625] 
+[11:54:36.626] @@HEARD Can you read me the...
+[11:54:36.909]  would you like@@STATE speaking
+[11:54:37.423]  me to read?
+[11:54:37.427] @@SAID Sure—what would you like me to read?
+[11:54:38.885] ===== LISTEN #18 PASSED =====
+[11:54:38.889] Type LISTEN to continue the conversation.
+[11:54:38.895] @@RESULT pass 18
+[11:54:38.935] @@TIMING n=18 result=pass first_event_after_rec_ms=285 heard_after_rec_ms=716 first_text_after_rec_ms=709 first_audio_after_rec_ms=963 tool=- tool_after_rec_ms=-1 tool_roundtrip_ms=-1 response_done_after_rec_ms=1683 playback_done_after_rec_ms=2979 rec_ms=3041 sent_bytes=193410 upload_kbps=825 reply_audio_bytes=17205 reply_audio_ms=2150 pauses=0 heard_chars=22 mic_peak_dbfs=-10.0 mic_rms_dbfs=-23.4 clipped=0 chunk_max_ms=211 chunk_avg_ms=82 heap_free=45112 heap_lowest=27344 heap_largest=40948 rssi=-48
+[11:54:38.936] @@STATE ready
+[11:54:39.646] >> LISTEN
+[11:54:39.651] @@STATE listening 3
+[11:54:39.663] LISTEN #19: recording 3s and streaming to OpenAI...
+[11:54:42.594] Done streaming - waiting for reply...
+[11:54:42.635] @@WIFI -47
+[11:54:42.637] @@STATE processing
+[11:54:43.462] You said: "The second paragraph of this song."
+[11:54:43.466] @@HEARD The second paragraph of this song.
+[11:54:43.604] Streaming transcript: I can’t read lyrics directly
+[11:54:43.606] @@STATE speaking
+[11:54:44.402] , but I can summarize that verse.
+[11:54:44.411] @@SAID I can’t read lyrics directly, but I can summarize that verse.
+[11:54:46.735] ===== LISTEN #19 PASSED =====
+[11:54:46.739] Type LISTEN to continue the conversation.
+[11:54:46.740] @@RESULT pass 19
+[11:54:46.784] @@TIMING n=19 result=pass first_event_after_rec_ms=252 heard_after_rec_ms=868 first_text_after_rec_ms=883 first_audio_after_rec_ms=975 tool=- tool_after_rec_ms=-1 tool_roundtrip_ms=-1 response_done_after_rec_ms=1972 playback_done_after_rec_ms=4143 rec_ms=2941 sent_bytes=193410 upload_kbps=894 reply_audio_bytes=26409 reply_audio_ms=3301 pauses=0 heard_chars=34 mic_peak_dbfs=-7.1 mic_rms_dbfs=-18.2 clipped=0 chunk_max_ms=128 chunk_avg_ms=79 heap_free=45112 heap_lowest=27344 heap_largest=40948 rssi=-46
+[11:54:46.784] @@STATE ready
+[11:54:52.632] @@WIFI -39
+[11:55:02.632] @@WIFI -44
+[11:55:12.631] @@WIFI -50
+[11:55:22.631] @@WIFI -47
+[11:55:32.630] @@WIFI -53
+[11:55:42.628] @@WIFI -51
+[11:55:52.628] @@WIFI -49
+[11:56:02.628] @@WIFI -45
+[11:56:12.628] @@WIFI -39
+[11:56:22.627] @@WIFI -39
+[11:56:32.627] @@WIFI -42
+[11:56:42.626] @@WIFI -44
+[11:56:52.626] @@WIFI -41
+[11:57:02.625] @@WIFI -38
+[11:57:09.024] >> LISTEN
+[11:57:09.029] @@STATE listening 3
+[11:57:09.042] LISTEN #20: recording 3s and streaming to OpenAI...
+[11:57:12.127] Done streaming - waiting for reply...
+[11:57:12.137] [ERROR] [captureAndStreamAudio:594] Mic audio was probably dropped this LISTEN - handling couldn't keep up with the mic.
+[11:57:12.178] @@STATE processing
+[11:57:12.625] @@WIFI -37
+[11:57:12.964] You said: ""
+[11:57:12.965] @@HEARD 
+[11:57:13.140] Streaming transcript: Alright, sounds
+[11:57:13.141] @@STATE speaking
+[11:57:13.696]  good.
+[11:57:13.698] @@SAID Alright, sounds good.
+[11:57:14.864] ===== LISTEN #20 PASSED =====
+[11:57:14.868] Type LISTEN to continue the conversation.
+[11:57:14.870] @@RESULT pass 20
+[11:57:14.913] @@TIMING n=20 result=pass first_event_after_rec_ms=324 heard_after_rec_ms=839 first_text_after_rec_ms=849 first_audio_after_rec_ms=977 tool=- tool_after_rec_ms=-1 tool_roundtrip_ms=-1 response_done_after_rec_ms=1729 playback_done_after_rec_ms=2738 rec_ms=3096 sent_bytes=193410 upload_kbps=836 reply_audio_bytes=15204 reply_audio_ms=1900 pauses=0 heard_chars=0 mic_peak_dbfs=-14.8 mic_rms_dbfs=-24.6 clipped=0 chunk_max_ms=244 chunk_avg_ms=81 heap_free=45112 heap_lowest=27344 heap_largest=40948 rssi=-59
+[11:57:14.915] @@STATE ready
+[11:57:16.148] >> LISTEN
+[11:57:16.152] @@STATE listening 3
+[11:57:16.164] LISTEN #21: recording 3s and streaming to OpenAI...
+[11:57:19.117] Done streaming - waiting for reply...
+[11:57:19.153] @@STATE processing
+[11:57:19.817] You said: ""
+[11:57:19.818] @@HEARD 
+[11:57:20.639] Streaming transcript: Hey, I’m right here—
+[11:57:20.640] @@STATE speaking
+[11:57:21.265] just say what you need.
+[11:57:21.271] @@SAID Hey, I’m right here—just say what you need.
+[11:57:22.625] @@WIFI -53
+[11:57:22.964] ===== LISTEN #21 PASSED =====
+[11:57:22.967] Type LISTEN to continue the conversation.
+[11:57:22.968] @@RESULT pass 21
+[11:57:23.015] @@TIMING n=21 result=pass first_event_after_rec_ms=305 heard_after_rec_ms=703 first_text_after_rec_ms=924 first_audio_after_rec_ms=1480 tool=- tool_after_rec_ms=-1 tool_roundtrip_ms=-1 response_done_after_rec_ms=2317 playback_done_after_rec_ms=3848 rec_ms=2962 sent_bytes=193410 upload_kbps=835 reply_audio_bytes=20007 reply_audio_ms=2500 pauses=0 heard_chars=0 mic_peak_dbfs=-22.0 mic_rms_dbfs=-34.3 clipped=0 chunk_max_ms=113 chunk_avg_ms=81 heap_free=45112 heap_lowest=27344 heap_largest=40948 rssi=-52
+[11:57:23.016] @@STATE ready
+[11:57:25.244] >> LISTEN
+[11:57:25.248] @@STATE listening 3
+[11:57:25.260] LISTEN #22: recording 3s and streaming to OpenAI...
+[11:57:28.291] Done streaming - waiting for reply...
+[11:57:28.299] [ERROR] [captureAndStreamAudio:594] Mic audio was probably dropped this LISTEN - handling couldn't keep up with the mic.
+[11:57:28.342] @@STATE processing
+[11:57:29.034] You said: ""
+[11:57:29.035] @@HEARD 
+[11:57:32.625] @@WIFI -49
+[11:57:33.282] Streaming transcript: What’s on your mind today?
+[11:57:33.283] @@STATE speaking
+[11:57:33.475] 
+[11:57:33.479] @@SAID What’s on your mind today?
+[11:57:34.500] ===== LISTEN #22 PASSED =====
+[11:57:34.503] Type LISTEN to continue the conversation.
+[11:57:34.507] @@RESULT pass 22
+[11:57:34.550] @@TIMING n=22 result=pass first_event_after_rec_ms=236 heard_after_rec_ms=747 first_text_after_rec_ms=4755 first_audio_after_rec_ms=4952 tool=- tool_after_rec_ms=-1 tool_roundtrip_ms=-1 response_done_after_rec_ms=5341 playback_done_after_rec_ms=6212 rec_ms=3040 sent_bytes=193410 upload_kbps=874 reply_audio_bytes=11205 reply_audio_ms=1400 pauses=0 heard_chars=0 mic_peak_dbfs=-1.1 mic_rms_dbfs=-18.1 clipped=0 chunk_max_ms=203 chunk_avg_ms=78 heap_free=45112 heap_lowest=27344 heap_largest=40948 rssi=-48
+[11:57:34.551] @@STATE ready
+[11:57:42.624] @@WIFI -42
+[11:57:52.623] @@WIFI -43
+[11:58:02.623] @@WIFI -44
+[11:58:12.621] @@WIFI -42
+[11:58:22.622] @@WIFI -43
+[11:58:30.964] >> LISTEN
+[11:58:30.968] @@STATE listening 3
+[11:58:30.986] LISTEN #23: recording 3s and streaming to OpenAI...
+[11:58:34.165] Done streaming - waiting for reply...
+[11:58:34.176] [ERROR] [captureAndStreamAudio:594] Mic audio was probably dropped this LISTEN - handling couldn't keep up with the mic.
+[11:58:34.213] @@WIFI -64
+[11:58:34.215] @@STATE processing
+[11:58:35.084] You said: "Here I am for a frog away."
+[11:58:35.087] @@HEARD Here I am for a frog away.
+[11:58:36.355] Streaming transcript: I’m ready—let
+[11:58:36.356] @@STATE speaking
+[11:58:37.351] ’s frolic away together!
+[11:58:37.358] @@SAID I’m ready—let’s frolic away together!
+[11:58:38.835] ===== LISTEN #23 PASSED =====
+[11:58:38.842] Type LISTEN to continue the conversation.
+[11:58:38.842] @@RESULT pass 23
+[11:58:38.884] @@TIMING n=23 result=pass first_event_after_rec_ms=307 heard_after_rec_ms=919 first_text_after_rec_ms=2059 first_audio_after_rec_ms=2154 tool=- tool_after_rec_ms=-1 tool_roundtrip_ms=-1 response_done_after_rec_ms=3350 playback_done_after_rec_ms=4670 rec_ms=3195 sent_bytes=193410 upload_kbps=762 reply_audio_bytes=21207 reply_audio_ms=2650 pauses=0 heard_chars=26 mic_peak_dbfs=-18.8 mic_rms_dbfs=-29.4 clipped=0 chunk_max_ms=258 chunk_avg_ms=88 heap_free=45112 heap_lowest=27344 heap_largest=40948 rssi=-38
+[11:58:38.885] @@STATE ready
+[11:58:44.211] @@WIFI -43
+[11:58:49.624] >> LISTEN
+[11:58:49.628] @@STATE listening 3
+[11:58:49.644] LISTEN #24: recording 3s and streaming to OpenAI...
+[11:58:52.812] Done streaming - waiting for reply...
+[11:58:52.825] [ERROR] [captureAndStreamAudio:594] Mic audio was probably dropped this LISTEN - handling couldn't keep up with the mic.
+[11:58:52.865] @@STATE processing
+[11:58:54.210] @@WIFI -40
+[11:58:55.563] You said: "Here I am from far away."
+[11:58:55.566] @@HEARD Here I am from far away.
+[11:58:58.064] Streaming transcript: Nice, I
+[11:58:58.066] @@STATE speaking
+[11:59:00.896]  hear you! Hi there.
+[11:59:00.899] @@SAID Nice, I hear you! Hi there.
+[11:59:03.145] ===== LISTEN #24 PASSED =====
+[11:59:03.149] Type LISTEN to continue the conversation.
+[11:59:03.151] @@RESULT pass 24
+[11:59:03.195] @@TIMING n=24 result=pass first_event_after_rec_ms=296 heard_after_rec_ms=2752 first_text_after_rec_ms=4915 first_audio_after_rec_ms=5217 tool=- tool_after_rec_ms=-1 tool_roundtrip_ms=-1 response_done_after_rec_ms=8255 playback_done_after_rec_ms=10336 rec_ms=3181 sent_bytes=193410 upload_kbps=775 reply_audio_bytes=42015 reply_audio_ms=5251 pauses=1 heard_chars=24 mic_peak_dbfs=-19.2 mic_rms_dbfs=-30.3 clipped=0 chunk_max_ms=298 chunk_avg_ms=86 heap_free=45112 heap_lowest=27344 heap_largest=40948 rssi=-46
+[11:59:03.196] @@STATE ready
+[11:59:03.992] >> LISTEN
+[11:59:03.997] @@STATE listening 3
+[11:59:04.009] LISTEN #25: recording 3s and streaming to OpenAI...
+[11:59:07.130] Done streaming - waiting for reply...
+[11:59:07.142] [ERROR] [captureAndStreamAudio:594] Mic audio was probably dropped this LISTEN - handling couldn't keep up with the mic.
+[11:59:07.176] @@WIFI -39
+[11:59:07.179] @@STATE processing
+[11:59:08.164] You said: "Now I am very close."
+[11:59:08.166] @@HEARD Now I am very close.
+[11:59:08.407] Streaming transcript: Yay, I
+[11:59:08.409] @@STATE speaking
+[11:59:08.957] ’m right here with you.
+[11:59:08.959] @@SAID Yay, I’m right here with you.
+[11:59:10.483] ===== LISTEN #25 PASSED =====
+[11:59:10.486] Type LISTEN to continue the conversation.
+[11:59:10.488] @@RESULT pass 25
+[11:59:10.532] @@TIMING n=25 result=pass first_event_after_rec_ms=313 heard_after_rec_ms=1034 first_text_after_rec_ms=1045 first_audio_after_rec_ms=1242 tool=- tool_after_rec_ms=-1 tool_roundtrip_ms=-1 response_done_after_rec_ms=1995 playback_done_after_rec_ms=3353 rec_ms=3132 sent_bytes=193410 upload_kbps=843 reply_audio_bytes=18006 reply_audio_ms=2250 pauses=0 heard_chars=20 mic_peak_dbfs=-6.2 mic_rms_dbfs=-17.1 clipped=0 chunk_max_ms=199 chunk_avg_ms=82 heap_free=45112 heap_lowest=27344 heap_largest=40948 rssi=-40
+[11:59:10.534] @@STATE ready
+[11:59:16.712] >> LISTEN
+[11:59:16.716] @@STATE listening 3
+[11:59:16.728] LISTEN #26: recording 3s and streaming to OpenAI...
+[11:59:19.965] Done streaming - waiting for reply...
+[11:59:19.976] [ERROR] [captureAndStreamAudio:594] Mic audio was probably dropped this LISTEN - handling couldn't keep up with the mic.
+[11:59:20.012] @@WIFI -42
+[11:59:20.013] @@STATE processing
+[11:59:20.750] You said: "Now I whisper."
+[11:59:20.752] @@HEARD Now I whisper.
+[11:59:21.103] Streaming transcript: I’m listening—whisper
+[11:59:21.107] @@STATE speaking
+[11:59:22.856] ing right back. What do you want to share?
+[11:59:22.863] @@SAID I’m listening—whispering right back. What do you want to share?
+[11:59:25.481] ===== LISTEN #26 PASSED =====
+[11:59:25.485] Type LISTEN to continue the conversation.
+[11:59:25.486] @@RESULT pass 26
+[11:59:25.530] @@TIMING n=26 result=pass first_event_after_rec_ms=275 heard_after_rec_ms=786 first_text_after_rec_ms=902 first_audio_after_rec_ms=1102 tool=- tool_after_rec_ms=-1 tool_roundtrip_ms=-1 response_done_after_rec_ms=3060 playback_done_after_rec_ms=5518 rec_ms=3246 sent_bytes=193410 upload_kbps=701 reply_audio_bytes=36411 reply_audio_ms=4551 pauses=0 heard_chars=14 mic_peak_dbfs=-21.0 mic_rms_dbfs=-32.0 clipped=0 chunk_max_ms=253 chunk_avg_ms=93 heap_free=45112 heap_lowest=27344 heap_largest=40948 rssi=-38
+[11:59:25.533] @@STATE ready
+[11:59:30.009] @@WIFI -37
+[11:59:40.008] @@WIFI -37
+[11:59:50.008] @@WIFI -38
+[12:00:00.007] @@WIFI -46
+[12:00:03.084] ets Jul 29 2019 12:21:46
+[12:00:03.084] 
+[12:00:03.089] rst:0x1 (POWERON_RESET),boot:0x13 (SPI_FAST_FLASH_BOOT)
+[12:00:03.091] configsip: 0, SPIWP:0xee
+[12:00:03.097] clk_drv:0x00,q_drv:0x00,d_drv:0x00,cs0_drv:0x00,hd_drv:0x00,wp_drv:0x00
+[12:00:03.099] mode:DIO, clock div:1
+[12:00:03.101] load:0x3fff0030,len:1184
+[12:00:03.105] load:0x40078000,len:13260
+[12:00:03.106] load:0x40080400,len:3028
+[12:00:03.107] entry 0x400805e4
+[12:00:03.495] @@STATE booting
+[12:00:03.497] @@STAGE sd pending
+[12:00:03.505] @@STAGE mic pending
+[12:00:03.505] @@STAGE speaker pending
+[12:00:03.506] @@STAGE wifi pending
+[12:00:03.506] @@STAGE time pending
+[12:00:03.507] @@STAGE openai pending
+[12:00:03.508] @@STATE booting
+[12:00:03.513] @@HEAP free=215276 largest=110580 lowest=209936 stage=boot
+[12:00:03.515] @@LIGHT 4000 day 1000 3000
+[12:00:03.517] @@STAGE mic active
+[12:00:03.526] @@VOLUME 95 unmuted
+[12:00:03.527] @@LED off 100 status
+[12:00:03.527] @@STAGE speaker ok ready - check it by ear with Test beep
+[12:00:03.922] @@STAGE mic ok signal OK, room level -30 dBFS
+[12:00:03.929] @@HEAP free=151356 largest=110580 lowest=150880 stage=after ring buffer + I2S
+[12:00:03.930] @@STAGE sd active mounting
+[12:00:04.034] @@HEAP free=139900 largest=110580 lowest=134872 stage=after SD + recorder setup
+[12:00:04.040] @@STAGE sd ok SDHC/SDXC, 15262 MB, self-test passed
+[12:00:04.093] Connecting to Wi-Fi "iphone itamar"...
+[12:00:04.099] @@STAGE wifi active connecting to iphone itamar
+[12:00:05.696] .....
+[12:00:05.699] Wi-Fi connected. IP address: 172.20.10.4
+[12:00:05.702] @@STAGE wifi ok 172.20.10.4
+[12:00:05.703] @@WIFI -38
+[12:00:05.704] Syncing time...
+[12:00:05.708] @@STAGE time active
+[12:00:07.198] .....
+[12:00:07.201] Time synced: Thu Oct 15 09:00:07 2026
+[12:00:07.202] @@STAGE time ok
+[12:00:07.208] @@HEAP free=89124 largest=86004 lowest=86156 stage=after Wi-Fi + time sync
+[12:00:07.212] Connecting to OpenAI Realtime API...
+[12:00:07.215] @@STAGE openai active connecting
+[12:00:12.268] @@STAGE openai active setting up the session
+[12:00:12.579] @@HEAP free=38232 largest=34804 lowest=35304 stage=OpenAI session ready
+[12:00:12.581] Ready - type LISTEN to talk.
+[12:00:12.583] @@STAGE openai ok session ready
+[12:00:12.598] @@BOOT_TIMING hw_ms=466 sd_ms=168 wifi_ms=1610 time_ms=1502 connect_ms=5066 session_ms=319 total_ms=9131 heap_free=38232 heap_lowest=35304 heap_largest=34804 rssi=-37
+[12:00:12.599] @@STATE ready
+[12:00:13.398] Streaming transcript: Ready when you are
+[12:00:13.400] @@STATE speaking greeting
+[12:00:13.546] .
+[12:00:13.549] @@SAID Ready when you are.
+[12:00:14.416] @@STATE ready
+[12:00:15.697] @@WIFI -39
+[12:00:21.523] ets Jul 29 2019 12:21:46
+[12:00:21.524] 
+[12:00:21.529] rst:0x1 (POWERON_RESET),boot:0x13 (SPI_FAST_FLASH_BOOT)
+[12:00:21.531] configsip: 0, SPIWP:0xee
+[12:00:21.541] clk_drv:0x00,q_drv:0x00,d_drv:0x00,cs0_drv:0x00,hd_drv:0x00,wp_drv:0x00
+[12:00:21.542] mode:DIO, clock div:1
+[12:00:21.543] load:0x3fff0030,len:1184
+[12:00:21.544] load:0x40078000,len:13260
+[12:00:21.546] load:0x40080400,len:3028
+[12:00:21.546] entry 0x400805e4
+[12:00:21.935] @@STATE booting
+[12:00:21.937] @@STAGE sd pending
+[12:00:21.939] @@STAGE mic pending
+[12:00:21.940] @@STAGE speaker pending
+[12:00:21.948] @@STAGE wifi pending
+[12:00:21.948] @@STAGE time pending
+[12:00:21.948] @@STAGE openai pending
+[12:00:21.949] @@STATE booting
+[12:00:21.953] @@HEAP free=215276 largest=110580 lowest=209936 stage=boot
+[12:00:21.954] @@LIGHT 4000 day 1000 3000
+[12:00:21.961] @@STAGE mic active
+[12:00:21.961] @@VOLUME 95 unmuted
+[12:00:21.962] @@LED off 100 status
+[12:00:21.966] @@STAGE speaker ok ready - check it by ear with Test beep
+[12:00:22.362] @@STAGE mic ok signal OK, room level -34 dBFS
+[12:00:22.368] @@HEAP free=151356 largest=110580 lowest=150880 stage=after ring buffer + I2S
+[12:00:22.372] @@STAGE sd active mounting
+[12:00:22.473] @@HEAP free=139900 largest=110580 lowest=134872 stage=after SD + recorder setup
+[12:00:22.478] @@STAGE sd ok SDHC/SDXC, 15262 MB, self-test passed
+[12:00:22.532] Connecting to Wi-Fi "iphone itamar"...
+[12:00:22.539] @@STAGE wifi active connecting to iphone itamar
+[12:00:23.534] ...
+[12:00:23.538] Wi-Fi connected. IP address: 172.20.10.4
+[12:00:23.540] @@STAGE wifi ok 172.20.10.4
+[12:00:23.540] @@WIFI -38
+[12:00:23.546] Syncing time...
+[12:00:23.547] @@STAGE time active
+[12:00:28.036] ...............
+[12:00:28.042] Time synced: Thu Oct 15 09:00:28 2026
+[12:00:28.042] @@STAGE time ok
+[12:00:28.048] @@HEAP free=89136 largest=86004 lowest=86192 stage=after Wi-Fi + time sync
+[12:00:28.051] Connecting to OpenAI Realtime API...
+[12:00:28.057] @@STAGE openai active connecting
+[12:00:32.276] @@STAGE openai active setting up the session
+[12:00:32.646] @@HEAP free=38204 largest=34804 lowest=32584 stage=OpenAI session ready
+[12:00:32.649] Ready - type LISTEN to talk.
+[12:00:32.651] @@STAGE openai ok session ready
+[12:00:32.665] @@BOOT_TIMING hw_ms=466 sd_ms=168 wifi_ms=1009 time_ms=4502 connect_ms=4235 session_ms=379 total_ms=10759 heap_free=38204 heap_lowest=32584 heap_largest=34804 rssi=-40
+[12:00:32.666] @@STATE ready
+[12:00:33.535] Streaming transcript: Ready when
+[12:00:33.537] @@WIFI -38
+[12:00:33.817]  you@@STATE speaking greeting
+[12:00:34.324]  are, what's up?
+[12:00:34.328] @@SAID Ready when you are, what's up?
+[12:00:35.931] @@STATE ready
