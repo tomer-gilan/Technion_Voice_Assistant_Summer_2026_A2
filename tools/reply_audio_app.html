@@ -681,7 +681,7 @@
           <p class="control-note" id="vad-note" aria-live="polite"></p>
         </div>
         <div class="conversation">
-          <div class="conversation-head"><h3>Conversation</h3><button id="clear-conversation" type="button">Clear</button></div>
+          <div class="conversation-head"><h3>Conversation</h3><span><button id="save-conversation" type="button" title="The conversation as a text file">Save</button> <button id="clear-conversation" type="button">Clear</button></span></div>
           <div id="bubbles" aria-live="polite"></div>
           <p class="result" id="result">No conversation yet.</p>
         </div>
@@ -2958,6 +2958,27 @@ function onUsageExportClick() {
 
 document.getElementById("usage-export").addEventListener("click", onUsageExportClick);
 
+/** Downloads the conversation as plain text: one line per bubble ("[time]
+    You: ..."), with the notes about what the board did indented under them. */
+function onSaveConversationClick() {
+  const lines = [...elements.bubbles.children].map((item) => {
+    if (!item.classList.contains("bubble")) return `           · ${item.textContent}`;
+    const time = item.querySelector("time");
+    const who = item.classList.contains("heard") ? "You" : "Assistant";
+    const words = [...item.childNodes].filter((node) => node.nodeType === Node.TEXT_NODE).map((node) => node.textContent).join("");
+    const answered = item.querySelector(".answer-time");
+    return `[${time ? time.textContent : "--:--:--"}] ${who}: ${words.trim()}${answered ? `  (${answered.textContent.trim()})` : ""}`;
+  });
+  if (!lines.length) return;
+  const blob = new Blob([lines.join("\n") + "\n"], { type: "text/plain" });
+  const url = URL.createObjectURL(blob);
+  const anchor = Object.assign(document.createElement("a"), { href: url, download: `esp32_conversation_${fileStamp(new Date())}.txt` });
+  anchor.click();
+  setTimeout(() => URL.revokeObjectURL(url), 5000);
+}
+
+document.getElementById("save-conversation").addEventListener("click", onSaveConversationClick);
+
 /** Example requests for whoever is trying the assistant - [icon, phrase]. */
 const EXAMPLE_PHRASES = [
   ["❓", "What can you do?"],
@@ -3026,6 +3047,7 @@ const DEMO_SECTIONS = [
     ["cantdo", "בקשה שאי אפשר לבצע", "<code>Make the light blue</code>: עונה שה-LED הוא בצבע אחד."],
     ["volrange", "עוצמה מחוץ לטווח", "<code>Set the volume to 150 percent</code>: נעצר על 100%."],
     ["sd", "בלי כרטיס SD", "מוציאים SD ועושים Reset. נורית SD אדומה."],
+    ["timeroffline", "טיימר בלי אינטרנט", "<code>Set a timer for 30 seconds</code> ומכבים hotspot: הלוח עדיין מצפצף בזמן."],
     ["reconnect", "ניתוק מרכז הבקרה", "מנתקים את כבל ה-USB: באנר אדום. מחברים שוב והכל חוזר."],
   ]],
 ];
