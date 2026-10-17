@@ -145,7 +145,7 @@ stateDiagram-v2
 | `STATUS` | מדפיס מחדש את כל שורות הסטטוס |
 | `VOLUME <0-100>`, `MUTE on\|off`, `BEEP` | הרמקול |
 | `LED on\|off`, `LED_BRIGHTNESS <0-100>` | ה-LED |
-| `LIGHT <0-4095>`, `LIGHT_BANDS <evening> <day>` | חיישן האור המדומה והספים שלו |
+| `LIGHT <0-6142>`, `LIGHT_BANDS <evening> <day>` | חיישן האור המדומה והספים שלו |
 | `VAD on\|off`, `VAD_SENSITIVITY <1-5>`, `VAD_HANGOVER <600-1500>` | Hands-free |
 | `LIST`, `GET <name>`, `DELETE <name>`, `DELETE_ALL [replies\|commands]` | ההקלטות ב-SD |
 
