@@ -233,6 +233,31 @@
   .stats dt { color: var(--muted); font-size: 12px; }
   .stats dd { margin: 0; font-variant-numeric: tabular-nums; }
   .stats dd.warn { color: var(--warn); font-weight: 600; }
+  /* ----- Response-time chart (Statistics) ----- */
+  :root { --seg-server: #c27a12; --seg-sound: #2c6bd9; }
+  @media (prefers-color-scheme: dark) { :root { --seg-server: #b8801f; --seg-sound: #5b8cf0; } }
+  .chart-head { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 6px 16px; margin: 16px 0 6px; }
+  .chart-head h3 { margin: 0; font-size: 13px; font-weight: 600; }
+  .legend { display: flex; flex-wrap: wrap; gap: 4px 14px; font-size: 12px; color: var(--muted); }
+  .legend span { display: inline-flex; align-items: center; gap: 6px; }
+  .legend i { width: 10px; height: 10px; border-radius: 2px; display: inline-block; }
+  .chart { position: relative; }
+  .chart svg { display: block; width: 100%; height: 190px; overflow: visible; }
+  .chart .grid { stroke: var(--border); stroke-width: 1; }
+  .chart .axis-label { fill: var(--muted); font-size: 11px; font-variant-numeric: tabular-nums; }
+  .chart .median { stroke: var(--text); stroke-width: 1.5; stroke-dasharray: 4 4; opacity: 0.7; }
+  .chart .median-label { fill: var(--text); font-size: 11px; font-weight: 600; }
+  .chart .hit { fill: transparent; cursor: default; }
+  .chart .hit:hover { fill: color-mix(in srgb, var(--accent) 8%, transparent); }
+  .chart .fail-mark { fill: var(--error); font-size: 12px; font-weight: 700; }
+  .chart-empty { color: var(--muted); font-size: 13px; padding: 26px 0; text-align: center; border: 1px dashed var(--border); border-radius: 8px; }
+  .chart-tip {
+    position: absolute; pointer-events: none; z-index: 2; min-width: 170px; padding: 7px 10px; border-radius: 8px;
+    background: var(--panel); border: 1px solid var(--border); box-shadow: 0 4px 14px rgba(0, 0, 0, 0.12);
+    font-size: 12px; line-height: 1.5; font-variant-numeric: tabular-nums;
+  }
+  .chart-tip b { display: block; font-size: 12.5px; }
+  .chart-tip i { width: 8px; height: 8px; border-radius: 2px; display: inline-block; margin-right: 5px; }
   #pause-list { margin: 8px 0 0; padding-left: 18px; color: var(--muted); font-size: 13px; }
 
   .board { display: flex; flex-direction: column; }
@@ -598,11 +623,21 @@
     <div class="panel-head">
       <h2 id="usage-heading">Statistics</h2>
       <div class="panel-actions">
+        <button id="usage-export" type="button" title="Every command's timing as a spreadsheet (CSV)">Export CSV</button>
         <button id="usage-reset" type="button">Reset</button>
       </div>
     </div>
     <p class="hint">Since the app connected (or since Reset). Response time: from the end of the recording to the first sound of the reply.</p>
     <dl id="usage-stats" class="stats"></dl>
+    <div class="chart-head">
+      <h3>Response time per command</h3>
+      <div class="legend" aria-hidden="true">
+        <span><i style="background:var(--seg-server)"></i>Until OpenAI started answering</span>
+        <span><i style="background:var(--seg-sound)"></i>Until the first sound of the reply</span>
+        <span><svg width="18" height="10"><line x1="0" y1="5" x2="18" y2="5" stroke="currentColor" stroke-width="1.5" stroke-dasharray="4 3"/></svg>Median</span>
+      </div>
+    </div>
+    <div class="chart" id="response-chart"></div>
   </section>
 
   <div class="row">
@@ -2464,7 +2499,8 @@ let usage = newUsage();
 /** Empty counters. */
 function newUsage() {
   return { turns: 0, failed: 0, handsFree: 0, responseMs: [], ledByVoice: 0, timeOfDayAsks: 0,
-           lightBand: null, lightChanges: 0, noisesIgnored: 0, bootMs: null };
+           lightBand: null, lightChanges: 0, noisesIgnored: 0, bootMs: null,
+           history: [] };  // one entry per @@TIMING: { n, at, mode, tool, result, serverMs, firstSoundMs, doneMs }
 }
 
 /** "a=1 b=x" -> { a: "1", b: "x" }. */
@@ -2485,6 +2521,12 @@ function onUsageTiming(fields) {
   if (fields.tool === "get_time_of_day") usage.timeOfDayAsks++;
   const firstAudioMs = Number(fields.first_audio_after_rec_ms);
   if (firstAudioMs >= 0) usage.responseMs.push(firstAudioMs);  // -1: the turn had no reply audio
+  const number = (key) => (Number(fields[key]) >= 0 ? Number(fields[key]) : null);
+  usage.history.push({
+    n: Number(fields.n) || usage.turns, at: new Date(), mode: fields.mode || "button", tool: fields.tool || "-",
+    result: fields.result || "?", serverMs: number("first_event_after_rec_ms"), firstSoundMs: number("first_audio_after_rec_ms"),
+    doneMs: number("playback_done_after_rec_ms"),
+  });
   renderUsage();
 }
 
@@ -2517,6 +2559,7 @@ function renderUsage() {
     ["Noises ignored", `${usage.noisesIgnored}`],
     ["Last boot time", usage.bootMs === null ? "-" : seconds(usage.bootMs)],
   ];
+  renderResponseChart();
   const list = document.getElementById("usage-stats");
   list.replaceChildren(...rows.map(([label, value]) => {
     const item = document.createElement("div");
@@ -2529,6 +2572,125 @@ function renderUsage() {
   }));
 }
 
+const CHART_MAX_BARS = 40;
+const SVG_NS = "http://www.w3.org/2000/svg";
+
+/** Makes an SVG element with these attributes. */
+function svgElement(name, attributes = {}, text = null) {
+  const element = document.createElementNS(SVG_NS, name);
+  for (const [key, value] of Object.entries(attributes)) element.setAttribute(key, value);
+  if (text !== null) element.textContent = text;
+  return element;
+}
+
+/** A bar segment's outline - a rectangle, its top corners rounded when it's the top of the bar. */
+function barPath(x, y, width, height, roundTop) {
+  const r = roundTop ? Math.min(4, width / 2, height) : 0;
+  return `M${x},${y + height}V${y + r}` + (r ? `Q${x},${y} ${x + r},${y}` : "") +
+         `H${x + width - r}` + (r ? `Q${x + width},${y} ${x + width},${y + r}` : "") + `V${y + height}Z`;
+}
+
+/** Stacked bars of the last CHART_MAX_BARS commands' response times, split
+    at the moment OpenAI started answering, with the median as a dashed line. */
+function renderResponseChart() {
+  const container = document.getElementById("response-chart");
+  const turns = usage.history.slice(-CHART_MAX_BARS);
+  if (!turns.length) {
+    container.innerHTML = '<div class="chart-empty">No commands yet - each answer\'s timing shows up here.</div>';
+    return;
+  }
+  const width = Math.max(320, container.clientWidth || 800);
+  const height = 190, left = 40, right = 8, top = 16, bottom = 22;
+  const plotW = width - left - right, plotH = height - top - bottom;
+  const longestS = Math.max(1, ...turns.map((turn) => (turn.firstSoundMs ?? turn.serverMs ?? 0) / 1000));
+  const stepS = longestS > 6 ? 2 : longestS > 3 ? 1 : 0.5;
+  const maxS = Math.ceil(longestS / stepS) * stepS;
+  const yOf = (ms) => top + plotH - (ms / 1000 / maxS) * plotH;
+  const slot = plotW / CHART_MAX_BARS;
+  const barW = Math.max(4, Math.min(22, slot * 0.62));
+
+  const svg = svgElement("svg", { viewBox: `0 0 ${width} ${height}`, role: "img",
+    "aria-label": `Response time of the last ${turns.length} commands` });
+  for (let s = 0; s <= maxS + 1e-9; s += stepS) {
+    svg.append(svgElement("line", { class: "grid", x1: left, x2: width - right, y1: yOf(s * 1000), y2: yOf(s * 1000) }));
+    svg.append(svgElement("text", { class: "axis-label", x: left - 6, y: yOf(s * 1000) + 4, "text-anchor": "end" },
+      `${Number.isInteger(s) ? s : s.toFixed(1)} s`));
+  }
+  const tip = document.createElement("div");
+  tip.className = "chart-tip";
+  tip.hidden = true;
+  const labelEvery = Math.ceil(turns.length / 10);
+  turns.forEach((turn, index) => {
+    const x = left + index * slot + (slot - barW) / 2;
+    const group = svgElement("g");
+    const server = turn.serverMs, sound = turn.firstSoundMs;
+    if (server !== null && sound !== null && sound >= server) {
+      const gap = sound - server > 0 ? 1 : 0;  // 2px surface gap between the two segments
+      svg.append(svgElement("path", { d: barPath(x, yOf(server) + gap, barW, yOf(0) - yOf(server) - gap, false), fill: "var(--seg-server)" }));
+      if (gap) svg.append(svgElement("path", { d: barPath(x, yOf(sound), barW, Math.max(1, yOf(server) - yOf(sound) - gap), true), fill: "var(--seg-sound)" }));
+    } else if (sound !== null) {
+      svg.append(svgElement("path", { d: barPath(x, yOf(sound), barW, yOf(0) - yOf(sound), true), fill: "var(--seg-sound)" }));
+    } else {
+      svg.append(svgElement("text", { class: "fail-mark", x: x + barW / 2, y: yOf(0) - 4, "text-anchor": "middle" }, "✕"));
+    }
+    const icon = turn.tool === "set_board_state" ? "💡" : turn.tool === "get_time_of_day" ? "🔆" : turn.tool === "set_volume" ? "🔊" : "";
+    if (icon && sound !== null) svg.append(svgElement("text", { x: x + barW / 2, y: yOf(sound) - 4, "text-anchor": "middle", "font-size": 11 }, icon));
+    if (index % labelEvery === 0 || index === turns.length - 1) {
+      svg.append(svgElement("text", { class: "axis-label", x: x + barW / 2, y: height - 6, "text-anchor": "middle" }, `#${turn.n}`));
+    }
+    const hit = svgElement("rect", { class: "hit", x: left + index * slot, y: top, width: slot, height: plotH, rx: 3 });
+    hit.addEventListener("pointerenter", () => {
+      const seconds = (ms) => (ms === null ? "-" : `${(ms / 1000).toFixed(2)} s`);
+      const toolText = { set_board_state: "LED by voice", get_time_of_day: "part of day", set_volume: "volume by voice" }[turn.tool];
+      tip.innerHTML = "";
+      const title = document.createElement("b");
+      title.textContent = `Command #${turn.n} · ${clockStamp(turn.at).slice(0, 8)}`;
+      const lines = [
+        ["var(--seg-server)", `OpenAI started answering: ${seconds(server)}`],
+        ["var(--seg-sound)", `First sound of the reply: ${seconds(sound)}`],
+        [null, `Reply finished playing: ${seconds(turn.doneMs)}`],
+        [null, `${turn.mode === "vad" ? "Hands-free" : "Talk button"}${toolText ? ` · ${toolText}` : ""}${turn.result !== "pass" ? " · failed" : ""}`],
+      ];
+      tip.append(title, ...lines.map(([color, text]) => {
+        const line = document.createElement("div");
+        if (color) { const swatch = document.createElement("i"); swatch.style.background = color; line.append(swatch); }
+        line.append(text);
+        return line;
+      }));
+      tip.hidden = false;
+      const barCenter = ((left + (index + 0.5) * slot) / width) * container.clientWidth;
+      tip.style.left = `${Math.min(Math.max(0, barCenter - 90), container.clientWidth - 190)}px`;
+      tip.style.top = "0px";
+    });
+    hit.addEventListener("pointerleave", () => { tip.hidden = true; });
+    group.append(hit);
+    svg.append(group);
+  });
+  const sounds = turns.map((turn) => turn.firstSoundMs).filter((ms) => ms !== null).sort((a, b) => a - b);
+  if (sounds.length >= 2) {
+    const middle = Math.floor(sounds.length / 2);
+    const median = sounds.length % 2 ? sounds[middle] : (sounds[middle - 1] + sounds[middle]) / 2;
+    svg.append(svgElement("line", { class: "median", x1: left, x2: width - right, y1: yOf(median), y2: yOf(median) }));
+    svg.append(svgElement("text", { class: "median-label", x: width - right, y: yOf(median) - 5, "text-anchor": "end" },
+      `median ${(median / 1000).toFixed(2)} s`));
+  }
+  container.replaceChildren(svg, tip);
+}
+
+/** Saves every command's timing since connecting (or Reset) as a CSV file. */
+function onUsageExportClick() {
+  const header = "command,time,mode,tool,result,openai_started_ms,first_sound_ms,reply_done_ms";
+  const rows = usage.history.map((turn) => [turn.n, clockStamp(turn.at).slice(0, 8), turn.mode, turn.tool, turn.result,
+    turn.serverMs ?? "", turn.firstSoundMs ?? "", turn.doneMs ?? ""].join(","));
+  const blob = new Blob([[header, ...rows].join("\n") + "\n"], { type: "text/csv" });
+  const url = URL.createObjectURL(blob);
+  const anchor = Object.assign(document.createElement("a"), { href: url, download: `esp32_statistics_${fileStamp(new Date())}.csv` });
+  anchor.click();
+  setTimeout(() => URL.revokeObjectURL(url), 5000);
+}
+
+document.getElementById("usage-export").addEventListener("click", onUsageExportClick);
+window.addEventListener("resize", renderResponseChart);
 document.getElementById("usage-reset").addEventListener("click", () => {
   const band = usage.lightBand;
   usage = newUsage();
