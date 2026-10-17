@@ -30,6 +30,7 @@
 |---|---|
 | `80b1506` | כלי קולי `set_volume`: עוצמה באחוזים (`Set the volume to 30 percent`) או מגביר / מנמיך ב-20% |
 | `e0a8753` | מודול חדש `clock_timer_utils`: הכלים `get_current_time` (מה השעה) ו-`set_timer` (טיימר שמצפצף ומהבהב) |
+| `d9af02e` | `How long is left on my timer?`: התשובה של `get_current_time` כוללת גם כמה זמן נשאר לטיימר |
 | `3abf862` | `What can you do?` עונה במשפט אחד מה העוזר יודע לעשות. גם בכרטיס Try saying |
 | `348a78d` | תזכורת בקול: ל-`set_timer` יש תיאור (`label`), ובסוף העוזר אומר `Time's up - check the oven`. גם מרכז הבקרה מציג את התיאור |
 
@@ -42,7 +43,8 @@
 | `ba62efa` | מסמך חדש `docs/architecture.md` (מודולים, דיאגרמת מצבים, טבלת שורות `@@` ופקודות), ו-README מעודכן |
 | `5c3cc0d` | מסמך חדש `docs/demo-plan.md` (סדר של 25 דקות, הכנות, גיבויים), Summary ו-Tour בסיפורי המשתמש |
 | `31cfb95` | התזכורת בקול ב-README, בסיפור משתמש 6, ב-architecture וב-demo-plan |
-| הבא אחריו | מדריך מהיר לבוחנים בדף אחד: `docs/quick-start.md` ו-PDF |
+| `56ad2cd` | מדריך מהיר לבוחנים בדף אחד: `docs/quick-start.md` ו-PDF |
+| `273be3c` | צילום מסך חדש ב-README, ותמונות של Stage view ו-Summary |
 
 ## מה צריך לבדוק על הלוח
 
@@ -62,13 +64,14 @@
    - `Set a timer for 20 seconds`: במסך ספירה לאחור. אחרי 20 שניות 3 צפצופים וה-LED מהבהב, ואז חוזר למצב שהיה.
    - עם Hands-free דלוק: הצפצופים לא מתחילים הקלטה.
    - טיימר שנגמר באמצע תשובה מצלצל רק אחרי שהתשובה נגמרת.
+   - `How long is left on my timer?` באמצע ספירה: עונה בערך כמו המסך.
    - `Cancel the timer`: הספירה נעלמת.
    - `Remind me in 30 seconds to check the oven`: בספירה כתוב `check the oven`. בסוף, אחרי הצפצופים, העוזר אומר `Time's up - check the oven` ובמסך כתוב Saying that the timer is done.
    - עם Hands-free דלוק: ההודעה בקול לא מתחילה הקלטה.
 6. **`What can you do?`:** עונה במשפט אחד עם הדברים שהוא יודע לעשות.
 7. **שלא נשבר כלום:** `Turn on the light`, `Is it day or night?`, Hands-free, הקלטות ב-SD.
 
-אם משהו מהקושחה לא עובד, אפשר לבטל רק אותו: `git revert 348a78d` (התזכורת בקול), `git revert e0a8753` (טיימר ושעה, אחרי שביטלתם את התזכורת) או `git revert 80b1506` (עוצמה). ה-GUI ממשיך לעבוד גם בלי הכלים האלה.
+אם משהו מהקושחה לא עובד, אפשר לבטל רק אותו: `git revert d9af02e` (כמה זמן נשאר), `git revert 348a78d` (התזכורת בקול), `git revert e0a8753` (טיימר ושעה, אחרי שביטלתם את שני אלה) או `git revert 80b1506` (עוצמה). ה-GUI ממשיך לעבוד גם בלי הכלים האלה.
 
 ## בדיקה של מרכז הבקרה
 
