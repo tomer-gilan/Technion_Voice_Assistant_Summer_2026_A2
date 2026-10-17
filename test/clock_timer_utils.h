@@ -17,6 +17,9 @@
 // hands-free off first so the mic doesn't take the beeps for speech). Then
 // the sketch has the assistant say it out loud (sendTimerAnnouncement()),
 // with the label if there is one: "Time's up - check the oven."
+// set_timer's optional light ("on" / "off") also switches the LED when it
+// rings - "Turn off the light in 10 minutes" (label "light off" unless the
+// user gave one).
 // Status lines for the laptop app (tools/reply_audio_app.html):
 //
 //   @@TIMER <seconds left> <seconds total> [label] - set, and in the STATUS reply

@@ -2652,7 +2652,9 @@ function onTimerLine([first, second, ...rest]) {
   if (first === "done") {
     const label = [second, ...rest].filter(Boolean).join(" ");
     board.timer = null;
-    addConversationNote(label ? `⏰ Reminder: ${label} - the board is ringing!` : "⏰ Timer done - the board is ringing!", "tool");
+    const lightAction = /^light (on|off)$/.exec(label);  // "Turn off the light in 20 seconds"
+    addConversationNote(lightAction ? `⏰ Timer done - the board rings and turns the light ${lightAction[1]}`
+      : label ? `⏰ Reminder: ${label} - the board is ringing!` : "⏰ Timer done - the board is ringing!", "tool");
     const chip = document.getElementById("timer-chip");
     chip.hidden = false;
     chip.textContent = "⏰ Ringing!";
@@ -3104,6 +3106,7 @@ const EXAMPLE_PHRASES = [
   ["🔊", "A bit louder"],
   ["⏰", "Set a timer for 20 seconds"],
   ["📝", "Remind me in 30 seconds to check the oven"],
+  ["🌙", "Turn off the light in 20 seconds"],
   ["🕒", "What time is it?"],
   ["📶", "How are you doing?"],
 ];
@@ -3137,7 +3140,7 @@ const DEMO_SECTIONS = [
     ["handsfree", "Hands-free בלי כפתור", "מדליקים את המתג ומדברים. הוא מתחיל ועוצר לבד."],
     ["led", "הדלקת אור בקול", "<code>Turn on the light</code>, <code>Dim the light to 30 percent</code>, ואז <code>Turn off the light</code>. הנורה במסך זוהרת לפי הבהירות."],
     ["voicevolume", "עוצמה בקול", "<code>Set the volume to 30 percent</code>, ואז <code>A bit louder</code>."],
-    ["timer", "טיימר ושעה בקול", "<code>Set a timer for 20 seconds</code>: ספירה לאחור במסך, ובסוף הלוח מצפצף ומהבהב. <code>What time is it</code>."],
+    ["timer", "טיימר ושעה בקול", "<code>Set a timer for 20 seconds</code>: ספירה לאחור במסך, ובסוף הלוח מצפצף ומהבהב. <code>Turn off the light in 20 seconds</code>: האור נכבה כשהטיימר נגמר. <code>What time is it</code>."],
     ["daynight", "יום או לילה לפי חיישן האור", "סליידר האור נמוך, <code>Is it day or night</code>, ואז מעלים ושואלים שוב."],
     ["memory", "זיכרון שיחה", "<code>My name is Omri</code> ואז <code>What is my name</code>"],
     ["transcript", "רואים מה שמע ומה ענה", "בועות השיחה, זמן התשובה ותגיות הפעולה."],

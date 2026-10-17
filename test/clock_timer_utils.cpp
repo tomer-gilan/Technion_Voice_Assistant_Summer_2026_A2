@@ -34,6 +34,7 @@ bool timer_armed = false;
 uint32_t timer_started_ms = 0;
 uint32_t timer_length_ms = 0;
 char timer_label[kMaxLabelLength + 1] = "";  // "" when the timer has no label
+int timer_light_action = -1;  // -1: leave the LED alone when it rings, 0: turn it off, 1: turn it on
 char announcement_json[kAnnouncementBufferSize];
 
 /** Keeps a short, JSON-safe copy of the model's label: letters, digits,
@@ -127,6 +128,7 @@ bool handleSetTimerCall(JsonDocument& doc, WebSocketsClient& webSocket) {
   if (seconds <= 0) {
     bool was_armed = timer_armed;
     timer_armed = false;
+    timer_light_action = -1;
     esp32va_status::printProtocolLine("@@TIMER off");
     LOG_INFO("Timer cancelled (voice command).\n");
     snprintf(output, sizeof(output), "%s", was_armed ? "Timer cancelled." : "There was no timer running.");
@@ -136,6 +138,12 @@ bool handleSetTimerCall(JsonDocument& doc, WebSocketsClient& webSocket) {
     timer_started_ms = millis();
     timer_length_ms = static_cast<uint32_t>(seconds) * 1000;
     setTimerLabel(args_doc["label"] | "");
+    // "Turn off the light in 10 minutes": switch the LED when it rings.
+    const char* light = args_doc["light"] | "";
+    timer_light_action = strcmp(light, "on") == 0 ? 1 : strcmp(light, "off") == 0 ? 0 : -1;
+    if (timer_light_action >= 0 && timer_label[0] == '\0') {
+      setTimerLabel(timer_light_action ? "light on" : "light off");
+    }
     announceTimerState();
     LOG_INFO("Timer set for %ld s (voice command)%s%s.\n", seconds, timer_label[0] ? " - " : "", timer_label);
     if (timer_label[0] != '\0') {
@@ -160,6 +168,12 @@ bool serviceTimer(bool board_idle) {
     esp32va_status::printProtocolLine("@@TIMER done");
   }
   ringAlarm();
+  if (timer_light_action >= 0) {
+    setLed(timer_light_action == 1);
+    LOG_INFO("Timer done - LED turned %s, as asked.\n", timer_light_action ? "on" : "off");
+    esp32va_board::announceLedState("voice");  // asked for by voice, just later
+    timer_light_action = -1;
+  }
   return true;
 }
 
