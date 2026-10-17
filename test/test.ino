@@ -96,6 +96,7 @@ constexpr uint32_t kChunkMs = kChunkSamples * 1000 / kSampleRateHz;
 // spoken "1, 2, 3" hit full scale (min -32768 / max 32767) - clipped before
 // OpenAI heard it. Must match tools/reply_audio_app.html's BOARD_MIC_GAIN.
 constexpr int32_t kSoftwareGain = 2;
+constexpr unsigned int kMaxTypedQuestionLength = 200;  // ASK <text> - longer is cut
 constexpr unsigned long kReplyTimeoutMs = 15000;  // max silence (no server message) while awaiting_reply, not a total-reply-duration cap - see checkReplyTimeout()
 // The gain and the base64 encoding run kGainBlockSamples at a time, straight
 // into the JSON message: 192 bytes = 64 whole base64 groups, so only a
@@ -150,7 +151,7 @@ uint32_t connection_count = 0;     // how many times WStype_CONNECTED has fired 
 unsigned long last_reply_activity_ms = 0;  // last time ANY server message arrived while a response was due - see checkReplyTimeout()
 bool ws_reads_paused_for_backpressure = false;  // see i2s_audio_utils.h's ringShouldPauseReads()
 bool step_verdict_reported = false;  // this step's own control-center verdict - see reportStepVerdict()
-const char* unprompted_speech_detail = "greeting";  // @@STATE speaking detail for speech no LISTEN asked for - "timer" once a timer announced itself
+const char* unprompted_speech_detail = "greeting";  // @@STATE speaking detail for speech no LISTEN asked for - "timer" once a timer announced itself, "typed" for ASK
 bool speech_in_progress = false;  // reply (or greeting) audio has started arriving and hasn't finished playing yet
 constexpr size_t kToolNameBufferSize = 32;
 char active_tool_name[kToolNameBufferSize] = "";  // the tool call being handled, for @@STATE tool <name>
@@ -936,6 +937,40 @@ void startManualListen() {
   }
 }
 
+/** ASK <text>: a question typed in the laptop app instead of spoken - for a
+    noisy room, or a mic that won't cooperate. It goes into the same
+    conversation as a text message, and the reply is spoken like the
+    greeting: no LISTEN, so no recording and no @@TIMING. The text comes
+    back as @@HEARD for the app's chat bubble. */
+void askTypedQuestion(const String& text) {
+  if (!session_ready) {
+    Serial.printf("ASK ignored - not connected to OpenAI yet.\n");
+    return;
+  }
+  if (!isIdleForFileTransfer() || response_in_flight || speech_in_progress) {
+    Serial.printf("ASK ignored - the assistant is busy, try again when it is Ready.\n");
+    return;
+  }
+  String question = text.substring(0, kMaxTypedQuestionLength);
+  JsonDocument doc;
+  doc["type"] = "conversation.item.create";
+  JsonObject item = doc["item"].to<JsonObject>();
+  item["type"] = "message";
+  item["role"] = "user";
+  JsonObject part = item["content"].to<JsonArray>().add<JsonObject>();
+  part["type"] = "input_text";
+  part["text"] = question;  // ArduinoJson escapes it
+  String message;
+  serializeJson(doc, message);
+  webSocket.sendTXT(message);
+  webSocket.sendTXT(kResponseCreateMessage);
+  esp32va_status::reportTextLine("HEARD", question.c_str());
+  unprompted_speech_detail = "typed";
+  response_in_flight = true;  // like the greeting: hands-free waits for it to be heard
+  last_reply_activity_ms = millis();
+  LOG_INFO("Typed question sent: \"%s\"\n", question.c_str());
+}
+
 /** Checks Serial for a typed command. LIST / GET / DELETE <name> / DELETE_ALL answer the laptop
     app (see sd_file_transfer_utils.h) - with @@BUSY unless idle. STATUS
     reprints the board's whole status (status_report_utils.h). VOLUME / MUTE
@@ -944,7 +979,8 @@ void startManualListen() {
     simulated light sensor (light_sensor_utils.h), VAD / VAD_SENSITIVITY /
     VAD_HANGOVER set hands-free listening (hands_free_utils.h) - all at any
     time; BEEP and GET stop hands-free listening first. LISTEN starts a
-    manual capture if the board can take one (startManualListen()).
+    manual capture if the board can take one (startManualListen()). ASK
+    <text> sends a typed question (askTypedQuestion()).
     Anything else is logged and ignored. */
 void checkForSerialCommand() {
   if (!Serial.available()) {
@@ -975,8 +1011,12 @@ void checkForSerialCommand() {
   if (handled) {
     return;
   }
+  if (command.length() > 4 && command.substring(0, 4).equalsIgnoreCase("ASK ")) {
+    askTypedQuestion(command.substring(4));
+    return;
+  }
   if (!command.equalsIgnoreCase("LISTEN")) {
-    Serial.printf("Unknown command \"%s\" - expected LISTEN, STATUS, VAD on|off, VAD_SENSITIVITY <1-5>, VAD_HANGOVER <600-1500>, LIGHT <0-%d>, LIGHT_BANDS <evening> <day>, VOLUME <0-100>, MUTE on|off, BEEP, LED on|off, LED_BRIGHTNESS <0-100>, LIST, GET <name>, DELETE <name> or DELETE_ALL [replies|commands].\n",
+    Serial.printf("Unknown command \"%s\" - expected LISTEN, ASK <text>, STATUS, VAD on|off, VAD_SENSITIVITY <1-5>, VAD_HANGOVER <600-1500>, LIGHT <0-%d>, LIGHT_BANDS <evening> <day>, VOLUME <0-100>, MUTE on|off, BEEP, LED on|off, LED_BRIGHTNESS <0-100>, LIST, GET <name>, DELETE <name> or DELETE_ALL [replies|commands].\n",
              command.c_str(), esp32va_light_sensor::kMaxLightSensorValue);
     return;
   }

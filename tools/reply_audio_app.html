@@ -374,6 +374,10 @@
   .timer-chip { font-size: 12px; padding: 3px 9px; border-radius: 999px; background: var(--warn-soft); color: var(--warn); font-weight: 700; font-variant-numeric: tabular-nums; }
   .timer-chip.ringing { animation: blink 0.5s infinite; }
   .talk-row { grid-column: 1 / -1; display: flex; gap: 14px; align-items: center; flex-wrap: wrap; }
+  .ask-row { grid-column: 1 / -1; display: flex; gap: 8px; align-items: center; margin: -4px 0 0; }
+  .ask-row input { flex: 1; min-width: 0; font: inherit; font-size: 13.5px; padding: 6px 10px; border-radius: 6px; border: 1px solid var(--border); background: var(--panel); color: var(--text); }
+  .ask-row input:disabled { opacity: 0.6; }
+  .bubble.typed b::after { content: " · typed"; font-weight: 400; }
   button.talk {
     font-size: 17px; font-weight: 650; padding: 13px 26px; border-radius: 999px; border: 0;
     background: var(--accent); color: var(--on-accent); display: inline-flex; gap: 10px; align-items: center;
@@ -674,6 +678,10 @@
             <div class="meter-note" id="meter-note" hidden></div>
           </div>
         </div>
+        <form class="ask-row" id="ask-form" title="For a noisy room: the question goes to the assistant as text, and it answers out loud as usual">
+          <input id="ask-text" type="text" maxlength="200" placeholder="Or type a question…" autocomplete="off" disabled aria-label="Type a question">
+          <button id="ask-send" type="submit" disabled>Ask</button>
+        </form>
         <div class="vad-settings" id="vad-settings" hidden>
           <div class="control-line">
             <label for="vad-sensitivity" title="Higher hears quieter voices - and more of the room's noise.">Sensitivity</label>
@@ -1480,6 +1488,8 @@ const elements = {
   stateDetail: document.getElementById("state-detail"),
   steps: document.getElementById("steps"),
   talk: document.getElementById("talk"),
+  askText: document.getElementById("ask-text"),
+  askSend: document.getElementById("ask-send"),
   talkLabel: document.getElementById("talk-label"),
   micFill: document.getElementById("mic-fill"),
   meterName: document.getElementById("meter-name"),
@@ -1564,11 +1574,12 @@ function freshBoardStatus() {
     cycleTools: new Set(),   // tools already noted in the conversation this LISTEN
     timer: null,             // { endsAt (performance.now() ms), totalS } from @@TIMER, null when none runs
     timerTicker: null,
+    askPending: null,  // a typed question sent with ASK, until the board echoes it as @@HEARD
   };
 }
 
 const link = new BoardLink({
-  onLine: (line) => appendLog(line),
+  onLine: (line) => { appendLog(line); noteAskRefused(line); },
   onNote: (text) => appendLog(`(app) ${text}`),
   onConnectionChange: handleConnectionChange,
   onListAnnounced: (files) => {
@@ -2189,6 +2200,12 @@ function handleStatusLine(tag, rest) {
     case "HEARD":
       // Transcription can arrive after the reply - keep it first. Empty: OpenAI heard no words (a noise).
       addBubble("heard", rest.trim() ? rest : "(no words - just a sound)", board.cycleFirstBubble);
+      if (board.askPending && rest.trim() === board.askPending) {  // the board echoes a typed question back
+        const typed = [...elements.bubbles.querySelectorAll(".bubble.heard")].pop();
+        if (typed) typed.classList.add("typed");
+        board.askPending = null;
+        autoTickDemo("typed");
+      }
       break;
     case "SAID":
       addBubble("said", rest);
@@ -2380,6 +2397,7 @@ function showPipelineState(shownState, detail) {
   else if ((shownState === "halted" || shownState === "error") && detail) detailText = detail;
   else if (shownState === "speaking" && detail === "greeting") detailText = "Playing the opening greeting.";
   else if (shownState === "speaking" && detail === "timer") detailText = "Saying that the timer is done.";
+  else if (shownState === "speaking" && detail === "typed") detailText = "Answering your typed question.";
   elements.stateDetail.textContent = detailText;
   const step = STEP_OF_STATE[shownState];
   [...elements.steps.children].forEach((span) => span.classList.toggle("now", span.dataset.step === step));
@@ -2425,6 +2443,7 @@ function updateTalkButton() {
   const ready = link.connected && !board.talkPending &&
     ((board.pipeline && IDLE_STATES.has(board.pipeline.state)) || noReports);
   elements.talk.disabled = !ready;
+  elements.askText.disabled = elements.askSend.disabled = !ready || noReports;
   elements.talk.classList.toggle("is-listening", listening);
   if (!listening) {
     elements.talkLabel.textContent = board.talkPending ? "Starting…" : ready || !link.connected ? "Talk" : "Busy";
@@ -2441,6 +2460,35 @@ function onTalkClick() {
     board.talkPending = false;
     updateTalkButton();
   }, TALK_START_TIMEOUT_MS);
+}
+
+/** Sends a typed question (ASK <text>, firmware step 31+): a new turn in the
+    conversation, answered out loud like a spoken one. */
+function onAskSubmit(event) {
+  event.preventDefault();
+  const text = elements.askText.value.replace(/\s+/g, " ").trim();
+  if (!text || elements.askSend.disabled) return;
+  const board = state.board;
+  board.cycleFirstBubble = null;  // a new turn: its bubbles go after the last one's
+  board.cycleFirstSaid = null;
+  board.cycleTools.clear();
+  board.askPending = text;
+  sendCommand(`ASK ${text}`);
+  elements.askText.value = "";
+}
+
+/** The board's answer to an ASK it didn't take. */
+function noteAskRefused(line) {
+  if (line.startsWith("ASK ignored - ")) {
+    elements.result.className = "result fail";
+    elements.result.textContent = `Typed question not sent: ${line.slice(14)}`;
+  } else if (line.startsWith('Unknown command "ASK ')) {
+    elements.result.className = "result fail";
+    elements.result.textContent = "This board's firmware can't take typed questions yet - flash the latest test.ino.";
+  } else {
+    return;
+  }
+  state.board.askPending = null;
 }
 
 /** Where dbfs sits on a meter running from min to max, in percent. */
@@ -3067,6 +3115,7 @@ const DEMO_SECTIONS = [
     ["volrange", "עוצמה מחוץ לטווח", "<code>Set the volume to 150 percent</code>: נעצר על 100%."],
     ["sd", "בלי כרטיס SD", "מוציאים SD ועושים Reset. נורית SD אדומה."],
     ["timeroffline", "טיימר בלי אינטרנט", "<code>Set a timer for 30 seconds</code> ומכבים hotspot: הלוח עדיין מצפצף בזמן."],
+    ["typed", "חדר רועש: שאלה בכתב", "כותבים שאלה בשדה <code>Or type a question…</code> ולוחצים Ask. הוא עונה בקול כרגיל."],
     ["reconnect", "ניתוק מרכז הבקרה", "מנתקים את כבל ה-USB: באנר אדום. מחברים שוב והכל חוזר."],
   ]],
 ];
@@ -3313,7 +3362,7 @@ const TOUR_STEPS = [
   ["#talk", "3. Talk to it",
    "Press Talk (or the space bar) and speak for up to 3 seconds, in English. The circle shows what it's doing: listening, thinking, speaking."],
   ["#hands-free, .talk-row", "4. Or hands-free",
-   "Once the board is connected, a Hands-free switch appears next to Talk. Switch it on and just start talking - the board notices speech by itself and ignores knocks and claps."],
+   "Once the board is connected, a Hands-free switch appears next to Talk. Switch it on and just start talking - the board notices speech by itself and ignores knocks and claps. Room too noisy? Type the question in the box below instead - it still answers out loud."],
   [".conversation", "5. The conversation",
    "What it heard and what it answered, with the response time, and a tag whenever it did something on the board (LED, volume, timer)."],
   ["#phrases", "6. Ideas to try",
@@ -3515,6 +3564,7 @@ elements.downloadLog.addEventListener("click", onDownloadLogClick);
 elements.clearLog.addEventListener("click", onClearLogClick);
 elements.deleteButton.addEventListener("click", onDeleteClick);
 elements.talk.addEventListener("click", onTalkClick);
+document.getElementById("ask-form").addEventListener("submit", onAskSubmit);
 document.addEventListener("keydown", onKeyDown);
 elements.toggleTerminal.addEventListener("click", onTerminalToggle);
 elements.showProtocol.addEventListener("change", () => {
