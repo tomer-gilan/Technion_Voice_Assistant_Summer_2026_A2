@@ -20,7 +20,7 @@ constexpr int kAlarmBeeps = 3;
 constexpr uint32_t kAlarmGapMs = 150;       // LED off, silence, between two beeps
 constexpr int kEarliestPlausibleYear = 2024;  // before this the clock was never synced
 const char kResponseCreateMessage[] = R"JSON({"type":"response.create"})JSON";
-constexpr size_t kToolResponseBufferSize = 256;  // function_call_output messages are tiny - no audio involved
+constexpr size_t kToolResponseBufferSize = 384;  // the JSON around it, a ~40-char call_id and the longest output (~140 chars), with room to spare
 char tool_response_message[kToolResponseBufferSize];
 
 constexpr size_t kMaxLabelLength = 48;  // "check the oven" - a few words, said back out loud
@@ -92,11 +92,16 @@ bool handleGetCurrentTimeCall(JsonDocument& doc, WebSocketsClient& webSocket) {
   time_t now = time(nullptr);
   struct tm local_time;
   localtime_r(&now, &local_time);
-  char output[96];
+  char output[96 + 48 + kMaxLabelLength];
   if (local_time.tm_year + 1900 < kEarliestPlausibleYear) {
     snprintf(output, sizeof(output), "The board's clock is not set, so the time is unknown.");
   } else {
     strftime(output, sizeof(output), "It is %H:%M on %A, %d %B %Y.", &local_time);
+  }
+  if (timer_armed) {  // so "how long is left on my timer?" can be answered from the same call
+    size_t used = strlen(output);
+    snprintf(output + used, sizeof(output) - used, " The timer has %lu seconds left%s%s.",
+             (unsigned long)secondsLeft(), timer_label[0] ? " - " : "", timer_label);
   }
   LOG_INFO("Time asked - %s\n", output);
   sendToolOutput(webSocket, call_id, output);

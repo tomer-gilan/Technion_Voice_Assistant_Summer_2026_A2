@@ -6,7 +6,8 @@
 // The board's clock and a kitchen-timer, as two more tools for the model:
 //
 //   get_current_time  -> "It is 21:05 on Saturday, 17 October 2026." (from
-//                        the SNTP-synced clock, TIMEZONE_UTC_OFFSET_SEC applied)
+//                        the SNTP-synced clock, TIMEZONE_UTC_OFFSET_SEC applied),
+//                        plus " The timer has 40 seconds left." while one runs
 //   set_timer         {"seconds": N} -> rings in N seconds (1 to 3600);
 //                        {"seconds": 0} cancels a running timer. An optional
 //                        "label" ("check the oven") turns it into a reminder.
