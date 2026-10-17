@@ -558,6 +558,17 @@
     </section>
   </div>
 
+  <section class="panel" aria-labelledby="usage-heading">
+    <div class="panel-head">
+      <h2 id="usage-heading">Statistics</h2>
+      <div class="panel-actions">
+        <button id="usage-reset" type="button">Reset</button>
+      </div>
+    </div>
+    <p class="hint">Since the app connected (or since Reset). Response time: from the end of the recording to the first sound of the reply.</p>
+    <dl id="usage-stats" class="stats"></dl>
+  </section>
+
   <div class="row">
   <div class="column">
     <section class="panel" aria-labelledby="recordings-heading">
@@ -646,7 +657,8 @@ const SAFE_FILE_NAME = /^[A-Za-z0-9_-][A-Za-z0-9_.-]{0,30}$/;  // a plain name, 
 
 // Status and controls (step 28) - the board's side is test/status_report_utils.h.
 const STATUS_TAGS = new Set(["@@STAGE", "@@STATE", "@@RESULT", "@@MIC_LEVEL", "@@HEARD", "@@SAID", "@@WIFI",
-                             "@@LED", "@@VOLUME", "@@LIGHT", "@@BEEP", "@@VAD", "@@VAD_LEVEL", "@@VAD_EVENT"]);
+                             "@@LED", "@@VOLUME", "@@LIGHT", "@@BEEP", "@@VAD", "@@VAD_LEVEL", "@@VAD_EVENT",
+                             "@@TIMING", "@@BOOT_TIMING"]);
 const STATUS_REQUEST_DELAY_MS = 400;   // after connecting, ask for the full picture
 const NO_STATUS_HINT_MS = 4000;        // no @@STATE by then: the board runs older firmware
 const TALK_START_TIMEOUT_MS = 2500;    // LISTEN sent but no "listening" yet: unlock Talk again
@@ -1899,6 +1911,7 @@ function handleStatusLine(tag, rest) {
     case "LED":
       board.led = { on: words[0] === "on", brightness: Number(words[1]), source: words[2] };
       renderLed();
+      if (words[2] === "voice") countUsage("ledByVoice");
       break;
     case "VOLUME":
       board.volume = { percent: Number(words[0]), muted: words[1] === "muted" };
@@ -1907,6 +1920,7 @@ function handleStatusLine(tag, rest) {
     case "LIGHT":
       board.light = { value: Number(words[0]), band: words[1], eveningMin: Number(words[2]), dayMin: Number(words[3]) };
       renderLight();
+      onUsageLight(words[1]);
       break;
     case "BEEP":
       elements.volumeNote.textContent = words[0] === "played"
@@ -1922,6 +1936,14 @@ function handleStatusLine(tag, rest) {
       break;
     case "VAD_EVENT":
       onVadEvent(words);
+      if (words[0] === "discarded") countUsage("noisesIgnored");
+      break;
+    case "TIMING":
+      onUsageTiming(parseKeyValues(rest));
+      break;
+    case "BOOT_TIMING":
+      usage.bootMs = Number(parseKeyValues(rest).total_ms);
+      renderUsage();
       break;
     default:
       break;
@@ -2301,6 +2323,88 @@ function onKeyDown(event) {
   event.preventDefault();
   onTalkClick();
 }
+
+// ===== Statistics =====
+
+/** Counters for the Statistics panel, from the board's @@TIMING / @@LED /
+    @@LIGHT / @@VAD_EVENT / @@BOOT_TIMING lines. Kept in the page only. */
+let usage = newUsage();
+
+/** Empty counters. */
+function newUsage() {
+  return { turns: 0, failed: 0, handsFree: 0, responseMs: [], ledByVoice: 0, timeOfDayAsks: 0,
+           lightBand: null, lightChanges: 0, noisesIgnored: 0, bootMs: null };
+}
+
+/** "a=1 b=x" -> { a: "1", b: "x" }. */
+function parseKeyValues(text) {
+  const fields = {};
+  for (const pair of text.trim().split(/\s+/)) {
+    const at = pair.indexOf("=");
+    if (at > 0) fields[pair.slice(0, at)] = pair.slice(at + 1);
+  }
+  return fields;
+}
+
+/** One answered (or failed) turn from its @@TIMING line. */
+function onUsageTiming(fields) {
+  usage.turns++;
+  if (fields.result !== "pass") usage.failed++;
+  if (fields.mode === "vad") usage.handsFree++;
+  if (fields.tool === "get_time_of_day") usage.timeOfDayAsks++;
+  const firstAudioMs = Number(fields.first_audio_after_rec_ms);
+  if (firstAudioMs >= 0) usage.responseMs.push(firstAudioMs);  // -1: the turn had no reply audio
+  renderUsage();
+}
+
+/** Counts a change of the light sensor's part of the day (the first reading only sets it). */
+function onUsageLight(band) {
+  if (usage.lightBand !== null && band !== usage.lightBand) usage.lightChanges++;
+  usage.lightBand = band;
+  renderUsage();
+}
+
+/** Adds one to a plain counter. */
+function countUsage(name) {
+  usage[name]++;
+  renderUsage();
+}
+
+/** Redraws the Statistics panel. */
+function renderUsage() {
+  const seconds = (ms) => `${(ms / 1000).toFixed(2)} s`;
+  const times = usage.responseMs;
+  const average = times.length ? times.reduce((sum, ms) => sum + ms, 0) / times.length : null;
+  const rows = [
+    ["Commands", `${usage.turns}` + (usage.failed ? ` (${usage.failed} failed)` : "")],
+    ["Hands-free / button", `${usage.handsFree} / ${usage.turns - usage.handsFree}`],
+    ["Average response time", average === null ? "-" : seconds(average)],
+    ["Fastest / slowest", times.length ? `${seconds(Math.min(...times))} / ${seconds(Math.max(...times))}` : "-"],
+    ["LED changed by voice", `${usage.ledByVoice}`],
+    ["Part-of-day questions", `${usage.timeOfDayAsks}`],
+    ["Light sensor changes", `${usage.lightChanges}` + (usage.lightBand ? ` (now ${usage.lightBand})` : "")],
+    ["Noises ignored", `${usage.noisesIgnored}`],
+    ["Last boot time", usage.bootMs === null ? "-" : seconds(usage.bootMs)],
+  ];
+  const list = document.getElementById("usage-stats");
+  list.replaceChildren(...rows.map(([label, value]) => {
+    const item = document.createElement("div");
+    const term = document.createElement("dt");
+    const detail = document.createElement("dd");
+    term.textContent = label;
+    detail.textContent = value;
+    item.append(term, detail);
+    return item;
+  }));
+}
+
+document.getElementById("usage-reset").addEventListener("click", () => {
+  const band = usage.lightBand;
+  usage = newUsage();
+  usage.lightBand = band;
+  renderUsage();
+});
+renderUsage();
 
 // ===== Wiring =====
 
