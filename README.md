@@ -63,6 +63,11 @@
 
 המיקרופון והמגבר חולקים את אותם קווי שעון של I2S (full duplex על פורט I2S אחד).
 
+![דיאגרמת חיבורים](docs/images/wiring.png)
+
+<details>
+<summary>אותו דבר בטקסט</summary>
+
 <div dir="ltr">
 
 ```
@@ -85,6 +90,8 @@
 ```
 
 </div>
+
+</details>
 
 | אות | פין ב-ESP32 |
 |---|---|
