@@ -514,6 +514,20 @@
     .summary-tile .value { font-size: 34px; }
   }
 
+  /* ----- Guided tour: a spotlight on one part of the page at a time ----- */
+  .tour-spot {
+    position: fixed; z-index: 45; border-radius: 12px; pointer-events: none; outline: 3px solid var(--accent);
+    box-shadow: 0 0 0 9999px rgba(10, 14, 22, 0.55); transition: top 0.25s, left 0.25s, width 0.25s, height 0.25s;
+  }
+  .tour-card {
+    position: fixed; z-index: 46; width: min(380px, calc(100vw - 32px)); background: var(--panel); color: var(--text);
+    border: 1px solid var(--border); border-radius: 12px; padding: 16px 18px; box-shadow: 0 12px 32px rgba(0, 0, 0, 0.25);
+  }
+  .tour-card h3 { margin: 0 0 6px; font-size: 17px; }
+  .tour-card p { margin: 0 0 14px; line-height: 1.5; font-size: 14px; }
+  .tour-card .tour-foot { display: flex; align-items: center; gap: 8px; }
+  .tour-card .tour-count { flex: 1; color: var(--muted); font-size: 13px; }
+
   /* ----- Log replay bar ----- */
   .replay-bar {
     position: fixed; left: 50%; bottom: 18px; transform: translateX(-50%); z-index: 40; display: flex; align-items: center;
@@ -579,6 +593,7 @@
       <option value="115200" selected>115200 baud</option>
       <option value="921600">921600 baud</option>
     </select>
+    <button id="tour-open" type="button" title="A short walk through this page, for first-time users">? Tour</button>
     <button id="stage-open" type="button" title="A big view of the assistant for people watching from a distance (key F)">⛶ Stage view</button>
     <button id="demo-open" type="button" aria-controls="demo-drawer" aria-expanded="false">✓ Demo checklist</button>
     <button id="connect" class="primary" type="button">Connect board</button>
@@ -839,6 +854,17 @@
   <div class="summary-section">
     <h3>Board settings now (kept after a reset)</h3>
     <div class="summary-chips" id="summary-settings"></div>
+  </div>
+</div>
+
+<div class="tour-spot" id="tour-spot" hidden></div>
+<div class="tour-card" id="tour-card" hidden role="dialog" aria-labelledby="tour-title">
+  <h3 id="tour-title"></h3>
+  <p id="tour-text"></p>
+  <div class="tour-foot">
+    <span class="tour-count" id="tour-count"></span>
+    <button id="tour-back" type="button">Back</button>
+    <button id="tour-next" class="primary" type="button">Next</button>
   </div>
 </div>
 
@@ -3198,6 +3224,89 @@ function setSummaryOpen(open) {
 document.getElementById("summary-open").addEventListener("click", () => setSummaryOpen(true));
 document.getElementById("summary-close").addEventListener("click", () => setSummaryOpen(false));
 document.addEventListener("keydown", (event) => { if (event.key === "Escape") setSummaryOpen(false); });
+
+// ===== Guided tour =====
+
+/** The tour's stops: which part of the page (the first of the selectors
+    that is showing - Hands-free appears only once the board reports it),
+    and what to say about it. */
+const TOUR_STEPS = [
+  ["#connect", "1. Connect the board",
+   "Plug the ESP32 into this computer with USB, press Connect board and pick its COM port. Chrome or Edge only."],
+  [".health", "2. Startup checks",
+   "Each part of the board reports here as it starts: Wi-Fi, SD card, microphone, speaker and the OpenAI connection. All green means it's ready - about 10 seconds after power-on, and it greets you out loud."],
+  ["#talk", "3. Talk to it",
+   "Press Talk (or the space bar) and speak for up to 3 seconds, in English. The circle shows what it's doing: listening, thinking, speaking."],
+  ["#hands-free, .talk-row", "4. Or hands-free",
+   "Once the board is connected, a Hands-free switch appears next to Talk. Switch it on and just start talking - the board notices speech by itself and ignores knocks and claps."],
+  [".conversation", "5. The conversation",
+   "What it heard and what it answered, with the response time, and a tag whenever it did something on the board (LED, volume, timer)."],
+  ["#phrases", "6. Ideas to try",
+   "Click a phrase to start recording, then say it: turn the light on, set the volume, set a timer, ask the time or whether it's day or night."],
+  ["#controls-heading", "7. Settings",
+   "Volume, mute, LED brightness, and the light sensor's thresholds. The board saves them, so they stay after a reset."],
+  ["#usage-heading", "8. Statistics",
+   "Every command's response time, as numbers and a chart. Summary shows it all big at the end."],
+  ["#stage-open", "9. For a room",
+   "Stage view (key F) shows the assistant big, for people watching from further away. Demo checklist walks through everything to show."],
+];
+
+let tourIndex = -1;
+
+/** Shows tour stop index (or ends the tour when out of range). */
+function showTourStep(index) {
+  const spot = document.getElementById("tour-spot");
+  const card = document.getElementById("tour-card");
+  if (index < 0 || index >= TOUR_STEPS.length) {
+    tourIndex = -1;
+    spot.hidden = card.hidden = true;
+    return;
+  }
+  tourIndex = index;
+  const [selector, title, text] = TOUR_STEPS[index];
+  const target = [...document.querySelectorAll(selector)].find((element) => element.getClientRects().length);
+  const panel = target.closest(".panel") && selector.endsWith("-heading") ? target.closest(".panel") : target;
+  document.getElementById("tour-title").textContent = title;
+  document.getElementById("tour-text").textContent = text;
+  document.getElementById("tour-count").textContent = `${index + 1} of ${TOUR_STEPS.length}`;
+  document.getElementById("tour-back").disabled = index === 0;
+  document.getElementById("tour-next").textContent = index === TOUR_STEPS.length - 1 ? "Done" : "Next";
+  spot.hidden = card.hidden = false;
+  panel.scrollIntoView({ block: "center", behavior: "instant" });
+  placeTour(panel);
+}
+
+/** Puts the spotlight around element and the card below it (or above, if there's no room). */
+function placeTour(element) {
+  const spot = document.getElementById("tour-spot");
+  const card = document.getElementById("tour-card");
+  const rect = element.getBoundingClientRect();
+  const pad = 6;
+  const top = Math.max(4, rect.top - pad), bottom = Math.min(window.innerHeight - 4, rect.bottom + pad);
+  Object.assign(spot.style, { top: `${top}px`, left: `${rect.left - pad}px`, width: `${rect.width + 2 * pad}px`,
+                              height: `${bottom - top}px` });
+  const cardHeight = card.offsetHeight, cardWidth = card.offsetWidth;
+  let cardTop = bottom + 12;
+  if (cardTop + cardHeight > window.innerHeight - 8) cardTop = top - cardHeight - 12;
+  if (cardTop < 8) cardTop = Math.min(window.innerHeight - cardHeight - 8, Math.max(8, top + 12));  // tall target: overlap it
+  const cardLeft = Math.min(window.innerWidth - cardWidth - 16, Math.max(16, rect.left));
+  Object.assign(card.style, { top: `${cardTop}px`, left: `${cardLeft}px` });
+}
+
+document.getElementById("tour-open").addEventListener("click", () => {
+  setDemoOpen(false);
+  showTourStep(0);
+  document.getElementById("tour-next").focus();
+});
+document.getElementById("tour-next").addEventListener("click", () => showTourStep(tourIndex + 1));
+document.getElementById("tour-back").addEventListener("click", () => showTourStep(tourIndex - 1));
+document.addEventListener("keydown", (event) => {
+  if (tourIndex < 0) return;
+  if (event.key === "Escape") showTourStep(-1);
+  else if (event.key === "ArrowRight") showTourStep(tourIndex + 1);
+  else if (event.key === "ArrowLeft" && tourIndex > 0) showTourStep(tourIndex - 1);
+});
+window.addEventListener("resize", () => { if (tourIndex >= 0) showTourStep(tourIndex); });
 
 // ===== Log replay =====
 
