@@ -1,6 +1,7 @@
 #include "device_controls_utils.h"
 
 #include <Arduino.h>
+#include <math.h>
 #include <stdlib.h>
 #include <string.h>
 #include <strings.h>
@@ -20,6 +21,11 @@ constexpr int kDefaultLedBrightnessPercent = 100;
 const char kVolumeSettingKey[] = "volume";
 const char kMutedSettingKey[] = "muted";
 const char kLedBrightnessSettingKey[] = "led_bright";
+
+constexpr int kVoiceVolumeStepPercent = 20;    // "louder" / "quieter" by voice
+const char kResponseCreateMessage[] = R"JSON({"type":"response.create"})JSON";
+constexpr size_t kToolResponseBufferSize = 256;  // function_call_output messages are tiny - no audio involved
+char tool_response_message[kToolResponseBufferSize];
 
 uint8_t volume_percent = kDefaultVolumePercent;
 bool is_muted = false;
@@ -154,6 +160,54 @@ bool handleControlCommand(const char* command, bool idle_for_beep) {
   }
 
   return false;
+}
+
+bool handleSetVolumeCall(JsonDocument& doc, WebSocketsClient& webSocket) {
+  const char* call_id = doc["call_id"] | (const char*)nullptr;
+  const char* arguments_json = doc["arguments"] | "{}";
+  if (call_id == nullptr) {
+    LOG_ERROR("Function call missing call_id.\n");
+    return false;
+  }
+
+  JsonDocument args_doc;
+  DeserializationError err = deserializeJson(args_doc, arguments_json);
+  if (err) {
+    LOG_ERROR("set_volume args parse failed: %s\n", err.c_str());
+    LOG_DEBUG("Failed arguments string: %s\n", arguments_json);
+    return false;
+  }
+
+  int requested = -1;
+  JsonVariant percent = args_doc["percent"];
+  if (percent.is<int>() || percent.is<float>()) {  // 30, or 30.0 if the model sends it that way
+    requested = static_cast<int>(lroundf(percent.as<float>()));
+  } else {
+    const char* step = args_doc["step"] | "";
+    if (strcasecmp(step, "up") == 0) {
+      requested = volume_percent + kVoiceVolumeStepPercent;
+    } else if (strcasecmp(step, "down") == 0) {
+      requested = volume_percent - kVoiceVolumeStepPercent;
+    } else {
+      LOG_ERROR("set_volume called with neither percent nor step up/down: %s\n", arguments_json);
+      return false;
+    }
+  }
+  volume_percent = static_cast<uint8_t>(constrain(requested, 0, kMaxPercent));
+  is_muted = false;
+  setPlaybackVolume(volume_percent, is_muted);
+  esp32va_settings::saveSetting(kVolumeSettingKey, volume_percent);
+  esp32va_settings::saveSetting(kMutedSettingKey, 0);
+  LOG_INFO("Speaker volume set to %u%% (voice command).\n", (unsigned)volume_percent);
+  announceVolume();
+
+  snprintf(tool_response_message, kToolResponseBufferSize,
+           R"JSON({"type":"conversation.item.create","item":{"type":"function_call_output","call_id":"%s","output":"Volume set to %u percent"}})JSON",
+           call_id, (unsigned)volume_percent);
+  webSocket.sendTXT(tool_response_message);
+  webSocket.sendTXT(kResponseCreateMessage);
+  LOG_DEBUG("Sent function_call_output - asked the model for a spoken confirmation.\n");
+  return true;
 }
 
 void announceControlStates() {

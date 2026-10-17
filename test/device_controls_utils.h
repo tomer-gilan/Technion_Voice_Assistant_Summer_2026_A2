@@ -1,5 +1,8 @@
 #pragma once
 
+#include <ArduinoJson.h>
+#include <WebSocketsClient.h>
+
 // Serial commands that control the board's own hardware - mostly sent by the
 // laptop app's control panel (tools/reply_audio_app.html), but just as
 // usable typed by hand (step 28):
@@ -9,6 +12,9 @@
 //   BEEP                   0.3 s test tone, when idle  -> @@BEEP played, or @@BEEP busy
 //   LED <on|off>           onboard LED                 -> @@LED <on|off> <brightness> gui
 //   LED_BRIGHTNESS <0-100> its brightness in %         -> @@LED ...
+//
+// The volume can also be set by voice, through the set_volume tool
+// (handleSetVolumeCall() below) -> @@VOLUME ...
 //
 // Volume, mute and brightness are kept across reboots (settings_store_utils.h);
 // the LED itself always starts off, as before. (BEEP doesn't answer @@BUSY:
@@ -26,6 +32,15 @@ void setupDeviceControls();
     nothing being recorded or played. Returns true if `command` was one of
     these commands (handled or rejected), false if it's something else. */
 bool handleControlCommand(const char* command, bool idle_for_beep);
+
+/** Handles a finalized response.function_call_arguments.done event for the
+    set_volume tool: arguments {"percent": 0-100} sets that volume, or
+    {"step": "up"|"down"} changes it by kVoiceVolumeStepPercent. Unmutes the
+    speaker (the user asked to hear it), saves the volume, announces
+    @@VOLUME, and sends the function_call_output plus a response.create so
+    the model confirms it out loud. Returns true if handled, or false
+    (logged) if call_id is missing or the arguments say neither. */
+bool handleSetVolumeCall(JsonDocument& doc, WebSocketsClient& webSocket);
 
 /** Prints the current @@VOLUME and @@LED lines - part of the STATUS reply. */
 void announceControlStates();
