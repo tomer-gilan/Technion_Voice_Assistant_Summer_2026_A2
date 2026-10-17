@@ -2362,6 +2362,7 @@ function showPipelineState(shownState, detail) {
   else if (shownState === "reconnecting" && detail) detailText = `Lost the connection to OpenAI - ${detail}.`;
   else if ((shownState === "halted" || shownState === "error") && detail) detailText = detail;
   else if (shownState === "speaking" && detail === "greeting") detailText = "Playing the opening greeting.";
+  else if (shownState === "speaking" && detail === "timer") detailText = "Saying that the timer is done.";
   elements.stateDetail.textContent = detailText;
   const step = STEP_OF_STATE[shownState];
   [...elements.steps.children].forEach((span) => span.classList.toggle("now", span.dataset.step === step));
@@ -2516,7 +2517,9 @@ function noteToolInConversation(tool) {
       : "🔆 Read the light sensor", "tool");
   } else if (tool === "set_timer") {
     const timer = board.timer;
-    addConversationNote(timer ? `⏰ Timer set for ${formatDuration(timer.totalS)}` : "⏰ Timer cancelled", "tool");
+    addConversationNote(!timer ? "⏰ Timer cancelled"
+      : timer.label ? `⏰ Reminder set: ${timer.label}, in ${formatDuration(timer.totalS)}`
+      : `⏰ Timer set for ${formatDuration(timer.totalS)}`, "tool");
   } else if (tool === "get_current_time") {
     addConversationNote(`🕒 Read the board's clock`, "tool");
   } else if (tool === "set_volume") {
@@ -2531,12 +2534,14 @@ function formatDuration(seconds) {
   return `${Math.floor(seconds / 60)}:${pad(Math.round(seconds % 60))}`;
 }
 
-/** @@TIMER <left> <total> | off | done - the voice timer (test/clock_timer_utils.h). */
-function onTimerLine([first, second]) {
+/** @@TIMER <left> <total> [label] | off | done [label] - the voice timer
+    or reminder (test/clock_timer_utils.h). */
+function onTimerLine([first, second, ...rest]) {
   const board = state.board;
   if (first === "done") {
+    const label = [second, ...rest].filter(Boolean).join(" ");
     board.timer = null;
-    addConversationNote("⏰ Timer done - the board is ringing!", "tool");
+    addConversationNote(label ? `⏰ Reminder: ${label} - the board is ringing!` : "⏰ Timer done - the board is ringing!", "tool");
     const chip = document.getElementById("timer-chip");
     chip.hidden = false;
     chip.textContent = "⏰ Ringing!";
@@ -2544,7 +2549,8 @@ function onTimerLine([first, second]) {
     setTimeout(() => { chip.classList.remove("ringing"); renderTimer(); }, 4000);
     return;
   }
-  board.timer = first === "off" ? null : { endsAt: performance.now() + Number(first) * 1000, totalS: Number(second) || Number(first) };
+  board.timer = first === "off" ? null
+    : { endsAt: performance.now() + Number(first) * 1000, totalS: Number(second) || Number(first), label: rest.join(" ") };
   renderTimer();
 }
 
@@ -2561,7 +2567,7 @@ function renderTimer() {
     if (!board.timer) return;
     const left = Math.max(0, Math.ceil((board.timer.endsAt - performance.now()) / 1000));
     chip.hidden = false;
-    chip.textContent = `⏰ ${formatDuration(left)}`;
+    chip.textContent = `⏰ ${board.timer.label ? `${board.timer.label} · ` : ""}${formatDuration(left)}`;
   };
   tick();
   board.timerTicker = setInterval(tick, 1000);
@@ -2962,6 +2968,7 @@ const EXAMPLE_PHRASES = [
   ["🔊", "Set the volume to 30 percent"],
   ["🔊", "A bit louder"],
   ["⏰", "Set a timer for 20 seconds"],
+  ["📝", "Remind me in 30 seconds to check the oven"],
   ["🕒", "What time is it?"],
 ];
 document.getElementById("phrases").replaceChildren(...EXAMPLE_PHRASES.map(([icon, phrase]) => {

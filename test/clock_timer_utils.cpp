@@ -1,7 +1,9 @@
 #include "clock_timer_utils.h"
 
 #include <Arduino.h>
+#include <ctype.h>
 #include <math.h>
+#include <string.h>
 #include <time.h>
 #include "board_state_utils.h"
 #include "hands_free_utils.h"
@@ -21,9 +23,33 @@ const char kResponseCreateMessage[] = R"JSON({"type":"response.create"})JSON";
 constexpr size_t kToolResponseBufferSize = 256;  // function_call_output messages are tiny - no audio involved
 char tool_response_message[kToolResponseBufferSize];
 
+constexpr size_t kMaxLabelLength = 48;  // "check the oven" - a few words, said back out loud
+constexpr size_t kAnnouncementBufferSize = kMaxLabelLength + 160;  // template text + JSON punctuation, generous margin
+// The announcement's text goes inside a JSON string: setTimerLabel() keeps
+// only characters that need no escaping.
+constexpr char kAnnouncementTemplate[] =
+    R"JSON({"type":"response.create","response":{"instructions":"Say exactly and only the following, with no other words or tool calls: \"%s\""}})JSON";
+
 bool timer_armed = false;
 uint32_t timer_started_ms = 0;
 uint32_t timer_length_ms = 0;
+char timer_label[kMaxLabelLength + 1] = "";  // "" when the timer has no label
+char announcement_json[kAnnouncementBufferSize];
+
+/** Keeps a short, JSON-safe copy of the model's label: letters, digits,
+    spaces and simple punctuation only, cut to kMaxLabelLength. */
+void setTimerLabel(const char* label) {
+  size_t length = 0;
+  for (const char* c = label; *c != '\0' && length < kMaxLabelLength; c++) {
+    if (isalnum(static_cast<unsigned char>(*c)) || strchr(" ,.'-", *c) != nullptr) {
+      timer_label[length++] = *c;
+    }
+  }
+  while (length > 0 && timer_label[length - 1] == ' ') {
+    length--;
+  }
+  timer_label[length] = '\0';
+}
 
 /** Seconds until the timer rings, rounded up (0 once due). */
 uint32_t secondsLeft() {
@@ -92,7 +118,7 @@ bool handleSetTimerCall(JsonDocument& doc, WebSocketsClient& webSocket) {
     return false;
   }
   long seconds = lroundf(seconds_value.as<float>());
-  char output[64];
+  char output[64 + kMaxLabelLength];
   if (seconds <= 0) {
     bool was_armed = timer_armed;
     timer_armed = false;
@@ -104,28 +130,50 @@ bool handleSetTimerCall(JsonDocument& doc, WebSocketsClient& webSocket) {
     timer_armed = true;
     timer_started_ms = millis();
     timer_length_ms = static_cast<uint32_t>(seconds) * 1000;
-    esp32va_status::printProtocolLine("@@TIMER %ld %ld", seconds, seconds);
-    LOG_INFO("Timer set for %ld s (voice command).\n", seconds);
-    snprintf(output, sizeof(output), "Timer set for %ld seconds.", seconds);
+    setTimerLabel(args_doc["label"] | "");
+    announceTimerState();
+    LOG_INFO("Timer set for %ld s (voice command)%s%s.\n", seconds, timer_label[0] ? " - " : "", timer_label);
+    if (timer_label[0] != '\0') {
+      snprintf(output, sizeof(output), "Reminder set: %s, in %ld seconds.", timer_label, seconds);
+    } else {
+      snprintf(output, sizeof(output), "Timer set for %ld seconds.", seconds);
+    }
   }
   sendToolOutput(webSocket, call_id, output);
   return true;
 }
 
-void serviceTimer(bool board_idle) {
+bool serviceTimer(bool board_idle) {
   if (!timer_armed || secondsLeft() > 0 || !board_idle) {
-    return;
+    return false;
   }
   timer_armed = false;
   LOG_INFO("Timer done - ringing.\n");
-  esp32va_status::printProtocolLine("@@TIMER done");
+  if (timer_label[0] != '\0') {
+    esp32va_status::printProtocolLine("@@TIMER done %s", timer_label);
+  } else {
+    esp32va_status::printProtocolLine("@@TIMER done");
+  }
   ringAlarm();
+  return true;
+}
+
+void sendTimerAnnouncement(WebSocketsClient& webSocket) {
+  char spoken[kMaxLabelLength + 32];
+  if (timer_label[0] != '\0') {
+    snprintf(spoken, sizeof(spoken), "Time's up - %s.", timer_label);
+  } else {
+    snprintf(spoken, sizeof(spoken), "Time's up - your timer is done.");
+  }
+  snprintf(announcement_json, sizeof(announcement_json), kAnnouncementTemplate, spoken);
+  webSocket.sendTXT(announcement_json);
+  LOG_INFO("Timer announcement sent: \"%s\"\n", spoken);
 }
 
 void announceTimerState() {
   if (timer_armed) {
-    esp32va_status::printProtocolLine("@@TIMER %lu %lu", (unsigned long)secondsLeft(),
-                                      (unsigned long)(timer_length_ms / 1000));
+    esp32va_status::printProtocolLine("@@TIMER %lu %lu%s%s", (unsigned long)secondsLeft(),
+                                      (unsigned long)(timer_length_ms / 1000), timer_label[0] ? " " : "", timer_label);
   } else {
     esp32va_status::printProtocolLine("@@TIMER off");
   }
