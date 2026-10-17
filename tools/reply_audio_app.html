@@ -493,6 +493,27 @@
   .stage-close { position: absolute; top: 16px; right: 16px; }
   .stage-hint { position: absolute; bottom: 14px; font-size: 13px; color: var(--muted); }
 
+  /* ----- Session summary: the end of the demo, big ----- */
+  .summary { justify-content: flex-start; overflow-y: auto; gap: 26px; padding-top: 56px; }
+  .summary-title { font-size: 40px; font-weight: 750; margin: 0; }
+  .summary-sub { font-size: 18px; color: var(--muted); margin: -18px 0 0; }
+  .summary-tiles { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 16px; width: min(1100px, 100%); }
+  .summary-tile { background: var(--panel); border: 1px solid var(--border); border-radius: 16px; padding: 18px 16px; }
+  .summary-tile .value { font-family: inherit; text-align: center; font-size: 46px; font-weight: 750; line-height: 1.1; font-variant-numeric: tabular-nums; }
+  .summary-tile .label { font-size: 16px; font-weight: 600; margin-top: 4px; }
+  .summary-tile .sub { font-size: 14px; color: var(--muted); margin-top: 6px; }
+  .summary-section { width: min(1100px, 100%); text-align: left; }
+  .summary-section h3 { font-size: 15px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); margin: 0 0 10px; }
+  .summary-chips { display: flex; flex-wrap: wrap; gap: 10px; }
+  .summary-chip { display: flex; align-items: center; gap: 8px; padding: 8px 14px; border: 1px solid var(--border);
+                  border-radius: 999px; background: var(--panel); font-size: 17px; }
+  .summary-chip b { font-variant-numeric: tabular-nums; }
+  .summary-chip.zero { opacity: 0.5; }
+  @media (max-width: 760px) {
+    .summary-tiles { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .summary-tile .value { font-size: 34px; }
+  }
+
   /* ----- Log replay bar ----- */
   .replay-bar {
     position: fixed; left: 50%; bottom: 18px; transform: translateX(-50%); z-index: 40; display: flex; align-items: center;
@@ -711,6 +732,7 @@
     <div class="panel-head">
       <h2 id="usage-heading">Statistics</h2>
       <div class="panel-actions">
+        <button id="summary-open" type="button" title="The session's numbers and the board's settings, big - for the end of the demo">Summary</button>
         <button id="usage-export" type="button" title="Every command's timing as a spreadsheet (CSV)">Export CSV</button>
         <button id="usage-reset" type="button">Reset</button>
       </div>
@@ -803,6 +825,21 @@
   <div class="stage-exchange" id="stage-exchange"></div>
   <div class="stage-status" id="stage-status"></div>
   <div class="stage-hint">Space talks · Esc closes</div>
+</div>
+
+<div class="stage summary" id="summary" hidden role="dialog" aria-label="Session summary">
+  <button class="stage-close" id="summary-close" type="button">Close (Esc)</button>
+  <h2 class="summary-title">This session</h2>
+  <p class="summary-sub" id="summary-sub"></p>
+  <div class="summary-tiles" id="summary-tiles"></div>
+  <div class="summary-section">
+    <h3>What the assistant did</h3>
+    <div class="summary-chips" id="summary-tools"></div>
+  </div>
+  <div class="summary-section">
+    <h3>Board settings now (kept after a reset)</h3>
+    <div class="summary-chips" id="summary-settings"></div>
+  </div>
 </div>
 
 <div class="replay-bar" id="replay-bar" hidden role="status">
@@ -2755,6 +2792,7 @@ function renderUsage() {
     ["Last boot time", usage.bootMs === null ? "-" : seconds(usage.bootMs)],
   ];
   renderResponseChart();
+  if (!document.getElementById("summary").hidden) renderSummary();
   const list = document.getElementById("usage-stats");
   list.replaceChildren(...rows.map(([label, value]) => {
     const item = document.createElement("div");
@@ -2940,6 +2978,7 @@ const DEMO_SECTIONS = [
     ["bands", "ספי יום / ערב / לילה", "משנים ספים ולוחצים Apply thresholds."],
     ["persist", "ההגדרות נשמרות", "Reset ללוח, והעוצמה וההגדרות נשארות."],
     ["stats", "סטטיסטיקה", "חלונית Statistics: מספרים, גרף זמני תגובה, Export CSV."],
+    ["summary", "סיכום במסך מלא", "כפתור Summary: הפקודות, אחוז ההצלחה, זמן התגובה וההגדרות של הלוח, בגדול."],
   ]],
   ["מקרי קצה", [
     ["noise", "רעש לא מפעיל", "דפיקה על השולחן או מחיאת כפיים: נשאר Waiting for speech."],
@@ -3066,6 +3105,7 @@ function setStageOpen(open) {
   clearInterval(stageTicker);
   if (open) {
     setDemoOpen(false);
+    document.getElementById("summary").hidden = true;
     if (document.activeElement) document.activeElement.blur();  // so Space talks instead of re-pressing the button
     syncStage();
     stageTicker = setInterval(syncStage, 100);
@@ -3082,6 +3122,82 @@ document.addEventListener("keydown", (event) => {
   }
 });
 renderDemoChecklist();
+
+// ===== Session summary =====
+
+/** Fills the summary screen from the Statistics counters and the board's
+    last reported settings. */
+function renderSummary() {
+  const history = usage.history;
+  const answered = history.filter((turn) => turn.result === "pass").length;
+  const times = [...usage.responseMs].sort((a, b) => a - b);
+  const median = times.length ? (times.length % 2 ? times[(times.length - 1) / 2]
+    : (times[times.length / 2 - 1] + times[times.length / 2]) / 2) : null;
+  const seconds = (ms) => (ms / 1000).toFixed(1);
+  const span = history.length > 1 ? (history[history.length - 1].at - history[0].at) / 1000 : 0;
+
+  document.getElementById("summary-sub").textContent = history.length
+    ? `${history.length} commands` + (span >= 60 ? ` over ${Math.round(span / 60)} minutes` : "")
+    : "No commands yet - ask the assistant something first.";
+
+  const tile = (value, label, sub) => {
+    const item = document.createElement("div");
+    item.className = "summary-tile";
+    item.innerHTML = '<div class="value"></div><div class="label"></div><div class="sub"></div>';
+    item.querySelector(".value").textContent = value;
+    item.querySelector(".label").textContent = label;
+    item.querySelector(".sub").textContent = sub;
+    return item;
+  };
+  document.getElementById("summary-tiles").replaceChildren(
+    tile(String(usage.turns), "Commands", `${usage.handsFree} hands-free · ${usage.turns - usage.handsFree} with Talk`),
+    tile(history.length ? `${Math.round((answered / history.length) * 100)}%` : "-", "Answered",
+         usage.failed ? `${usage.failed} failed` : "none failed"),
+    tile(median === null ? "-" : `${seconds(median)} s`, "Median response",
+         times.length ? `fastest ${seconds(times[0])} s · slowest ${seconds(times[times.length - 1])} s` : "end of speech to first sound"),
+    tile(usage.bootMs === null ? "-" : `${seconds(usage.bootMs)} s`, "Startup", "power on to ready to talk"),
+  );
+
+  const toolCount = (name) => history.filter((turn) => turn.tool === name).length;
+  const chip = (icon, label, count) => {
+    const item = document.createElement("span");
+    item.className = `summary-chip${count === 0 ? " zero" : ""}`;
+    item.append(`${icon} ${label} `, Object.assign(document.createElement("b"), { textContent: `×${count}` }));
+    return item;
+  };
+  document.getElementById("summary-tools").replaceChildren(
+    chip("💬", "Just answered", history.filter((turn) => turn.tool === "-" && turn.result === "pass").length),
+    chip("💡", "Switched the LED", toolCount("set_board_state")),
+    chip("🌗", "Read the light sensor", toolCount("get_time_of_day")),
+    chip("🔊", "Changed the volume", toolCount("set_volume")),
+    chip("🕒", "Told the time", toolCount("get_current_time")),
+    chip("⏰", "Set a timer", toolCount("set_timer")),
+    chip("🤫", "Ignored a noise", usage.noisesIgnored),
+  );
+
+  const board = state.board;
+  const setting = (icon, text) => Object.assign(document.createElement("span"), { className: "summary-chip", textContent: `${icon} ${text}` });
+  const settings = [];
+  if (board.volume) settings.push(setting(board.volume.muted ? "🔇" : "🔊", board.volume.muted ? "Muted" : `Volume ${board.volume.percent}%`));
+  if (board.led) settings.push(setting("💡", `LED ${board.led.on ? "on" : "off"}, brightness ${board.led.brightness}%`));
+  if (board.vad) settings.push(setting("🎙️", `Hands-free ${board.vad.on ? "on" : "off"}, sensitivity ${board.vad.sensitivity} of 5`));
+  if (board.light) settings.push(setting("🌗", `Evening from ${board.light.eveningMin}, day from ${board.light.dayMin} (now ${board.light.band})`));
+  if (!settings.length) settings.push(setting("🔌", "Connect the board to see its settings."));
+  document.getElementById("summary-settings").replaceChildren(...settings);
+}
+
+function setSummaryOpen(open) {
+  document.getElementById("summary").hidden = !open;
+  if (open) {
+    setStageOpen(false);
+    setDemoOpen(false);
+    renderSummary();
+  }
+}
+
+document.getElementById("summary-open").addEventListener("click", () => setSummaryOpen(true));
+document.getElementById("summary-close").addEventListener("click", () => setSummaryOpen(false));
+document.addEventListener("keydown", (event) => { if (event.key === "Escape") setSummaryOpen(false); });
 
 // ===== Log replay =====
 
