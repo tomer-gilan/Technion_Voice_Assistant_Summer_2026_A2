@@ -783,7 +783,8 @@ const DISCARD_TEXT = {                 // @@VAD_EVENT discarded <reason> - vad_u
   unvoiced: "no voice in it (a cough, a laugh, running water?)",
   steady: "too steady to be speech (a machine, a bell?)",
 };
-const TOOL_LABELS = { set_board_state: "Switching the LED", get_time_of_day: "Reading the light sensor" };
+const TOOL_LABELS = { set_board_state: "Switching the LED", get_time_of_day: "Reading the light sensor",
+                      set_volume: "Changing the volume" };
 const STATE_TEXT = {
   offline: ["Not connected", "Connect the board to start."],
   unknown: ["Connected", "Waiting for the board to report its state…"],
@@ -2531,7 +2532,7 @@ let usage = newUsage();
 
 /** Empty counters. */
 function newUsage() {
-  return { turns: 0, failed: 0, handsFree: 0, responseMs: [], ledByVoice: 0, timeOfDayAsks: 0,
+  return { turns: 0, failed: 0, handsFree: 0, responseMs: [], ledByVoice: 0, timeOfDayAsks: 0, volumeByVoice: 0,
            lightBand: null, lightChanges: 0, noisesIgnored: 0, bootMs: null,
            history: [] };  // one entry per @@TIMING: { n, at, mode, tool, result, serverMs, firstSoundMs, doneMs }
 }
@@ -2552,6 +2553,7 @@ function onUsageTiming(fields) {
   if (fields.result !== "pass") usage.failed++;
   if (fields.mode === "vad") usage.handsFree++;
   if (fields.tool === "get_time_of_day") usage.timeOfDayAsks++;
+  if (fields.tool === "set_volume") usage.volumeByVoice++;
   const firstAudioMs = Number(fields.first_audio_after_rec_ms);
   if (firstAudioMs >= 0) usage.responseMs.push(firstAudioMs);  // -1: the turn had no reply audio
   const number = (key) => (Number(fields[key]) >= 0 ? Number(fields[key]) : null);
@@ -2588,6 +2590,7 @@ function renderUsage() {
     ["Fastest / slowest", times.length ? `${seconds(Math.min(...times))} / ${seconds(Math.max(...times))}` : "-"],
     ["LED changed by voice", `${usage.ledByVoice}`],
     ["Part-of-day questions", `${usage.timeOfDayAsks}`],
+    ["Volume changed by voice", `${usage.volumeByVoice}`],
     ["Light sensor changes", `${usage.lightChanges}` + (usage.lightBand ? ` (now ${usage.lightBand})` : "")],
     ["Noises ignored", `${usage.noisesIgnored}`],
     ["Last boot time", usage.bootMs === null ? "-" : seconds(usage.bootMs)],
