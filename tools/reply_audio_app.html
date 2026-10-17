@@ -382,6 +382,9 @@
   .steps span.now[data-step="speaking"] { color: var(--accent); }
   .timer-chip { font-size: 12px; padding: 3px 9px; border-radius: 999px; background: var(--warn-soft); color: var(--warn); font-weight: 700; font-variant-numeric: tabular-nums; }
   .timer-chip.ringing { animation: blink 0.5s infinite; }
+  .demo-clock { font-variant-numeric: tabular-nums; }
+  .demo-clock.late { border-color: var(--error); color: var(--error); }
+  .demo-clock-row { display: flex; align-items: center; gap: 8px; margin: 0 0 10px; font-size: 13px; color: var(--muted); }
   .talk-row { grid-column: 1 / -1; display: flex; gap: 14px; align-items: center; flex-wrap: wrap; }
   .ask-row { grid-column: 1 / -1; display: flex; gap: 8px; align-items: center; margin: -4px 0 0; }
   .ask-row input { flex: 1; min-width: 0; font: inherit; font-size: 13.5px; padding: 6px 10px; border-radius: 6px; border: 1px solid var(--border); background: var(--panel); color: var(--text); }
@@ -616,6 +619,7 @@
     </select>
     <button id="tour-open" type="button" title="A short walk through this page, for first-time users">? Tour</button>
     <button id="stage-open" type="button" title="A big view of the assistant for people watching from a distance (key F)">⛶ Stage view</button>
+    <button id="demo-clock" class="demo-clock" type="button" hidden title="Time since the demo started, and where the plan (docs/demo-plan.md) says you should be. Click to stop."></button>
     <button id="demo-open" type="button" aria-controls="demo-drawer" aria-expanded="false">✓ Demo checklist</button>
     <button id="connect" class="primary" type="button">Connect board</button>
     <span id="status" class="status-pill" role="status">Not connected</span>
@@ -915,6 +919,7 @@
   </div>
   <div class="demo-progress"><div id="demo-bar"></div></div>
   <p class="demo-count" id="demo-count"></p>
+  <div class="demo-clock-row"><button id="demo-clock-start" type="button">⏱ התחלת ההדגמה</button><span>שעון של 25 דקות למעלה, עם השלב לפי התוכנית</span></div>
   <ul class="demo-list" id="demo-list"></ul>
 </aside>
 
@@ -3338,6 +3343,41 @@ async function runSelfTest() {
 
 document.getElementById("selftest-run").addEventListener("click", runSelfTest);
 document.getElementById("selftest-close").addEventListener("click", () => { document.getElementById("selftest").hidden = true; });
+
+// ===== Demo clock =====
+
+/** The 25 minutes of docs/demo-plan.md: [from minute, what to show]. */
+const DEMO_PLAN = [
+  [0, "הדלקה ונורות"], [2, "שאלה בלחיצה"], [5, "Hands-free ורעש"], [8, "LED, עוצמה ותזכורת"],
+  [12, "חלק היום וזיכרון"], [14, "הקלטות SD"], [16, "מקרי קצה"], [20, "הגדרות נשמרות"], [23, "סטטיסטיקה וסיכום"],
+];
+const DEMO_LENGTH_MIN = 25;
+let demoClockStart = null;
+let demoClockTicker = null;
+
+function renderDemoClock() {
+  const clock = document.getElementById("demo-clock");
+  clock.hidden = demoClockStart === null;
+  if (demoClockStart === null) return;
+  const elapsedS = Math.floor((Date.now() - demoClockStart) / 1000);
+  const minutes = elapsedS / 60;
+  const step = [...DEMO_PLAN].reverse().find(([from]) => minutes >= from);
+  const late = minutes >= DEMO_LENGTH_MIN;
+  clock.classList.toggle("late", late);
+  const where = document.createElement("bdi");
+  where.textContent = late ? "הזמן נגמר" : step[1];
+  clock.replaceChildren(`⏱ ${pad(Math.floor(elapsedS / 60))}:${pad(elapsedS % 60)} · `, where);
+}
+
+function setDemoClock(running) {
+  clearInterval(demoClockTicker);
+  demoClockStart = running ? Date.now() : null;
+  if (running) demoClockTicker = setInterval(renderDemoClock, 1000);
+  renderDemoClock();
+}
+
+document.getElementById("demo-clock-start").addEventListener("click", () => { setDemoClock(true); setDemoOpen(false); });
+document.getElementById("demo-clock").addEventListener("click", () => setDemoClock(false));
 
 // ===== Stage view =====
 
