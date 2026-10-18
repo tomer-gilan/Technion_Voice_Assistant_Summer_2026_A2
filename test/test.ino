@@ -955,7 +955,11 @@ void askTypedQuestion(const String& text) {
     Serial.printf("ASK ignored - the assistant is busy, try again when it is Ready.\n");
     return;
   }
-  String question = text.substring(0, kMaxTypedQuestionLength);
+  unsigned int cut = min(text.length(), kMaxTypedQuestionLength);
+  while (cut > 0 && cut < text.length() && (static_cast<uint8_t>(text[cut]) & 0xC0) == 0x80) {
+    cut--;  // don't split a multi-byte (e.g. Hebrew) character - the server rejects broken UTF-8
+  }
+  String question = text.substring(0, cut);
   JsonDocument doc;
   doc["type"] = "conversation.item.create";
   JsonObject item = doc["item"].to<JsonObject>();

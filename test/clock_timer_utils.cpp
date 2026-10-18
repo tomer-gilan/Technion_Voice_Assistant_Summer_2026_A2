@@ -121,9 +121,10 @@ bool handleSetTimerCall(JsonDocument& doc, WebSocketsClient& webSocket) {
   JsonVariant seconds_value = args_doc["seconds"];
   if (err || !(seconds_value.is<int>() || seconds_value.is<float>())) {
     LOG_ERROR("set_timer called without a number of seconds: %s\n", arguments_json);
-    return false;
+    sendToolOutput(webSocket, call_id, "Error: seconds must be a number.");  // so the model still answers
+    return true;
   }
-  long seconds = lroundf(seconds_value.as<float>());
+  long seconds = lroundf(constrain(seconds_value.as<float>(), -1.0f, static_cast<float>(kMaxTimerSeconds)));
   char output[64 + kMaxLabelLength];
   if (seconds <= 0) {
     bool was_armed = timer_armed;

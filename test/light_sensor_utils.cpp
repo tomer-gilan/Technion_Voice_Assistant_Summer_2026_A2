@@ -32,6 +32,8 @@ constexpr char kLightBandsCommandWord[] = "LIGHT_BANDS";
 constexpr size_t kLightBandsCommandWordLen = sizeof(kLightBandsCommandWord) - 1;
 
 #ifdef LIGHT_SENSOR_PIN
+// ADC2 pins (GPIO 0, 2, 4, 12-15, 25-27) can't be read while Wi-Fi is on.
+static_assert(LIGHT_SENSOR_PIN >= 32 && LIGHT_SENSOR_PIN <= 39, "LIGHT_SENSOR_PIN must be an ADC1 pin (GPIO 32-39)");
 constexpr uint32_t kSensorReadIntervalMs = 1000;
 constexpr int kSamplesPerReading = 8;           // averaged - an ADC reading jitters by a few counts
 constexpr int kAnnounceChange = 150;            // on the 0-6142 scale: smaller moves don't print @@LIGHT

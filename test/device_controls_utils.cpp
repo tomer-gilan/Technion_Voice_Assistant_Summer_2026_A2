@@ -177,26 +177,32 @@ bool handleSetVolumeCall(JsonDocument& doc, WebSocketsClient& webSocket) {
 
   JsonDocument args_doc;
   DeserializationError err = deserializeJson(args_doc, arguments_json);
+  bool understood = true;
+  int requested = volume_percent;
+  JsonVariant percent = args_doc["percent"];
+  const char* step = args_doc["step"] | "";
   if (err) {
     LOG_ERROR("set_volume args parse failed: %s\n", err.c_str());
     LOG_DEBUG("Failed arguments string: %s\n", arguments_json);
-    return false;
-  }
-
-  int requested = -1;
-  JsonVariant percent = args_doc["percent"];
-  if (percent.is<int>() || percent.is<float>()) {  // 30, or 30.0 if the model sends it that way
-    requested = static_cast<int>(lroundf(percent.as<float>()));
+    understood = false;
+  } else if (percent.is<int>() || percent.is<float>()) {  // 30, or 30.0 if the model sends it that way
+    requested = static_cast<int>(lroundf(constrain(percent.as<float>(), 0.0f, static_cast<float>(kMaxPercent))));
+  } else if (strcasecmp(step, "up") == 0) {
+    requested = volume_percent + kVoiceVolumeStepPercent;
+  } else if (strcasecmp(step, "down") == 0) {
+    requested = volume_percent - kVoiceVolumeStepPercent;
   } else {
-    const char* step = args_doc["step"] | "";
-    if (strcasecmp(step, "up") == 0) {
-      requested = volume_percent + kVoiceVolumeStepPercent;
-    } else if (strcasecmp(step, "down") == 0) {
-      requested = volume_percent - kVoiceVolumeStepPercent;
-    } else {
-      LOG_ERROR("set_volume called with neither percent nor step up/down: %s\n", arguments_json);
-      return false;
-    }
+    LOG_ERROR("set_volume called with neither percent nor step up/down: %s\n", arguments_json);
+    understood = false;
+  }
+  if (!understood) {
+    // Still answer the call, so the model says something instead of going quiet.
+    snprintf(tool_response_message, kToolResponseBufferSize,
+             R"JSON({"type":"conversation.item.create","item":{"type":"function_call_output","call_id":"%s","output":"Error: give percent (0-100) or step up or down"}})JSON",
+             call_id);
+    webSocket.sendTXT(tool_response_message);
+    webSocket.sendTXT(kResponseCreateMessage);
+    return true;
   }
   volume_percent = static_cast<uint8_t>(constrain(requested, 0, kMaxPercent));
   is_muted = false;
