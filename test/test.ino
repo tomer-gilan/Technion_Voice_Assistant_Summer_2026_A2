@@ -410,15 +410,23 @@ void handleServerMessage(uint8_t* payload, size_t length) {
     return;
   }
 
+  // session.created / session.updated echo the whole session config back (all
+  // the tools and the instructions, ~6KB). Nothing in them is read, so they
+  // skip the full JSON parse - its JsonDocument would need several KB more
+  // heap, and a NoMemory there left the OpenAI stage stuck on "connecting".
+  bool is_session_event = have_type && (strcmp(type_buf, "session.created") == 0 ||
+                                        strcmp(type_buf, "session.updated") == 0);
   JsonDocument doc;
-  DeserializationError err = deserializeJson(doc, reinterpret_cast<const char*>(payload), length);
-  if (err) {
-    LOG_ERROR("JSON parse error: %s\n", err.c_str());
-    markReplyFailed("received a message that isn't valid JSON");
-    return;
+  if (!is_session_event) {
+    DeserializationError err = deserializeJson(doc, reinterpret_cast<const char*>(payload), length);
+    if (err) {
+      LOG_ERROR("JSON parse error: %s (%u bytes)\n", err.c_str(), (unsigned)length);
+      markReplyFailed("received a message that isn't valid JSON");
+      return;
+    }
   }
 
-  const char* type = doc["type"] | "(missing type)";
+  const char* type = is_session_event ? type_buf : (doc["type"] | "(missing type)");
 
   if (strcmp(type, "session.created") == 0) {
     LOG_DEBUG("Event type: session.created (server-initiated, before our own update).\n");
