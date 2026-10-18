@@ -3376,7 +3376,7 @@ const DEMO_PLAN = [
   [12, "חלק היום וזיכרון"], [14, "הקלטות SD"], [16, "מקרי קצה"], [20, "הגדרות נשמרות"], [23, "סטטיסטיקה וסיכום"],
 ];
 const DEMO_LENGTH_MIN = 25;
-let demoClockStart = null;
+var demoClockStart = null;  // var: renderSummary() may read it before this line runs
 let demoClockTicker = null;
 
 function renderDemoClock() {
@@ -3493,6 +3493,10 @@ function renderSummary() {
   document.getElementById("summary-sub").textContent = history.length
     ? `${history.length} commands` + (span >= 60 ? ` over ${Math.round(span / 60)} minutes` : "")
     : "No commands yet - ask the assistant something first.";
+  if (demoClockStart) {  // the demo clock from the checklist drawer is running
+    const demoS = Math.floor((Date.now() - demoClockStart) / 1000);
+    document.getElementById("summary-sub").textContent += ` · demo time ${Math.floor(demoS / 60)}:${pad(demoS % 60)}`;
+  }
 
   const tile = (value, label, sub) => {
     const item = document.createElement("div");
