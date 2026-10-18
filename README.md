@@ -130,7 +130,7 @@
 | `set_volume` | קובע עוצמה באחוזים, או מגביר / מנמיך ב-20% | `Set the volume to 30 percent`, `Louder` |
 | `get_current_time` | מחזיר את התאריך והשעה מהשעון של הלוח (מסונכרן מהאינטרנט) | `What time is it?` |
 | `get_board_status` | מחזיר את עוצמת ה-Wi-Fi, כמה דקות הלוח דלוק וכמה זיכרון פנוי | `How are you doing?`, `How is the Wi-Fi signal?` |
-| `set_timer` | מפעיל טיימר של 1 עד 3600 שניות, או מבטל אותו. עם תיאור קצר הוא תזכורת, שהעוזר אומר בקול כשהזמן נגמר | `Set a timer for 20 seconds`, `Remind me in 5 minutes to check the oven` |
+| `set_timer` | מפעיל טיימר של 1 עד 3600 שניות, או מבטל אותו. עם תיאור קצר הוא תזכורת, שהעוזר אומר בקול כשהזמן נגמר. אפשר גם להדליק או לכבות את האור כשהוא נגמר | `Set a timer for 20 seconds`, `Remind me in 5 minutes to check the oven`, `Turn off the light in 20 seconds` |
 
 ![מה קורה כשמבקשים להדליק את האור](docs/images/led-sequence.png)
 
