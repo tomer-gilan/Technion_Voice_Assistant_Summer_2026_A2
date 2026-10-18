@@ -389,7 +389,7 @@
   .talk-row { grid-column: 1 / -1; display: flex; gap: 14px; align-items: center; flex-wrap: wrap; }
   .ask-row { grid-column: 1 / -1; display: flex; gap: 8px; align-items: center; margin: -4px 0 0; }
   .ask-row input { flex: 1; min-width: 0; font: inherit; font-size: 13.5px; padding: 6px 10px; border-radius: 6px; border: 1px solid var(--border); background: var(--panel); color: var(--text); }
-  .ask-row input:disabled { opacity: 0.6; }
+  .ask-row input:read-only { opacity: 0.6; }
   .bubble.typed b::after { content: " · typed"; font-weight: 400; }
   button.talk {
     font-size: 17px; font-weight: 650; padding: 13px 26px; border-radius: 999px; border: 0;
@@ -699,7 +699,7 @@
           </div>
         </div>
         <form class="ask-row" id="ask-form" title="For a noisy room: the question goes to the assistant as text, and it answers out loud as usual">
-          <input id="ask-text" type="text" maxlength="200" placeholder="Or type a question…" autocomplete="off" disabled aria-label="Type a question">
+          <input id="ask-text" type="text" maxlength="200" placeholder="Or type a question…" autocomplete="off" readonly aria-label="Type a question">
           <button id="ask-send" type="submit" disabled>Ask</button>
         </form>
         <div class="vad-settings" id="vad-settings" hidden>
@@ -950,10 +950,11 @@ const SAFE_FILE_NAME = /^[A-Za-z0-9_-][A-Za-z0-9_.-]{0,30}$/;  // a plain name, 
 // Status and controls (step 28) - the board's side is test/status_report_utils.h.
 const STATUS_TAGS = new Set(["@@STAGE", "@@STATE", "@@RESULT", "@@MIC_LEVEL", "@@HEARD", "@@SAID", "@@WIFI",
                              "@@LED", "@@VOLUME", "@@LIGHT", "@@BEEP", "@@VAD", "@@VAD_LEVEL", "@@VAD_EVENT",
-                             "@@TIMING", "@@BOOT_TIMING", "@@TIMER"]);
+                             "@@TIMING", "@@BOOT_TIMING", "@@TIMER", "@@CLOCK"]);
 const STATUS_REQUEST_DELAY_MS = 400;   // after connecting, ask for the full picture
 const NO_STATUS_HINT_MS = 4000;        // no @@STATE by then: the board runs older firmware
-const TALK_START_TIMEOUT_MS = 2500;    // LISTEN sent but no "listening" yet: unlock Talk again
+const TALK_START_TIMEOUT_MS = 2500;
+const ASK_ECHO_TIMEOUT_MS = 20000;     // a typed question the board never echoed back stops counting as pending    // LISTEN sent but no "listening" yet: unlock Talk again
 const TOOL_MIN_SHOWN_MS = 1200;        // a tool call is over in milliseconds - keep it readable
 const ERROR_SHOWN_MS = 3000;           // how long a failed LISTEN shows as an error
 const CONTROL_SEND_DELAY_MS = 250;     // slider changes are sent once dragging pauses
@@ -1650,6 +1651,7 @@ async function onConnectClick() {
   } catch (error) {
     if (error.name !== "NotFoundError") appendLog(`(app) ${error.message}`);  // NotFoundError = chooser cancelled
   }
+  elements.connect.blur();  // else the next Space (= Talk) would click Disconnect
 }
 
 /** The red banner above the panels - for problems someone across the room should notice. */
@@ -2242,7 +2244,7 @@ function handleStatusLine(tag, rest) {
     case "HEARD":
       // Transcription can arrive after the reply - keep it first. Empty: OpenAI heard no words (a noise).
       addBubble("heard", rest.trim() ? rest : "(no words - just a sound)", board.cycleFirstBubble);
-      if (board.askPending && rest.trim() === board.askPending) {  // the board echoes a typed question back
+      if (board.askPending && rest.trim() === board.askPending && performance.now() - board.askPendingAt < ASK_ECHO_TIMEOUT_MS) {  // the board echoes a typed question back
         const typed = [...elements.bubbles.querySelectorAll(".bubble.heard")].pop();
         if (typed) typed.classList.add("typed");
         board.askPending = null;
@@ -2486,7 +2488,8 @@ function updateTalkButton() {
     ((board.pipeline && IDLE_STATES.has(board.pipeline.state)) || noReports);
   elements.talk.disabled = !ready;
   document.getElementById("selftest-run").disabled = !ready || noReports || selfTestRunning;
-  elements.askText.disabled = elements.askSend.disabled = !ready || noReports;
+  // readOnly, not disabled: a disabled field loses focus mid-typing, and the next keys would go to the page.
+  elements.askText.readOnly = elements.askSend.disabled = !ready || noReports;
   elements.talk.classList.toggle("is-listening", listening);
   if (!listening) {
     elements.talkLabel.textContent = board.talkPending ? "Starting…" : ready || !link.connected ? "Talk" : "Busy";
@@ -2516,6 +2519,7 @@ function onAskSubmit(event) {
   board.cycleFirstSaid = null;
   board.cycleTools.clear();
   board.askPending = text;
+  board.askPendingAt = performance.now();
   sendCommand(`ASK ${text}`);
   elements.askText.value = "";
 }
@@ -3892,8 +3896,12 @@ document.getElementById("gain-factor").textContent = `×${BOARD_MIC_GAIN}`;
 if ("showDirectoryPicker" in window) elements.saveLog.hidden = false;
 if ("serial" in navigator) {
   // Replugged board: reopen it, unless Disconnect was clicked.
-  navigator.serial.addEventListener("connect", (event) => {
-    if (!link.connected && state.reconnectWanted) connectPort(event.target);
+  // Windows often isn't ready to open the COM port the moment it appears, so try a few times.
+  navigator.serial.addEventListener("connect", async (event) => {
+    for (let attempt = 0; attempt < 4 && !link.connected && state.reconnectWanted; attempt++) {
+      if (attempt) await new Promise((resolve) => setTimeout(resolve, 700));
+      if (!link.connected && state.reconnectWanted) await connectPort(event.target);
+    }
   });
   // A port allowed earlier on this page's origin can reopen without the chooser.
   navigator.serial.getPorts().then((ports) => { if (ports.length === 1 && !link.connected) connectPort(ports[0]); });
