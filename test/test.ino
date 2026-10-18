@@ -126,6 +126,7 @@ struct CaptureProgress {
   uint32_t chunks_handled;
   uint32_t sent_json_bytes;
   unsigned long total_send_ms;
+  unsigned long total_sd_ms;  // appendMicSamples() - diagnostic, see sendCaptureChunk()
   unsigned long slowest_chunk_ms;
   unsigned long total_chunk_ms;
   uint32_t clipped_samples;
@@ -337,6 +338,9 @@ void recordCaptureMeasurements(const esp32va_mic_capture::CaptureStats& stats, l
            (unsigned)stats.max_read_gap_ms, (unsigned)mic_buffer_ms, (unsigned)samplesToMs(stats.max_backlog_samples),
            (unsigned)samplesToMs(stats.dropped_samples), (unsigned)kChunkMs, capture.slowest_chunk_ms,
            average_chunk_ms);
+  LOG_DEBUG("Chunk time split: sending %lu ms, SD %lu ms, everything else %lu ms (%u chunks).\n",
+            capture.total_send_ms, capture.total_sd_ms,
+            capture.total_chunk_ms - capture.total_send_ms - capture.total_sd_ms, (unsigned)capture.chunks_handled);
   last_turn_lost_mic_audio = stats.dropped_samples > 0 || stats.max_read_gap_ms >= mic_buffer_ms;
   if (last_turn_lost_mic_audio) {
     LOG_ERROR("Mic audio was lost this LISTEN - %u ms dropped from the ring, longest read gap %u ms.\n",
@@ -798,16 +802,26 @@ void sendCaptureChunk() {
   int chunk_level_dbfs = chunk_rms >= 1.0 ? static_cast<int>(lround(20.0 * log10(chunk_rms / 32768.0))) : -96;
   esp32va_status::printProtocolLine("@@MIC_LEVEL %d", chunk_level_dbfs);
 
+  unsigned long send_ms = 0;
   if (encoded) {
     memcpy(json_message + message_length, kAppendMessageSuffix, sizeof(kAppendMessageSuffix));  // with its '\0'
     message_length += sizeof(kAppendMessageSuffix) - 1;
     unsigned long send_started_ms = millis();
     webSocket.sendTXT(json_message, message_length);
-    capture.total_send_ms += millis() - send_started_ms;
+    send_ms = millis() - send_started_ms;
+    capture.total_send_ms += send_ms;
     capture.sent_json_bytes += message_length;
     capture.chunks_sent++;
   }
+  unsigned long sd_started_ms = millis();
   esp32va_command_recorder::appendMicSamples(mic_chunk, sample_count);
+  unsigned long sd_ms = millis() - sd_started_ms;
+  capture.total_sd_ms += sd_ms;
+  if (send_ms + sd_ms > 2 * kChunkMs) {
+    LOG_DEBUG("Slow chunk #%u: send %lu ms, SD %lu ms, %u bytes, RSSI %d, free heap %u.\n",
+              (unsigned)capture.chunks_handled + 1, send_ms, sd_ms, (unsigned)message_length, (int)WiFi.RSSI(),
+              (unsigned)ESP.getFreeHeap());
+  }
   capture.samples_sent += sample_count;
   capture.chunks_handled++;
   unsigned long handling_ms = millis() - handling_started_ms;
@@ -880,6 +894,13 @@ void serviceCapture() {
   }
   uint32_t samples_ready = esp32va_mic_capture::captureSamplesReady();
   bool capture_complete = esp32va_mic_capture::captureMode() == esp32va_mic_capture::CaptureMode::kDraining;
+  static unsigned long last_progress_log_ms = 0;  // diagnostic: where a long capture stands, every 2 s
+  if (millis() - last_progress_log_ms >= 2000) {
+    last_progress_log_ms = millis();
+    LOG_DEBUG("Capture in progress: mic mode %d, %u ms waiting to be sent, %u chunks sent so far.\n",
+              (int)esp32va_mic_capture::captureMode(), (unsigned)samplesToMs(samples_ready),
+              (unsigned)capture.chunks_sent);
+  }
   if (samples_ready >= kChunkSamples || (capture_complete && samples_ready > 0)) {
     sendCaptureChunk();
   }
