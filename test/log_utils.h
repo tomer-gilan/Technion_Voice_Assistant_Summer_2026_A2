@@ -67,7 +67,7 @@ extern LogLevel g_log_level;
 #define LOG(level, level_str, fmt, ...) \
   do { \
     if (esp32va_log::g_log_level >= (level)) { \
-      Serial.printf("[" level_str "] [%s:%d] " fmt, __func__, __LINE__, ##__VA_ARGS__); \
+      Serial.printf("[%lu ms][" level_str "] [%s:%d] " fmt, millis(), __func__, __LINE__, ##__VA_ARGS__); \
     } \
   } while (0)
 

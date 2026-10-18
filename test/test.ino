@@ -420,7 +420,9 @@ void handleServerMessage(uint8_t* payload, size_t length) {
   if (!is_session_event) {
     DeserializationError err = deserializeJson(doc, reinterpret_cast<const char*>(payload), length);
     if (err) {
-      LOG_ERROR("JSON parse error: %s (%u bytes)\n", err.c_str(), (unsigned)length);
+      LOG_ERROR("JSON parse error: %s (%u bytes, type %s, free heap %u, largest block %u)\n", err.c_str(),
+                (unsigned)length, have_type ? type_buf : "?", (unsigned)ESP.getFreeHeap(),
+                (unsigned)ESP.getMaxAllocHeap());
       markReplyFailed("received a message that isn't valid JSON");
       return;
     }
@@ -824,6 +826,8 @@ void finishCapture() {
   webSocket.sendTXT(kCommitMessage);
   webSocket.sendTXT(kResponseCreateMessage);
   unsigned long committed_ms = millis();
+  LOG_DEBUG("Commit + response.create sent (%u chunks). Free heap %u, largest block %u.\n",
+            (unsigned)capture.chunks_sent, (unsigned)ESP.getFreeHeap(), (unsigned)ESP.getMaxAllocHeap());
   response_in_flight = true;
   esp32va_measure::markTurnEvent(esp32va_measure::TurnEvent::kRecordingDone);
 
@@ -1077,6 +1081,9 @@ void checkReplyTimeout() {
               kReplyTimeoutMs);
     return;
   }
+  LOG_ERROR("Reply timeout: connected %d, session ready %d, free heap %u, largest block %u.\n",
+            (int)webSocket.isConnected(), (int)session_ready, (unsigned)ESP.getFreeHeap(),
+            (unsigned)ESP.getMaxAllocHeap());
   char reason[64];
   snprintf(reason, sizeof(reason), "no server activity for %lu ms", kReplyTimeoutMs);
   markReplyFailed(reason);
