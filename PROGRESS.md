@@ -88,7 +88,8 @@
 | `3820c1c` | צילום המסך שוב, עם 32 הפריטים בצ'ק-ליסט |
 | `e1b3a2a` | רשימת הבדיקות על הלוח והמסמכים שהשתנו מעודכנות |
 | `e1ff192` | בדיקה של הטיימר במחשב (stubs) |
-| הבא אחריו | מגבלות ידועות ב-README: כיוון ה-LDR ופיני ADC1, טיימר בלי אינטרנט |
+| `31f73da` | מגבלות ידועות ב-README: כיוון ה-LDR ופיני ADC1, טיימר בלי אינטרנט |
+| הבא אחריו | מסמך חדש `docs/questions.md`: שאלות צפויות מהבוחנים ותשובות קצרות מהמספרים שב-README |
 
 ## מה צריך לבדוק על הלוח
 
@@ -147,7 +148,7 @@
 
 ## מסמכים שהשתנו
 
-`README.md`, `docs/user-stories.md`, `docs/edge-cases.md` וה-PDF-ים שלהם השתנו, ונוספו `docs/images/demo.gif`, `docs/images/wiring.png`, `docs/images/repo-qr.png`, `docs/architecture.md`, `docs/versions.md`, `docs/demo-plan.md` ו-`docs/quick-start.md` (שני האחרונים גם כ-PDF). גם `docs/images/control-center.png` הוחלף. העותקים בתיקייה "מסמכים נלווים להגשת פרוייקט" בשולחן העבודה לא עודכנו, וצריך לסנכרן אותם.
+`README.md`, `docs/user-stories.md`, `docs/edge-cases.md` וה-PDF-ים שלהם השתנו, ונוספו `docs/images/demo.gif`, `docs/images/wiring.png`, `docs/images/repo-qr.png`, `docs/architecture.md`, `docs/versions.md`, `docs/questions.md`, `docs/demo-plan.md` ו-`docs/quick-start.md` (שני האחרונים גם כ-PDF). גם `docs/images/control-center.png` הוחלף. העותקים בתיקייה "מסמכים נלווים להגשת פרוייקט" בשולחן העבודה לא עודכנו, וצריך לסנכרן אותם.
 
 ## עוד לא נעשה
 
