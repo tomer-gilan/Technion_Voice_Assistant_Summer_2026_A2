@@ -889,6 +889,21 @@ void serviceCapture() {
       LOG_ERROR("Unexpected capture event %d - ignored.\n", (int)event);
       break;
   }
+  // The mic task drops a non-speech utterance by going back to kArmed and
+  // queueing kCaptureDiscarded. When that lands after the takeCaptureEvent()
+  // above but before serviceHandsFree() in the same loop() pass (the mic task
+  // runs at a higher priority on this core), serviceHandsFree() sees kArmed
+  // while is_capturing still holds and stops the mic - and stopCapture()
+  // clears the queued event, so the recording never ended (found on the
+  // board: clapping during hands-free left it on "Listening" for good).
+  if (is_capturing && capture.mode == esp32va_measure::ListenMode::kVoice) {
+    esp32va_mic_capture::CaptureMode mic_mode = esp32va_mic_capture::captureMode();
+    if (mic_mode == esp32va_mic_capture::CaptureMode::kArmed || mic_mode == esp32va_mic_capture::CaptureMode::kOff) {
+      LOG_INFO("The mic stopped this hands-free recording without saying why - treating it as discarded.\n");
+      handleVoiceDiscarded();
+      return;
+    }
+  }
   if (!is_capturing) {
     return;
   }
