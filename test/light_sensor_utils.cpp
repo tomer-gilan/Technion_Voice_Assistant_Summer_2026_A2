@@ -50,7 +50,6 @@ int readLightSensor() {
 }
 #endif
 
-const char kResponseCreateMessage[] = R"JSON({"type":"response.create"})JSON";
 constexpr uint32_t kToolResponseBufferSize = 256;  // function_call_output messages are tiny - no audio involved
 char tool_response_message[kToolResponseBufferSize];
 
@@ -207,8 +206,7 @@ bool handleGetTimeOfDayCall(JsonDocument& doc, WebSocketsClient& webSocket) {
            R"JSON({"type":"conversation.item.create","item":{"type":"function_call_output","call_id":"%s","output":"It is currently %s."}})JSON",
            call_id, part_of_day);
   webSocket.sendTXT(tool_response_message);
-  webSocket.sendTXT(kResponseCreateMessage);
-  LOG_DEBUG("Sent function_call_output (\"It is currently %s.\") - asked the model for a spoken answer.\n",
+  LOG_DEBUG("Sent function_call_output (\"It is currently %s.\").\n",
             part_of_day);
   return true;
 }

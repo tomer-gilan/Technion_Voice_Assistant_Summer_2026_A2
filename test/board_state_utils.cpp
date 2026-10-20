@@ -10,7 +10,6 @@
 #include "status_report_utils.h"
 
 namespace {
-const char kResponseCreateMessage[] = R"JSON({"type":"response.create"})JSON";
 constexpr uint32_t kToolResponseBufferSize = 256;  // function_call_output messages are tiny - no audio involved
 char tool_response_message[kToolResponseBufferSize];
 
@@ -125,7 +124,6 @@ bool handleSetBoardStateCall(JsonDocument& doc, WebSocketsClient& webSocket) {
            R"JSON({"type":"conversation.item.create","item":{"type":"function_call_output","call_id":"%s","output":"%s"}})JSON",
            call_id, output);
   webSocket.sendTXT(tool_response_message);
-  webSocket.sendTXT(kResponseCreateMessage);
-  LOG_DEBUG("Sent function_call_output - asked the model for a spoken confirmation.\n");
+  LOG_DEBUG("Sent function_call_output.\n");
   return true;
 }

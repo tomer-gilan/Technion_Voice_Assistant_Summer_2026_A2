@@ -9,7 +9,6 @@ namespace esp32va_info {
 
 namespace {
 
-const char kResponseCreateMessage[] = R"JSON({"type":"response.create"})JSON";
 constexpr size_t kToolResponseBufferSize = 320;  // the JSON around it, a ~40-char call_id and the ~90-char output
 char tool_response_message[kToolResponseBufferSize];
 
@@ -47,8 +46,7 @@ bool handleGetBoardStatusCall(JsonDocument& doc, WebSocketsClient& webSocket) {
            R"JSON({"type":"conversation.item.create","item":{"type":"function_call_output","call_id":"%s","output":"%s"}})JSON",
            call_id, output);
   webSocket.sendTXT(tool_response_message);
-  webSocket.sendTXT(kResponseCreateMessage);
-  LOG_DEBUG("Sent function_call_output - asked the model for a spoken answer.\n");
+  LOG_DEBUG("Sent function_call_output.\n");
   return true;
 }
 

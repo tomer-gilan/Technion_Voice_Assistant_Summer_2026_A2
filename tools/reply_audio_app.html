@@ -397,6 +397,10 @@
     justify-content: center; min-width: 210px;
   }
   button.talk svg { width: 20px; height: 20px; }
+  button.cancel-talk {
+    font-size: 15px; font-weight: 600; padding: 12px 22px; border-radius: 999px;
+    border: 2px solid var(--rec); background: transparent; color: var(--rec);
+  }
   button.talk.is-listening, button.talk.is-listening:disabled {
     /* --progress: how much of the recording is done (manual) or used (hands-free, of its 10 s cap) */
     background: linear-gradient(to right, color-mix(in srgb, var(--on-accent) 28%, transparent) var(--progress, 0%),
@@ -688,6 +692,7 @@
         </div>
         <div class="talk-row">
           <button class="talk" id="talk" type="button" disabled><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></svg><span id="talk-label">Talk</span></button>
+          <button class="cancel-talk" id="cancel-talk" type="button" hidden title="Stop this LISTEN - nothing more is sent or answered">Cancel</button>
           <label class="hands-free" id="hands-free" hidden title="The board listens by itself and records from just before you start talking until you stop. Talk still records a fixed 3 s.">
             <span class="switch"><input id="vad" type="checkbox" disabled><span class="knob"></span></span>
             Hands-free
@@ -1514,6 +1519,7 @@ const elements = {
   askText: document.getElementById("ask-text"),
   askSend: document.getElementById("ask-send"),
   talkLabel: document.getElementById("talk-label"),
+  cancelTalk: document.getElementById("cancel-talk"),
   micFill: document.getElementById("mic-fill"),
   meterName: document.getElementById("meter-name"),
   meterFloor: document.getElementById("meter-floor"),
@@ -2236,6 +2242,12 @@ function handleStatusLine(tag, rest) {
       break;
     }
     case "RESULT":
+      if (words[0] === "cancel") {  // the Cancel button (firmware CANCEL)
+        elements.result.className = "result";
+        elements.result.textContent = `LISTEN #${words[1]} cancelled.`;
+        addConversationNote(`LISTEN #${words[1]} cancelled - no answer.`);
+        break;
+      }
       showResult(words[0] === "pass", words[1], words.slice(2).join(" "));
       break;
     case "MIC_LEVEL":
@@ -2491,6 +2503,10 @@ function updateTalkButton() {
   // readOnly, not disabled: a disabled field loses focus mid-typing, and the next keys would go to the page.
   elements.askText.readOnly = elements.askSend.disabled = !ready || noReports;
   elements.talk.classList.toggle("is-listening", listening);
+  // Cancel: only while a LISTEN is recording, waiting for or saying its answer (not the greeting/timer/typed).
+  const shown = board.shownState;
+  elements.cancelTalk.hidden = !link.connected ||
+    !(["listening", "processing", "tool"].includes(shown) || (shown === "speaking" && !(board.pipeline && board.pipeline.detail)));
   if (!listening) {
     elements.talkLabel.textContent = board.talkPending ? "Starting…" : ready || !link.connected ? "Talk" : "Busy";
   }
@@ -3833,6 +3849,7 @@ elements.downloadLog.addEventListener("click", onDownloadLogClick);
 elements.clearLog.addEventListener("click", onClearLogClick);
 elements.deleteButton.addEventListener("click", onDeleteClick);
 elements.talk.addEventListener("click", onTalkClick);
+elements.cancelTalk.addEventListener("click", () => sendCommand("CANCEL"));
 document.getElementById("ask-form").addEventListener("submit", onAskSubmit);
 document.addEventListener("keydown", onKeyDown);
 elements.toggleTerminal.addEventListener("click", onTerminalToggle);

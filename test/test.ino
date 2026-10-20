@@ -85,6 +85,7 @@ const char kCommitMessage[] = R"JSON({"type":"input_audio_buffer.commit"})JSON";
 const char kResponseCreateMessage[] = R"JSON({"type":"response.create"})JSON";
 // Forgets the audio already appended for an utterance that wasn't speech.
 const char kClearMessage[] = R"JSON({"type":"input_audio_buffer.clear"})JSON";
+const char kCancelResponseMessage[] = R"JSON({"type":"response.cancel"})JSON";
 const char kAppendMessagePrefix[] = R"JSON({"type":"input_audio_buffer.append","audio":")JSON";
 const char kAppendMessageSuffix[] = R"JSON("})JSON";
 
@@ -147,6 +148,7 @@ bool reply_received_this_cycle = false;
 bool transcript_in_progress = false;   // a response.output_audio_transcript.delta stream is currently mid-line
 bool response_fully_received = false;  // the final (post-tool-call, if any) response.done arrived - ring buffer may still be draining
 bool function_call_turn_pending = false;  // true from a finalized tool call until its function-call-only response.done is consumed
+bool dropping_reply_audio = false;  // CANCEL stopped a response that's still coming - its audio, text and tool calls are skipped
 bool response_in_flight = false;   // a response.create (greeting or LISTEN) hasn't had its final response.done yet
 uint32_t listen_cycle = 0;         // deliberately never reset - keeps counting across reconnects for a soak test
 uint32_t connection_count = 0;     // how many times WStype_CONNECTED has fired this run (1 = first connect, 2+ = reconnect)
@@ -396,6 +398,9 @@ void handleServerMessage(uint8_t* payload, size_t length) {
       LOG_ERROR("Reply audio arrived while the mic was listening - dropped it.\n");
       return;
     }
+    if (dropping_reply_audio) {
+      return;  // a cancelled reply - not played
+    }
     esp32va_reply_recorder::noteReplyAudioArriving();  // before the ring write, so the tap catches it
     speech_in_progress = true;
     if (awaiting_reply) {
@@ -486,6 +491,10 @@ void handleServerMessage(uint8_t* payload, size_t length) {
 
   if (strcmp(type, "response.function_call_arguments.done") == 0) {
     const char* function_name = doc["name"] | "(unknown)";
+    if (dropping_reply_audio) {
+      LOG_INFO("Skipped %s - the LISTEN was cancelled.\n", function_name);
+      return;
+    }
     LOG_DEBUG("Event type: response.function_call_arguments.done -> %s(%s)\n",
               function_name, (const char*)(doc["arguments"] | "{}"));
     bool handled = false;
@@ -517,6 +526,9 @@ void handleServerMessage(uint8_t* payload, size_t length) {
     // Raw streamed content (the model's own spoken-reply transcript) - always
     // printed, never gated behind a log level. See log_utils.h.
     const char* delta = doc["delta"] | "";
+    if (dropping_reply_audio) {
+      return;  // a cancelled reply's text isn't shown either
+    }
     if (awaiting_reply) {
       esp32va_measure::markTurnEvent(esp32va_measure::TurnEvent::kFirstTranscript);
     }
@@ -533,6 +545,9 @@ void handleServerMessage(uint8_t* payload, size_t length) {
   }
 
   if (strcmp(type, "response.output_audio_transcript.done") == 0) {
+    if (dropping_reply_audio) {
+      return;
+    }
     if (transcript_in_progress) {
       esp32va_status::endRawLine();
       transcript_in_progress = false;
@@ -586,16 +601,27 @@ void handleServerMessage(uint8_t* payload, size_t length) {
     // Whatever the status, no more audio is coming for this response. A
     // function-call-only response.done has no recording open - a no-op.
     esp32va_reply_recorder::noteReplyFinished();
+    if (dropping_reply_audio) {  // the response CANCEL stopped is over
+      dropping_reply_audio = false;
+      response_in_flight = false;
+      function_call_turn_pending = false;
+      LOG_INFO("The cancelled response is over (%s).\n", status);
+      return;
+    }
     if (strcmp(status, "failed") == 0) {
       response_in_flight = false;
       const char* error_message = doc["response"]["status_details"]["error"]["message"] | "(no error detail)";
       markReplyFailed(error_message);
     } else if (function_call_turn_pending) {
       // This response.done was for the function-call-only turn (no audio) -
-      // we already sent function_call_output and a follow-up response.create
-      // in handleSetBoardStateCall(). The *next* response.done is the
+      // every call in it already sent its function_call_output. Only now,
+      // with that response over, is the follow-up response.create sent -
+      // once, however many calls it held (one per call, sent while the
+      // response was still running, got "Conversation already has an
+      // active response in progress"). The *next* response.done is the
       // model's real spoken confirmation, which does count as the reply.
       function_call_turn_pending = false;
+      webSocket.sendTXT(kResponseCreateMessage);
       esp32va_measure::markTurnEvent(esp32va_measure::TurnEvent::kToolResponseDone);
       LOG_INFO("Function call done - waiting for spoken confirmation.\n");
     } else {
@@ -615,6 +641,12 @@ void handleServerMessage(uint8_t* payload, size_t length) {
 
   if (strcmp(type, "error") == 0) {
     const char* message = doc["error"]["message"] | "(no message)";
+    const char* code = doc["error"]["code"] | "";
+    if (dropping_reply_audio && strcmp(code, "response_cancel_not_active") == 0) {
+      dropping_reply_audio = false;  // the response had already ended - nothing left to drop
+      response_in_flight = false;
+      return;
+    }
     LOG_ERROR("Error: %s\n", message);
     markReplyFailed(message);
     return;
@@ -654,6 +686,7 @@ void onWebSocketEvent(WStype_t type, uint8_t* payload, size_t length) {
       }
       session_ready = false;
       response_in_flight = false;
+      dropping_reply_audio = false;
       if (is_capturing) {
         abortCapture("disconnected while recording");  // stops the mic (no send happens here)
       }
@@ -693,6 +726,7 @@ void beginListenTurn(esp32va_measure::ListenMode mode) {
   reply_received_this_cycle = false;
   response_fully_received = false;
   function_call_turn_pending = false;
+  dropping_reply_audio = false;
   speech_in_progress = false;
   capture = {};
   capture.mode = mode;
@@ -752,6 +786,40 @@ void handleVoiceDiscarded() {
   is_capturing = false;
   listen_cycle--;
   esp32va_hands_free::noteUtteranceDiscarded(stats.discard_reason, samplesToMs(stats.captured_samples));
+}
+
+/** CANCEL (the app's Cancel button): drops the LISTEN in progress, so no
+    reply is heard. While recording: the mic stops, OpenAI forgets the audio
+    sent so far and the recording is deleted. Once sent: the response is
+    cancelled if it's still coming (its tool calls are skipped) and nothing
+    more of it is played. */
+void cancelListenTurn() {
+  if (is_capturing) {
+    esp32va_mic_capture::stopCapture();
+    if (capture.chunks_sent > 0) {
+      webSocket.sendTXT(kClearMessage);
+    }
+    esp32va_command_recorder::cancelVoiceCommand();
+    is_capturing = false;
+  } else if (awaiting_reply) {
+    if (response_in_flight) {
+      webSocket.sendTXT(kCancelResponseMessage);
+      dropping_reply_audio = true;
+    }
+    esp32va_reply_recorder::noteReplyAborted();  // keeps what was saved; must come before the ring reset
+    resetRingBuffer();
+  } else {
+    Serial.printf("CANCEL ignored - no LISTEN to cancel.\n");
+    return;
+  }
+  awaiting_reply = false;
+  reply_received_this_cycle = true;
+  function_call_turn_pending = false;
+  speech_in_progress = false;
+  esp32va_hands_free::holdOff();
+  Serial.printf("===== LISTEN #%u CANCELLED =====\n", listen_cycle);
+  esp32va_status::printProtocolLine("@@RESULT cancel %u", listen_cycle);
+  printNextTurnHint();
 }
 
 /** Takes up to one chunk of captured audio, saves the mic's own samples to
@@ -1076,8 +1144,12 @@ void checkForSerialCommand() {
     askTypedQuestion(command.substring(4));
     return;
   }
+  if (command.equalsIgnoreCase("CANCEL")) {
+    cancelListenTurn();
+    return;
+  }
   if (!command.equalsIgnoreCase("LISTEN")) {
-    Serial.printf("Unknown command \"%s\" - expected LISTEN, ASK <text>, STATUS, CLOCK, VAD on|off, VAD_SENSITIVITY <1-5>, VAD_HANGOVER <600-1500>, LIGHT <0-%d>, LIGHT_BANDS <evening> <day>, VOLUME <0-100>, MUTE on|off, BEEP, LED on|off, LED_BRIGHTNESS <0-100>, LIST, GET <name>, DELETE <name> or DELETE_ALL [replies|commands].\n",
+    Serial.printf("Unknown command \"%s\" - expected LISTEN, CANCEL, ASK <text>, STATUS, CLOCK, VAD on|off, VAD_SENSITIVITY <1-5>, VAD_HANGOVER <600-1500>, LIGHT <0-%d>, LIGHT_BANDS <evening> <day>, VOLUME <0-100>, MUTE on|off, BEEP, LED on|off, LED_BRIGHTNESS <0-100>, LIST, GET <name>, DELETE <name> or DELETE_ALL [replies|commands].\n",
              command.c_str(), esp32va_light_sensor::kMaxLightSensorValue);
     return;
   }
@@ -1112,6 +1184,7 @@ void checkReplyTimeout() {
     return;
   }
   response_in_flight = false;  // a response that silent isn't coming any more
+  dropping_reply_audio = false;
   if (!awaiting_reply) {
     LOG_ERROR("No word from the server for %lu ms about the last response - not waiting for it any more.\n",
               kReplyTimeoutMs);

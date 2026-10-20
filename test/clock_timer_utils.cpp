@@ -19,7 +19,6 @@ constexpr long kMaxTimerSeconds = 3600;
 constexpr int kAlarmBeeps = 3;
 constexpr uint32_t kAlarmGapMs = 150;       // LED off, silence, between two beeps
 constexpr int kEarliestPlausibleYear = 2024;  // before this the clock was never synced
-const char kResponseCreateMessage[] = R"JSON({"type":"response.create"})JSON";
 constexpr size_t kToolResponseBufferSize = 384;  // the JSON around it, a ~40-char call_id and the longest output (~140 chars), with room to spare
 char tool_response_message[kToolResponseBufferSize];
 
@@ -31,6 +30,7 @@ constexpr char kAnnouncementTemplate[] =
     R"JSON({"type":"response.create","response":{"instructions":"Say exactly and only the following, with no other words or tool calls: \"%s\""}})JSON";
 
 bool timer_armed = false;
+bool timer_waiting_to_start = false;  // set by voice: starts once the board is done saying so
 uint32_t timer_started_ms = 0;
 uint32_t timer_length_ms = 0;
 char timer_label[kMaxLabelLength + 1] = "";  // "" when the timer has no label
@@ -54,18 +54,20 @@ void setTimerLabel(const char* label) {
 
 /** Seconds until the timer rings, rounded up (0 once due). */
 uint32_t secondsLeft() {
+  if (timer_waiting_to_start) {
+    return timer_length_ms / 1000;
+  }
   uint32_t elapsed_ms = millis() - timer_started_ms;
   return elapsed_ms >= timer_length_ms ? 0 : (timer_length_ms - elapsed_ms + 999) / 1000;
 }
 
-/** Sends a tool's output text and asks the model to say it. */
+/** Sends a tool's output text (test.ino asks the model to say it once the call's response is done). */
 void sendToolOutput(WebSocketsClient& webSocket, const char* call_id, const char* output) {
   snprintf(tool_response_message, kToolResponseBufferSize,
            R"JSON({"type":"conversation.item.create","item":{"type":"function_call_output","call_id":"%s","output":"%s"}})JSON",
            call_id, output);
   webSocket.sendTXT(tool_response_message);
-  webSocket.sendTXT(kResponseCreateMessage);
-  LOG_DEBUG("Sent function_call_output (\"%s\") - asked the model for a spoken answer.\n", output);
+  LOG_DEBUG("Sent function_call_output (\"%s\").\n", output);
 }
 
 /** Blinks the LED and beeps kAlarmBeeps times, then puts the LED back. */
@@ -129,6 +131,7 @@ bool handleSetTimerCall(JsonDocument& doc, WebSocketsClient& webSocket) {
   if (seconds <= 0) {
     bool was_armed = timer_armed;
     timer_armed = false;
+    timer_waiting_to_start = false;
     timer_light_action = -1;
     esp32va_status::printProtocolLine("@@TIMER off");
     LOG_INFO("Timer cancelled (voice command).\n");
@@ -136,7 +139,7 @@ bool handleSetTimerCall(JsonDocument& doc, WebSocketsClient& webSocket) {
   } else {
     seconds = constrain(seconds, 1L, kMaxTimerSeconds);
     timer_armed = true;
-    timer_started_ms = millis();
+    timer_waiting_to_start = true;  // serviceTimer() starts it once the confirmation has been said
     timer_length_ms = static_cast<uint32_t>(seconds) * 1000;
     setTimerLabel(args_doc["label"] | "");
     // "Turn off the light in 10 minutes": switch the LED when it rings.
@@ -145,8 +148,7 @@ bool handleSetTimerCall(JsonDocument& doc, WebSocketsClient& webSocket) {
     if (timer_light_action >= 0 && timer_label[0] == '\0') {
       setTimerLabel(timer_light_action ? "light on" : "light off");
     }
-    announceTimerState();
-    LOG_INFO("Timer set for %ld s (voice command)%s%s.\n", seconds, timer_label[0] ? " - " : "", timer_label);
+    LOG_INFO("Timer set for %ld s (voice command)%s%s - starts once that's been said.\n", seconds, timer_label[0] ? " - " : "", timer_label);
     if (timer_label[0] != '\0') {
       snprintf(output, sizeof(output), "Reminder set: %s, in %ld seconds.", timer_label, seconds);
     } else {
@@ -158,6 +160,15 @@ bool handleSetTimerCall(JsonDocument& doc, WebSocketsClient& webSocket) {
 }
 
 bool serviceTimer(bool board_idle) {
+  if (timer_armed && timer_waiting_to_start) {
+    if (board_idle) {  // the spoken confirmation is over
+      timer_waiting_to_start = false;
+      timer_started_ms = millis();
+      LOG_INFO("Timer started.\n");
+      announceTimerState();
+    }
+    return false;
+  }
   if (!timer_armed || secondsLeft() > 0 || !board_idle) {
     return false;
   }

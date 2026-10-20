@@ -23,7 +23,6 @@ const char kMutedSettingKey[] = "muted";
 const char kLedBrightnessSettingKey[] = "led_bright";
 
 constexpr int kVoiceVolumeStepPercent = 20;    // "louder" / "quieter" by voice
-const char kResponseCreateMessage[] = R"JSON({"type":"response.create"})JSON";
 constexpr size_t kToolResponseBufferSize = 256;  // function_call_output messages are tiny - no audio involved
 char tool_response_message[kToolResponseBufferSize];
 
@@ -201,7 +200,6 @@ bool handleSetVolumeCall(JsonDocument& doc, WebSocketsClient& webSocket) {
              R"JSON({"type":"conversation.item.create","item":{"type":"function_call_output","call_id":"%s","output":"Error: give percent (0-100) or step up or down"}})JSON",
              call_id);
     webSocket.sendTXT(tool_response_message);
-    webSocket.sendTXT(kResponseCreateMessage);
     return true;
   }
   volume_percent = static_cast<uint8_t>(constrain(requested, 0, kMaxPercent));
@@ -216,8 +214,7 @@ bool handleSetVolumeCall(JsonDocument& doc, WebSocketsClient& webSocket) {
            R"JSON({"type":"conversation.item.create","item":{"type":"function_call_output","call_id":"%s","output":"Volume set to %u percent"}})JSON",
            call_id, (unsigned)volume_percent);
   webSocket.sendTXT(tool_response_message);
-  webSocket.sendTXT(kResponseCreateMessage);
-  LOG_DEBUG("Sent function_call_output - asked the model for a spoken confirmation.\n");
+  LOG_DEBUG("Sent function_call_output.\n");
   return true;
 }
 
