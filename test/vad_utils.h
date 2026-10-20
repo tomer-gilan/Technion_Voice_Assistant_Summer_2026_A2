@@ -26,8 +26,9 @@
 //     syllables, 4-5 times a second; a machine, a bell or a tone doesn't.
 // An utterance starts once most of the last ~240 ms were active AND some of
 // them voiced - a bang or a knock dies away sooner and isn't voiced. It ends
-// after hangover_ms of no activity (short breaths between words don't end
-// it), or at the maximum length. Then it is judged, and discarded rather
+// after hangover_ms with no voiced frame (short breaths between words don't
+// end it, and neither does background noise that keeps going after the
+// speaker stopped), or at the maximum length. Then it is judged, and discarded rather
 // than sent when it had too little voicing (a cough, a chair scraping,
 // running water) or, over 1 s long, no syllable rhythm (a machine starting
 // up, a bell) - see DiscardReason.
@@ -133,8 +134,8 @@ class VoiceActivityDetector {
   /** Voiced frames since the utterance's speech began. */
   uint32_t utteranceVoicedFrames() const { return utterance_voiced_frames_; }
 
-  /** Frames since the last active one, while in an utterance (0 = this
-      frame was active). */
+  /** Frames since the last voiced one, while in an utterance (0 = this
+      frame was voiced). */
   uint32_t framesSinceActivity() const { return frames_since_activity_; }
 
   /** Syllable dips from the utterance's start to its last active frame. */

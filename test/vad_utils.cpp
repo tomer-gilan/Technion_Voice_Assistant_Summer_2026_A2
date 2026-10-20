@@ -415,7 +415,14 @@ DetectorEvent VoiceActivityDetector::processFrame(const int16_t* samples) {
   if (dip) {
     utterance_dip_frames_++;
   }
-  if (frame.active) {
+  // Only a voiced frame keeps the utterance going. Background noise (a TV,
+  // people talking further off, traffic) rises and falls around the noise
+  // floor, so many of its frames still count as active once speech has
+  // lowered the margin - with "active" here, the recording ran until the
+  // noise stopped, and the long noisy tail then got it discarded as too
+  // steady/unvoiced, so no answer came. Noise is rarely voiced; speech
+  // has a vowel every few hundred ms, well inside the hangover.
+  if (frame.voiced) {
     frames_since_activity_ = 0;
     dip_frames_at_last_activity_ = utterance_dip_frames_;
   } else {
