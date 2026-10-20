@@ -1,6 +1,6 @@
 <div dir="rtl">
 
-# עוזר קולי על ESP32
+# Voice Assistant On esp32 : Solomon Mekhiln, Tomer Gilan and Itamar Cohen
 
 פרויקט בקורס IoT, טכניון, סמסטר קיץ 2026 (קבוצה A2).
 
