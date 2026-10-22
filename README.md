@@ -134,12 +134,16 @@
 | ArduinoJson של Benoit Blanchon | 7.4.3 |
 | מודל OpenAI | `gpt-realtime-2.1-mini` (קול לקול), ו-`gpt-4o-mini-transcribe` לטקסט שמוצג במרכז הבקרה |
 | מרכז הבקרה | Chrome או Edge (צריך Web Serial) |
+| Python, לכלים `tools/measurements_report.py` ו-`tools/realtime_audio_diagnostic.py` | 3.6 ומעלה (הכלים משתמשים ב-f-strings). נבדק עם 3.11.2. `measurements_report.py` משתמש בספרייה הסטנדרטית בלבד |
+| `websocket-client` (רק ל-`realtime_audio_diagnostic.py`) | `pip install websocket-client`. נבדק עם 1.8.0 |
+| מהדר C++11, לכלי `tools/vad_replay.cpp` | `g++` מכל גרסה שתומכת ב-C++11 (ב-Windows: MSYS2/MinGW) |
+| PowerShell, ללוגר `tools/serial_logger.ps1` | Windows PowerShell 5.1 (נבדק) |
 
 כל השאר מגיע עם ה-ESP32 core: `WiFi.h`, `SD.h`, `driver/i2s.h`, `Preferences` (NVS), mbedTLS ו-FreeRTOS. מעבר ל-wrapper של Arduino השתמשנו ישירות ביכולות של ESP-IDF: משימת FreeRTOS מוצמדת לליבה עם עדיפות משלה (המיקרופון), מנהל ה-I2S במצב full duplex, NVS, ו-mbedTLS ל-base64.
 
 ## התקנה והרצה
 
-1. מתקינים את שתי הספריות מה-Library Manager של Arduino, בגרסאות שבטבלה.
+1. ב-Arduino IDE, ב-**Boards Manager**, מתקינים **esp32 by Espressif Systems** גרסה **2.0.17**. אחר כך מתקינים את שתי הספריות מה-**Library Manager**, בגרסאות שבטבלה.
 2. מעתיקים את `ESP32/SECRETS.example.h` ל-`ESP32/SECRETS.h` וממלאים שם ו-סיסמה של Wi-Fi (‏2.4GHz) ומפתח OpenAI. הקובץ ב-`.gitignore`. בלעדיו הקומפילציה נעצרת עם הסבר.
 3. פותחים את `ESP32/ESP32.ino` ב-Arduino IDE, בוחרים **ESP32 Dev Module** וצורבים. אפשר גם משורת הפקודה: `arduino-cli compile --fqbn esp32:esp32:esp32 ESP32`.
 4. פותחים את `control_center/control_center.html` ב-Chrome, לוחצים **Connect board** ובוחרים את ה-COM של הלוח (115200).
