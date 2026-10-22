@@ -77,7 +77,7 @@ constexpr uint32_t kAliveIntervalMs = 5000;
 // ----- Listening -----
 constexpr uint32_t kManualRecordDurationSec = 3;  // Talk / LISTEN / the BOOT button record this long
 // Software gain on the mic before sending. x4 clipped a spoken "1, 2, 3"
-// at full scale; x2 doesn't. Must match control_center.html's BOARD_MIC_GAIN.
+// at full scale; x2 doesn't. The control center gets it from @@LIMITS.
 constexpr int32_t kMicSoftwareGain = 2;
 constexpr uint32_t kHandsFreeCooldownMs = 600;  // after the board speaks, the mic waits this long (its own echo)
 // Hands-free: this many sounds in a row that turned out not to be speech

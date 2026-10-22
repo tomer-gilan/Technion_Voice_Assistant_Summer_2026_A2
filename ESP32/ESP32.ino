@@ -92,7 +92,7 @@ constexpr uint32_t kChunkSamples = 2400;    // ~100ms per input_audio_buffer.app
 constexpr uint32_t kChunkMs = kChunkSamples * 1000 / kSampleRateHz;
 // Mic levels are quiet without any gain (step 3). x4 until 2026-10-06, when a
 // spoken "1, 2, 3" hit full scale (min -32768 / max 32767) - clipped before
-// OpenAI heard it. Must match control_center/control_center.html's BOARD_MIC_GAIN.
+// OpenAI heard it. The control center gets it from @@LIMITS (mic_gain).
 constexpr int32_t kSoftwareGain = esp32va_params::kMicSoftwareGain;
 constexpr unsigned int kMaxTypedQuestionBytes = esp32va_params::kMaxTypedQuestionBytes;  // ASK <text> - longer is cut
 constexpr unsigned long kReplyTimeoutMs = esp32va_params::kReplyTimeoutMs;  // max silence (no server message) while awaiting_reply, not a total-reply-duration cap - see checkReplyTimeout()
