@@ -6,6 +6,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <strings.h>
+#include "command_parse_utils.h"
 #include "log_utils.h"
 #include "mic_capture_utils.h"
 #include "settings_store_utils.h"
@@ -31,23 +32,8 @@ bool is_paused = false;          // pausing after kMaxDiscardsInARow of them
 unsigned long paused_since_ms = 0;
 unsigned long last_level_report_ms = 0;
 
-/** If command is `word` alone or `word <argument>` (case-insensitive),
-    returns the argument with leading spaces skipped ("" if there's none);
-    otherwise nullptr - so "VAD_HANGOVER 900" is not a VAD command. */
-const char* commandArgument(const char* command, const char* word) {
-  size_t word_length = strlen(word);
-  if (strncasecmp(command, word, word_length) != 0) {
-    return nullptr;
-  }
-  const char* rest = command + word_length;
-  if (*rest != ' ' && *rest != '\0') {
-    return nullptr;
-  }
-  while (*rest == ' ') {
-    rest++;
-  }
-  return rest;
-}
+using esp32va_cmd::commandArgument;  // command_parse_utils.h
+using esp32va_cmd::parseOnOff;
 
 /** Parses a whole number from low to high into value_out. False if text isn't one. */
 bool parseWholeNumber(const char* text, long low, long high, long* value_out) {
@@ -58,19 +44,6 @@ bool parseWholeNumber(const char* text, long low, long high, long* value_out) {
   }
   *value_out = value;
   return true;
-}
-
-/** Parses "on"/"off" (case-insensitive) into on_out. False if it's neither. */
-bool parseOnOff(const char* text, bool* on_out) {
-  if (strcasecmp(text, "on") == 0) {
-    *on_out = true;
-    return true;
-  }
-  if (strcasecmp(text, "off") == 0) {
-    *on_out = false;
-    return true;
-  }
-  return false;
 }
 
 /** Stops the mic if it's listening for speech - never a capture under way. */

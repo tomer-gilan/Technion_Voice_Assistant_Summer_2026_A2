@@ -7,6 +7,7 @@
 #include <time.h>
 #include "parameters.h"
 #include "secrets_include.h"
+#include "command_parse_utils.h"
 #include "log_utils.h"
 #include "settings_store_utils.h"
 #include "status_report_utils.h"
@@ -142,25 +143,7 @@ bool checkTimeSynced() {
   return true;
 }
 
-/** The rest of the line after word and a space, or nullptr if command isn't
-    word (with or without an argument). An argument-less word gives "". */
-const char* commandArgument(const char* command, const char* word) {
-  size_t word_length = strlen(word);
-  if (strncasecmp(command, word, word_length) != 0) {
-    return nullptr;
-  }
-  const char* rest = command + word_length;
-  if (*rest == '\0') {
-    return rest;
-  }
-  if (*rest != ' ') {
-    return nullptr;
-  }
-  while (*rest == ' ') {
-    rest++;
-  }
-  return rest;
-}
+using esp32va_cmd::commandArgument;  // command_parse_utils.h
 
 /** WIFI_PASSWORD's password as typed: everything after the word and exactly
     one space on the untrimmed line, so spaces at either end of the password

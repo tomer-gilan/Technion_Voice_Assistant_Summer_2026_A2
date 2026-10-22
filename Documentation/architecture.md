@@ -70,6 +70,7 @@ flowchart LR
 | `measurement_utils` | מדידות זמן (עלייה ותגובה) לכל פקודה |
 | `heap_diagnostics_utils` | מדידות זיכרון בכל שלב |
 | `log_utils` | מאקרו לוג עם רמות (`LOG_INFO`, `LOG_ERROR`, ...) |
+| `command_parse_utils` | עזרים משותפים לפקודות Serial: הפרדת מילת הפקודה מהארגומנט (`commandArgument`) וקריאת on/off |
 
 ## מה קורה בלולאה הראשית
 

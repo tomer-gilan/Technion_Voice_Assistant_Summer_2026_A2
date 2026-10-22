@@ -8,6 +8,7 @@
 #include <strings.h>
 #include <sys/stat.h>
 #include <unistd.h>
+#include "command_parse_utils.h"
 #include "log_utils.h"
 #include "recording_folder_utils.h"
 #include "sd_card_utils.h"
@@ -169,23 +170,7 @@ void deleteAllRecordings(const char* folder_argument) {
   Serial.printf("@@DELETE_ALL_DONE %u %u\n", (unsigned)result.deleted_count, (unsigned)result.remaining_count);
 }
 
-/** If command is `word` alone or `word <argument>` (case-insensitive),
-    returns the argument with leading spaces skipped ("" if there's none);
-    otherwise nullptr. So "LISTEN" is not a LIST command. */
-const char* commandArgument(const char* command, const char* word) {
-  size_t word_length = strlen(word);
-  if (strncasecmp(command, word, word_length) != 0) {
-    return nullptr;
-  }
-  const char* rest = command + word_length;
-  if (*rest != ' ' && *rest != '\0') {
-    return nullptr;
-  }
-  while (*rest == ' ') {
-    rest++;
-  }
-  return rest;
-}
+using esp32va_cmd::commandArgument;  // command_parse_utils.h
 
 }  // namespace
 
