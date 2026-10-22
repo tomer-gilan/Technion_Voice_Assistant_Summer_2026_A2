@@ -963,6 +963,11 @@ const DELETE_ALL_TIMEOUT_MS = 30000;
 const MAX_KEPT_RECORDINGS = 5;  // mirrors the board's kMaxKeptRecordings (recording_folder_utils.h) - display only
 const BOARD_MIC_GAIN = 2;       // mirrors ESP32.ino's kSoftwareGain (x4 until 2026-10-06) - for "what OpenAI hears"
 const GET_START_TIMEOUT_MS = 5000;
+const GET_STALL_MS = 2000;  // a GET's bytes stop arriving for this long: the transfer is given up
+// What a board restart prints first - the ESP32 ROM's "rst:0x.. (POWERON_RESET)"
+// and the firmware's own first status line. Seen inside a GET's bytes, the
+// board restarted mid-transfer: the rest is boot output, not the recording.
+const RESTART_SIGNATURES = ["rst:0x", "@@STATE booting"].map((text) => new TextEncoder().encode(text));
 const BUSY_RETRY_MS = 1500;
 const BUSY_RETRY_LIMIT = 12;
 const MAX_LOG_LINES_SHOWN = 2000;
@@ -1207,6 +1212,32 @@ function settlesWithin(promise, ms) {
   ]).finally(() => clearTimeout(timer));
 }
 
+/** Where in data[from, to) a board-restart signature (RESTART_SIGNATURES)
+    starts, or -1. A signature split across two chunks isn't seen - the stall
+    watchdog or the time budget still ends that transfer. */
+function findRestartSignature(data, from, to) {
+  let first = -1;
+  for (const signature of RESTART_SIGNATURES) {
+    const end = first < 0 ? to : first;  // only an earlier match matters
+    for (let at = data.indexOf(signature[0], from); at >= 0 && at < end; at = data.indexOf(signature[0], at + 1)) {
+      if (startsWithBytes(data, at, signature)) {
+        first = at;
+        break;
+      }
+    }
+  }
+  return first;
+}
+
+/** True if data holds the bytes of signature starting at index at. */
+function startsWithBytes(data, at, signature) {
+  if (at + signature.length > data.length) return false;
+  for (let index = 0; index < signature.length; index++) {
+    if (data[at + index] !== signature[index]) return false;
+  }
+  return true;
+}
+
 /** One LIST or GET in flight, filled in as the board's reply streams in. */
 class Transaction {
   constructor(kind, fileName) {
@@ -1248,7 +1279,8 @@ class BoardLink {
     this.baud = null;
     this.closing = false;
     this.pending = new Uint8Array(0);
-    this.binary = null;  // {remaining, target} while a GET's raw bytes are arriving
+    this.binary = null;  // {remaining, target, lastProgressAt} while a GET's raw bytes are arriving
+    this.resync = false; // a GET was given up mid-stream: skip to the next newline before reading lines again
     this.transaction = null;
     this.queue = Promise.resolve();
     this.decoder = new TextDecoder();
@@ -1307,6 +1339,7 @@ class BoardLink {
     }
     this.pending = new Uint8Array(0);
     this.binary = null;
+    this.resync = false;
     this.announcedFiles = null;
     if (this.transaction) this.transaction.finish("the serial port closed mid-transfer");
     this.onConnectionChange(false, this.closing);
@@ -1323,6 +1356,13 @@ class BoardLink {
     while (offset < data.length) {
       if (this.binary) {
         const take = Math.min(this.binary.remaining, data.length - offset);
+        const restartAt = findRestartSignature(data, offset, offset + take);
+        if (restartAt >= 0) {
+          this.abortBinary("the board restarted during the transfer");
+          offset = restartAt;  // its boot output is read as lines again
+          continue;
+        }
+        this.binary.lastProgressAt = performance.now();
         if (this.binary.target) {
           this.binary.target.set(data.subarray(offset, offset + take), this.binary.target.length - this.binary.remaining);
         }
@@ -1332,6 +1372,16 @@ class BoardLink {
           this.onTransferProgress(this.binary.target.length - this.binary.remaining, this.binary.target.length);
         }
         if (this.binary.remaining === 0) this.binary = null;
+        continue;
+      }
+      if (this.resync) {
+        const newlineAt = data.indexOf(10, offset);
+        if (newlineAt < 0) {
+          offset = data.length;
+          break;
+        }
+        offset = newlineAt + 1;
+        this.resync = false;
         continue;
       }
       let newlineAt = data.indexOf(10, offset);
@@ -1345,6 +1395,15 @@ class BoardLink {
       else this.onLine(line);
     }
     this.pending = offset < data.length ? data.slice(offset) : new Uint8Array(0);
+  }
+
+  /** Gives up a GET's binary stream (the board restarted or went quiet) and
+      fails the GET waiting for it, so status lines are read again at once. */
+  abortBinary(reason) {
+    const wanted = this.binary && this.binary.target;
+    this.binary = null;
+    if (wanted && this.transaction && this.transaction.kind === "GET") this.transaction.finish(reason);
+    this.onNote(`Download stopped: ${reason}.`);
   }
 
   handleProtocolLine(line) {
@@ -1369,7 +1428,7 @@ class BoardLink {
       } else {
         this.onNote(`Skipping ${size} bytes of a GET this page didn't ask for (${parts[1]}).`);
       }
-      if (size > 0) this.binary = { remaining: size, target };
+      if (size > 0) this.binary = { remaining: size, target, lastProgressAt: performance.now() };
       return;
     }
 
@@ -1454,12 +1513,25 @@ class BoardLink {
       } else {
         finished = await settlesWithin(transaction.started.promise, GET_START_TIMEOUT_MS);
         if (finished) {
-          // 10 bits per byte on the wire, doubled for margin, plus slack.
-          const budgetMs = ((transaction.size || 0) * 10 / this.baud) * 2000 + 5000;
-          finished = await settlesWithin(transaction.done.promise, budgetMs);
+          // The board writes at wire speed (10 bits per byte): a quarter more
+          // for margin, plus slack. A stall is caught much sooner.
+          const budgetMs = ((transaction.size || 0) * 10 / this.baud) * 1250 + 2000;
+          const watchdog = setInterval(() => {
+            if (this.binary && this.binary.target === transaction.data &&
+                performance.now() - this.binary.lastProgressAt > GET_STALL_MS) {
+              this.abortBinary(`no data from the board for ${GET_STALL_MS / 1000} s`);
+              this.resync = true;
+            }
+          }, 500);
+          try {
+            finished = await settlesWithin(transaction.done.promise, budgetMs);
+          } finally {
+            clearInterval(watchdog);
+          }
         }
       }
       if (!finished) {
+        if (this.binary) this.resync = true;  // the rest of the recording may still arrive - not as lines
         this.binary = null;
         throw new BoardError("transfer", `No complete answer to ${command} - timed out.`);
       }
