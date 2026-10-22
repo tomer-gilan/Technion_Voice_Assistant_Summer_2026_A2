@@ -2376,6 +2376,7 @@ function handleStatusLine(tag, rest) {
         elements.result.className = "result";
         elements.result.textContent = `LISTEN #${words[1]} cancelled.`;
         addConversationNote(`LISTEN #${words[1]} cancelled - no answer.`);
+        autoTickDemo("cancel");
         break;
       }
       showResult(words[0] === "pass", words[1], words.slice(2).join(" "));
@@ -2452,6 +2453,7 @@ function handleStatusLine(tag, rest) {
         clearTimeout(board.wifiSavePending.timer);
         board.wifiSavePending = null;
         elements.wifiNote.textContent = `Saved - the board is connecting to ${board.wifiNet.ssid}. If it can't, it says so in Board health.`;
+        autoTickDemo("netswitch");
       }
       renderBoardOptions();
       break;
@@ -3403,7 +3405,7 @@ const EXAMPLE_PHRASES = [
   ["🧠", "What is my name?"],
   ["🔊", "Set the volume to 30 percent"],
   ["🔊", "A bit louder"],
-  ["⏰", "Set a timer for 20 seconds"],
+  ["⏰", "Set a timer for 30 seconds"],
   ["📝", "Remind me in 30 seconds to check the oven"],
   ["🌙", "Turn off the light in 20 seconds"],
   ["🕒", "What time is it?"],
@@ -3430,48 +3432,57 @@ document.getElementById("connection-alert-close").addEventListener("click", hide
 
 // ===== Demo checklist =====
 
-/** The demo's order, as in Documentation/user-stories.md and Documentation/edge-cases.md / edge-cases-extended.md: [id, title, how]. */
+/** The demo's order: the numbered stories of Documentation/user-stories.md, then the edge cases of Documentation/edge-cases-extended.md the plan (Documentation/demo-plan.md) shows - each title carries its number there: [id, title, how]. */
 const DEMO_SECTIONS = [
   ["סיפורי משתמש", [
-    ["intro", "דקה על מטרת הפרויקט", "עוזר קולי על ESP32 זול, הבנת דיבור בענן, מרכז בקרה בדפדפן."],
-    ["boot", "הדלקה ונורות תקינות", "Connect board, כל הנורות ירוקות וברכת פתיחה."],
-    ["talk", "שאלה בלחיצה", "Talk או רווח: <code>What is the capital of France</code>"],
-    ["handsfree", "Hands-free בלי כפתור", "מדליקים את המתג ומדברים. הוא מתחיל ועוצר לבד."],
-    ["led", "הדלקת אור בקול", "<code>Turn on the light</code>, <code>Dim the light to 30 percent</code>, ואז <code>Turn off the light</code>. הנורה במסך זוהרת לפי הבהירות."],
-    ["voicevolume", "עוצמה בקול", "<code>Set the volume to 30 percent</code>, ואז <code>A bit louder</code>."],
-    ["timer", "טיימר ושעה בקול", "<code>Set a timer for 20 seconds</code>: ספירה לאחור במסך, ובסוף הלוח מצפצף ומהבהב. <code>Turn off the light in 20 seconds</code>: האור נכבה כשהטיימר נגמר. <code>What time is it</code>."],
-    ["daynight", "יום או לילה לפי חיישן האור", "סליידר האור נמוך, <code>Is it day or night</code>, ואז מעלים ושואלים שוב."],
-    ["memory", "זיכרון שיחה", "<code>My name is Omri</code> ואז <code>What is my name</code>"],
-    ["transcript", "רואים מה שמע ומה ענה", "בועות השיחה, זמן התשובה ותגיות הפעולה."],
-    ["recordings", "ניגון הקלטות מה-SD", "לשונית ההקלטות, ניגון עם waveform, מחיקה."],
-    ["settings", "עוצמה, השתקה ובהירות", "סליידר עוצמה ו-Test beep, Mute, בהירות LED."],
-    ["vadtune", "כיוון Hands-free", "Sensitivity ו-Stop after silence, ובודקים דיבור ורעש."],
-    ["bands", "ספי יום / ערב / לילה", "משנים ספים ולוחצים Apply thresholds."],
-    ["persist", "ההגדרות נשמרות", "Reset ללוח, והעוצמה וההגדרות נשארות."],
-    ["stats", "סטטיסטיקה", "חלונית Statistics: מספרים, גרף זמני תגובה, Export CSV."],
-    ["summary", "סיכום במסך מלא", "כפתור Summary: הפקודות, אחוז ההצלחה, זמן התגובה וההגדרות של הלוח, בגדול."],
+    ["intro", "הצגת הפרויקט (דקה, בלי מצגת)", "משפט אחד על המטרה. לומר: חיישן האור מדומה בסליידר, ועברית עובדת אבל פחות טוב."],
+    ["boot", "1. הדלקה ונורות תקינות", "Reset ללוח מול הבוחנים. Connect board, הנורות נהיות ירוקות אחת אחת וברכת פתיחה."],
+    ["selftest", "2. Self-test", "הכפתור ליד Board health: ה-LED מהבהב, צפצוף, וכל השורות עם ✓."],
+    ["talk", "3. שאלה בלחיצה", "Talk או רווח: <code>What is the capital of France</code>. לתת לבוחן ללחוץ על דוגמה ב-Try saying."],
+    ["transcript", "4. רואים מה שמע ומה ענה", "המצב משתנה (Listening, Processing, Speaking), והשיחה בבועות עם שעה וזמן תגובה. תגיות: 💡 🌙 🔊 ⏰ 🕒 📶."],
+    ["handsfree", "5. Hands-free בלי כפתור", "מדליקים את המתג ומדברים. הוא מתחיל ועוצר לבד."],
+    ["led", "6. הדלקת אור בקול", "<code>Turn on the light</code>, <code>Dim the light to 30 percent</code>, ואז <code>Turn off the light</code>. הנורה במסך זוהרת לפי הבהירות."],
+    ["voicevolume", "7. עוצמה בקול", "<code>Set the volume to 30 percent</code>, ואז <code>A bit louder</code>."],
+    ["timer", "8. תזכורת, טיימר ושעה", "<code>Remind me in 30 seconds to check the oven</code>: ספירה לאחור במסך, ובסוף 3 צפצופים, LED מהבהב ו-<code>Time's up - check the oven</code>. אחר כך <code>Turn off the light in 20 seconds</code>: האור נכבה בסוף הטיימר. ואז <code>What time is it</code>."],
+    ["daynight", "9. חלק היום לפי חיישן האור", "מזיזים את סליידר Light sensor לערך נמוך, <code>Is it day or night</code> (night), ואז מעלים ושואלים שוב."],
+    ["status", "10. איך הלוח מרגיש", "<code>How are you doing</code>: עוצמת ה-Wi-Fi, כמה זמן הלוח דלוק וכמה זיכרון פנוי. תגית 📶 בשיחה."],
+    ["memory", "11. זיכרון שיחה", "<code>My name is Omri</code> ואז <code>What is my name</code>"],
+    ["hebrew", "12. עברית", "<code>מה בירת צרפת</code>: עונה בעברית. התמלול בבועה יכול להיות לא מדויק."],
+    ["typed", "13. שאלה בכתב", "בשדה <code>Or type a question…</code> ולוחצים Ask. עונה בקול כרגיל. עד 200 בתים (כ-100 אותיות בעברית)."],
+    ["cancel", "14. ביטול באמצע", "Talk ומיד Cancel: <code>LISTEN #N CANCELLED</code> והלוח חוזר ל-Ready."],
+    ["recordings", "15. ניגון הקלטות מה-SD", "לשונית ההקלטות: מנגנים את הפקודה האחרונה עם waveform, ואפשר למחוק."],
+    ["settings", "16. עוצמה, השתקה ובהירות", "סליידר עוצמה ו-Test beep, Mute, בהירות LED."],
+    ["vadtune", "17. כיוון Hands-free", "Sensitivity ו-Stop after silence, ובודקים דיבור ורעש."],
+    ["bands", "18. ספי יום / ערב / לילה", "משנים ספים ולוחצים Apply thresholds."],
+    ["persist", "19. ההגדרות נשמרות", "Reset ללוח, והעוצמה, הבהירות וההגדרות של Hands-free נשארות."],
+    ["nopc", "20. בלי מחשב", "ב-On the board itself: BOOT button ו-Status sounds, ומדליקים Hands-free. קודם מחברים את הלוח ל-power bank, ורק אז מנתקים את ה-USB (ניתוק USB לבדו מאתחל את הלוח, וצריך לחכות כ-10 שניות לברכה). שואלים בקול או ב-BOOT."],
+    ["replay", "21. שחזור לוג, בלי הלוח", "Replay a log… עם לוג שנשמר, במהירות 4x. בסיום Stop, ו-Connect board שוב."],
+    ["stats", "22. סטטיסטיקה", "חלונית Statistics: מספרים, גרף זמני תגובה, Export CSV."],
+    ["summary", "22. סיכום במסך מלא", "כפתור Summary: הפקודות, אחוז ההצלחה, זמן התגובה וההגדרות של הלוח, בגדול. Save report שומר דף HTML."],
   ]],
-  ["מקרי קצה", [
-    ["noise", "רעש לא מפעיל", "דפיקה על השולחן או מחיאת כפיים: נשאר Waiting for speech."],
-    ["cough", "שיעול נזרק", "בשיחה מופיעה הערה שהצליל נזרק."],
-    ["manynoises", "הרבה רעשים ברצף", "אחרי 3 רעשים, הפסקה של 5 שניות."],
-    ["echo", "העוזר לא שומע את עצמו", "Hands-free דלוק, שאלה עם תשובה ארוכה: אחריה חוזר ל-Waiting ולא מתחיל לבד."],
-    ["pause", "הפסקה קצרה באמצע משפט", "משפט עם עצירה קצרה באמצע נשלח כשאלה אחת."],
-    ["busy", "Talk באמצע תשובה", "הכפתור Busy והבקשה נדחית."],
-    ["longspeech", "משפט ארוך מ-10 שניות", "ההקלטה נעצרת ב-10 שניות ועונה."],
-    ["wifi", "ניתוק Wi-Fi", "מכבים hotspot לכמה שניות. נורית OpenAI חוזרת לירוק."],
-    ["badlight", "ערך אור לא חוקי", "<code>LIGHT 99999</code> בטרמינל נדחה."],
-    ["cantdo", "בקשה שאי אפשר לבצע", "<code>Make the light blue</code>: עונה שה-LED הוא בצבע אחד."],
-    ["volrange", "עוצמה מחוץ לטווח", "<code>Set the volume to 150 percent</code>: נעצר על 100%."],
-    ["sd", "בלי כרטיס SD", "מוציאים SD ועושים Reset. נורית SD אדומה."],
-    ["timeroffline", "טיימר בלי אינטרנט", "<code>Set a timer for 30 seconds</code> ומכבים hotspot: הלוח עדיין מצפצף בזמן."],
-    ["typed", "חדר רועש: שאלה בכתב", "כותבים שאלה בשדה <code>Or type a question…</code> ולוחצים Ask. הוא עונה בקול כרגיל."],
-    ["reconnect", "ניתוק מרכז הבקרה", "מנתקים את כבל ה-USB: באנר אדום. מחברים שוב והכל חוזר."],
+  ["מקרי קצה (הרשימה המורחבת)", [
+    ["noise", "13. רעש לא מפעיל", "Hands-free דלוק: דפיקה על השולחן או מחיאת כפיים, והמצב נשאר Waiting for speech."],
+    ["cough", "13. שיעול נזרק", "בשיחה מופיעה הערה שהצליל נזרק (<code>too short to be speech</code>)."],
+    ["manynoises", "13. הרבה רעשים ברצף", "אחרי 3 רעשים, הפסקה של 5 שניות."],
+    ["silence", "14. שקט", "Hands-free ושותקים: לא קורה כלום. אחר כך Talk ושותקים: העוזר עונה במשפט כללי."],
+    ["echo", "23. העוזר לא שומע את עצמו", "Hands-free דלוק, <code>Tell me about the moon</code>: אחרי התשובה חוזר ל-Waiting ולא מתחיל לבד."],
+    ["farspeech", "24. דיבור ממרחק עם רעש", "אחד מתופף על השולחן והשני במרחק מטר אומר <code>Turn on the light</code>. ה-LED נדלק."],
+    ["cantdo", "18. בקשה שאי אפשר לבצע", "<code>Make the light blue</code>: עונה שה-LED הוא בצבע אחד."],
+    ["volrange", "19. ערך מחוץ לטווח", "<code>Set the volume to 150 percent</code>: נעצר על 100%. <code>Set the volume to 0</code>: 10%."],
+    ["multi", "20. כמה בקשות בפקודה אחת", "<code>Set the light brightness and the volume to 100 percent</code>: שניהם עולים."],
+    ["badlight", "12. ערך אור בקצוות", "סליידר האור לקצה התחתון ואז לעליון, <code>Is it day or night</code> בכל אחד. <code>LIGHT 99999</code> בטרמינל נדחה."],
+    ["busy", "15. Talk באמצע תשובה", "הכפתור Busy והבקשה נדחית. מחכים שיסיים, או Cancel."],
+    ["pause", "17. הפסקה קצרה באמצע משפט", "<code>What is the capital... of France</code> עם עצירה של חצי שנייה: נשלח כשאלה אחת."],
+    ["reconnect", "9. ניתוק מרכז הבקרה", "קודם power bank, ורק אז מנתקים את כבל ה-USB מהמחשב: באנר אדום. מחברים שוב והדף מתחבר לבד."],
+    ["timeroffline", "7. טיימר כשאין חיבור", "<code>Set a timer for 30 seconds</code> ומכבים hotspot: הלוח עדיין מצפצף בזמן."],
+    ["wifi", "1. ה-Wi-Fi נופל", "ה-hotspot כבוי ל-30 שניות: Offline ושני צלילים יורדים. אחרי שחוזר: Ready תוך כ-15 שניות ושני צלילים עולים."],
+    ["netswitch", "3. החלפת רשת", "בכרטיס Wi-Fi network: שם וסיסמה של hotspot שני ← Save & connect. בסוף Back to default."],
+    ["sd", "8. בלי כרטיס SD", "מוציאים SD ועושים Reset. נורית SD אדומה, והעוזר עונה בלי הקלטות."],
   ]],
 ];
 const DEMO_STORAGE_KEY = "esp32va-demo-checklist";
 /** Tools whose use ticks a checklist item by itself (autoTickDemo). */
-const DEMO_TOOL_ITEMS = { set_board_state: "led", set_volume: "voicevolume", get_time_of_day: "daynight" };
+const DEMO_TOOL_ITEMS = { set_board_state: "led", set_volume: "voicevolume", get_time_of_day: "daynight", get_board_status: "status" };
 
 /** Ticked items, kept in this browser (may be unavailable - then just for this page). */
 let demoDone = new Set();
@@ -3609,7 +3620,7 @@ const SELF_TESTS = [
     if (Math.abs(diff) <= 2) return ["ok", `${words[0]}, same as this laptop`];
     const hoursOff = Math.round(Math.abs(diff) / 60);
     const off = hoursOff ? `${hoursOff} h` : `${Math.abs(diff)} min`;
-    return ["warn", `${words[0]} - ${off} ${diff < 0 ? "behind" : "ahead of"} this laptop - set TIMEZONE_POSIX (README)`];
+    return ["warn", `${words[0]} - ${off} ${diff < 0 ? "behind" : "ahead of"} this laptop (the board keeps Israel time)`];
   }],
   ["OpenAI", async () => {
     const openai = state.board.stages.openai;
@@ -3656,6 +3667,7 @@ async function runSelfTest() {
   title.textContent = counts.fail ? `Self-test - ${counts.fail} problem${counts.fail === 1 ? "" : "s"}`
     : counts.warn ? `Self-test - passed, ${counts.warn} to look at` : "Self-test - all passed";
   appendLog(`(app) ${title.textContent}.`);
+  if (!counts.fail) autoTickDemo("selftest");
   selfTestRunning = false;
   updateTalkButton();
 }
@@ -3667,8 +3679,10 @@ document.getElementById("selftest-close").addEventListener("click", () => { docu
 
 /** The 25 minutes of Documentation/demo-plan.md: [from minute, what to show]. */
 const DEMO_PLAN = [
-  [0, "הדלקה ונורות"], [2, "שאלה בלחיצה"], [5, "Hands-free ורעש"], [8, "LED, עוצמה ותזכורת"],
-  [12, "חלק היום וזיכרון"], [14, "הקלטות SD"], [16, "רובסטיות ומקרי קצה"], [20, "הגדרות נשמרות"], [23, "בלי מחשב, וסיכום"],
+  [0, "הצגה קצרה"], [1, "הדלקה ו-Self-test"], [2.5, "שאלה בלחיצה"], [4, "Hands-free ורעש"], [6, "LED ועוצמה בקול"],
+  [7.5, "תזכורת וטיימר"], [9, "חלק היום ומצב הלוח"], [10.5, "זיכרון ועברית"], [12, "שאלה בכתב וביטול"],
+  [14, "הקלטות SD"], [15, "הגדרות ושמירה"], [17, "בלי מחשב"], [19, "שחזור לוג"], [20, "רובסטיות: רשת וחומרה"],
+  [23, "סטטיסטיקה וסיכום"], [24, "רזרבה"],
 ];
 const DEMO_LENGTH_MIN = 25;
 var demoClockStart = null;  // var: renderSummary() may read it before this line runs
