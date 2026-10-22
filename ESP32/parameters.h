@@ -68,6 +68,9 @@ namespace esp32va_params {
 
 // ----- Serial -----
 constexpr uint32_t kSerialBaudRate = 115200;  // must match control_center.html and tools/serial_logger.ps1
+// loop() prints "@@ALIVE <uptime s>" this often, so the control center can
+// tell a running board from a hung one (it waits 15 s - keep this well under).
+constexpr uint32_t kAliveIntervalMs = 5000;
 
 // ----- Listening -----
 constexpr uint32_t kManualRecordDurationSec = 3;  // Talk / LISTEN / the BOOT button record this long

@@ -23,6 +23,7 @@
 //   @@HEARD <text>           - what the user said (input transcription)
 //   @@SAID <text>            - what the assistant said (output transcript)
 //   @@WIFI <RSSI dBm>        - signal strength, on connect and every 10 s
+//   @@ALIVE <uptime s>       - every kAliveIntervalMs from loop(): not hung
 //
 // Other modules add their own state lines the same way (@@LED, @@VOLUME in
 // device_controls_utils.h, @@LIGHT in light_sensor_utils.h, @@BOOT_TIMING /

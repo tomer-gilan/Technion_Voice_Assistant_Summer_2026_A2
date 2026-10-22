@@ -1450,6 +1450,22 @@ void updatePipelineState() {
   }
 }
 
+/** Prints "@@ALIVE <seconds since boot>" every kAliveIntervalMs (the first
+    on loop()'s first pass), so the laptop app can tell a running board from
+    a hung one. Only from loop(): setup()'s waits and a GET's transfer hold
+    loop(), and the app allows for those. */
+void reportAliveHeartbeat() {
+  static uint32_t last_alive_ms = 0;
+  static bool alive_reported = false;
+  uint32_t now_ms = millis();
+  if (alive_reported && now_ms - last_alive_ms < esp32va_params::kAliveIntervalMs) {
+    return;
+  }
+  alive_reported = true;
+  last_alive_ms = now_ms;
+  esp32va_status::printProtocolLine("@@ALIVE %lu", (unsigned long)(now_ms / 1000));
+}
+
 }  // namespace
 
 /** One-time setup: playback ring buffer, full-duplex mic+speaker I2S, onboard
@@ -1576,6 +1592,7 @@ void startOpenAiConnectionWhenNetworkReady() {
     stops if the mic task can't start (haltSketch()) - and even then keeps
     answering LIST/GET. */
 void loop() {
+  reportAliveHeartbeat();  // halted too: it still answers LIST/GET
   if (!should_keep_running) {
     serviceReplyRecording();  // closes a recording cut short by the halt
     esp32va_sd_card::serviceCardCheck(isIdleForFileTransfer());
