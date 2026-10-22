@@ -153,6 +153,9 @@ bool setupReplyRecorder(esp32va_recordings::RecordingDeletedListener on_recordin
 }
 
 void noteReplyAudioArriving() {
+  if (!esp32va_sd_card::isSdCardUsable()) {
+    return;  // running without a card - replies are played, not saved
+  }
   last_audio_arrival_ms = millis();
   if (state == RecorderState::kRecording) {
     return;  // the usual case - every delta after a reply's first

@@ -1389,6 +1389,8 @@ class BoardLink {
       transaction.finish(line.slice("@@GET_ERROR ".length));
     } else if (tag === "@@DELETE_ERROR") {
       transaction.finish(line.slice("@@DELETE_ERROR ".length));
+    } else if (tag === "@@DELETE_ALL_ERROR") {
+      transaction.finish(line.slice("@@DELETE_ALL_ERROR ".length));
     } else if (tag === "@@DELETE_ALL_DONE" && transaction.kind === "DELETE_ALL" && parts.length === 3) {
       const left = Number(parts[2]);
       transaction.finish(left > 0 ? `${left} recording${left === 1 ? "" : "s"} couldn't be deleted - see the log` : null);

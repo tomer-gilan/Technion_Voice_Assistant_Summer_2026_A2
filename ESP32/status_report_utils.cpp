@@ -84,6 +84,8 @@ const char* pipelineStateName(PipelineState state) {
       return "saving";
     case PipelineState::kReconnecting:
       return "reconnecting";
+    case PipelineState::kOffline:
+      return "offline";
     case PipelineState::kHalted:
       return "halted";
     default:

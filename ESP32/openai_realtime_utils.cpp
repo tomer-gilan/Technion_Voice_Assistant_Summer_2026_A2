@@ -33,17 +33,19 @@ p/SgguMh1YQdc4acLa/KNJvxn7kjNuK8YAOdgLOaVsjh4rsUecrNIdSUtUlD
 -----END CERTIFICATE-----
 )EOF";
 
-// A closed/refused connection could be one transient blip - only declare
-// failure once it's happened enough times in a row that it looks like a
-// genuine, non-transient problem (bad API key, wrong host/path, TLS
-// rejection), per Tomer's Guidelines #4.
-constexpr uint32_t kMaxConnectAttempts = 5;
-constexpr unsigned long kInitialBackoffMs = 1000;
-constexpr unsigned long kMaxBackoffMs = 30000;
+// A closed/refused connection could be one transient blip - only call the
+// board offline once it has happened kOpenAiAttemptsBeforeOffline times in a
+// row (a bad API key, no internet, a server rejection). Even then it keeps
+// trying, every kOfflineRetryIntervalMs, and recovers by itself.
+constexpr uint32_t kAttemptsBeforeOffline = esp32va_params::kOpenAiAttemptsBeforeOffline;
+constexpr unsigned long kInitialBackoffMs = esp32va_params::kInitialReconnectBackoffMs;
+constexpr unsigned long kOfflineRetryIntervalMs = esp32va_params::kOfflineRetryIntervalMs;
 
 uint32_t reconnect_attempts = 0;
 unsigned long reconnect_backoff_ms = kInitialBackoffMs;
 }  // namespace
+
+namespace esp32va_openai {
 
 void beginOpenAiRealtimeConnection(WebSocketsClient& webSocket) {
   webSocket.setExtraHeaders(kOpenAiAuthHeader);
@@ -57,37 +59,49 @@ unsigned long addJitter(unsigned long base_ms) {
   return result < 0 ? 0 : static_cast<unsigned long>(result);
 }
 
-bool registerDisconnectAndMaybeGiveUp(WebSocketsClient& webSocket) {
+bool registerDisconnect(WebSocketsClient& webSocket) {
   reconnect_attempts++;
-  if (reconnect_attempts >= kMaxConnectAttempts) {
-    LOG_ERROR("Giving up - no verdict after %u attempts.\n", reconnect_attempts);
-    return true;
+  if (reconnect_attempts >= kAttemptsBeforeOffline) {
+    webSocket.setReconnectInterval(addJitter(kOfflineRetryIntervalMs));
+    if (reconnect_attempts == kAttemptsBeforeOffline) {
+      LOG_ERROR("OpenAI unreachable %u times in a row - offline, retrying every %lu s.\n",
+                (unsigned)reconnect_attempts, kOfflineRetryIntervalMs / 1000);
+      return true;
+    }
+    LOG_DEBUG("Still offline (attempt %u) - next try in ~%lu s.\n", (unsigned)reconnect_attempts,
+              kOfflineRetryIntervalMs / 1000);
+    return false;
   }
 
   unsigned long wait_ms = addJitter(reconnect_backoff_ms);
-  LOG_INFO("Reconnecting (attempt %u/%u)...\n", reconnect_attempts, kMaxConnectAttempts);
-  LOG_DEBUG("Disconnected before a verdict was reached (attempt %u/%u). Backing off ~%lu ms before retrying.\n",
-            reconnect_attempts, kMaxConnectAttempts, wait_ms);
+  LOG_INFO("Reconnecting (attempt %u/%u)...\n", (unsigned)reconnect_attempts, (unsigned)kAttemptsBeforeOffline);
+  LOG_DEBUG("Disconnected (attempt %u/%u). Backing off ~%lu ms before retrying.\n", (unsigned)reconnect_attempts,
+            (unsigned)kAttemptsBeforeOffline, wait_ms);
   webSocket.setReconnectInterval(wait_ms);
-  reconnect_backoff_ms = min(reconnect_backoff_ms * 2, kMaxBackoffMs);
+  reconnect_backoff_ms = min(reconnect_backoff_ms * 2, kOfflineRetryIntervalMs);
   return false;
 }
 
-namespace esp32va_openai {
+void resetReconnectBackoff(WebSocketsClient& webSocket) {
+  reconnect_attempts = 0;
+  reconnect_backoff_ms = kInitialBackoffMs;
+  webSocket.setReconnectInterval(kInitialBackoffMs);
+}
 
 uint32_t reconnectAttemptCount() {
   return reconnect_attempts;
 }
 
-uint32_t maxConnectAttempts() {
-  return kMaxConnectAttempts;
+uint32_t attemptsBeforeOffline() {
+  return kAttemptsBeforeOffline;
 }
 
-}  // namespace esp32va_openai
+bool isOffline() {
+  return reconnect_attempts >= kAttemptsBeforeOffline;
+}
 
-void resetReconnectBackoff() {
-  reconnect_attempts = 0;
-  reconnect_backoff_ms = kInitialBackoffMs;
+unsigned long offlineRetryIntervalMs() {
+  return kOfflineRetryIntervalMs;
 }
 
 void logGenericWsEvent(WStype_t type, uint8_t* payload, size_t length) {
@@ -121,3 +135,5 @@ void logGenericWsEvent(WStype_t type, uint8_t* payload, size_t length) {
       break;
   }
 }
+
+}  // namespace esp32va_openai

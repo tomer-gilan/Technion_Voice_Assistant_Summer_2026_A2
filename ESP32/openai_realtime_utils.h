@@ -4,9 +4,16 @@
 
 // Shared plumbing for talking to OpenAI's Realtime API over WSS: connection
 // setup (host/port/path/auth header/root CA), reconnect backoff, and the
-// generic WebSocket event logging every test sketch since step 09 has
-// needed. All of it reads OPENAI_API_KEY / OPENAI_MODEL straight from
-// SECRETS.h / parameters.h - no parameters needed for setup.
+// generic WebSocket event logging every sketch since step 09 has needed. All
+// of it reads OPENAI_API_KEY / OPENAI_MODEL straight from SECRETS.h /
+// parameters.h - no parameters needed for setup.
+//
+// The board never gives up on the connection: after
+// kOpenAiAttemptsBeforeOffline failed attempts in a row it counts as offline
+// (the control center shows it, the timer and the controls keep working) and
+// keeps retrying every kOfflineRetryIntervalMs until OpenAI is back.
+
+namespace esp32va_openai {
 
 /** Opens a WSS connection to the OpenAI Realtime API ("/v1/realtime?model=..."
     per parameters.h's OPENAI_MODEL), with the Authorization header and root CA
@@ -18,33 +25,33 @@ void beginOpenAiRealtimeConnection(WebSocketsClient& webSocket);
     on the same cadence. */
 unsigned long addJitter(unsigned long base_ms);
 
-/** Call from a sketch's WStype_DISCONNECTED handler (only while no verdict
-    has been reached yet). Applies the next exponential-backoff reconnect
-    interval to webSocket and returns false - or, once the attempt cap is
-    hit, returns true without touching webSocket, meaning the caller should
-    declare TEST FAILED instead of retrying again. Logs its own progress
-    either way. */
-bool registerDisconnectAndMaybeGiveUp(WebSocketsClient& webSocket);
+/** Call from the WStype_DISCONNECTED handler. Sets the next reconnect
+    interval on webSocket - exponential backoff, then every
+    kOfflineRetryIntervalMs once offline - and returns true exactly once: on
+    the disconnect that makes the board offline. Logs its own progress. */
+bool registerDisconnect(WebSocketsClient& webSocket);
 
-/** Resets the reconnect-attempt/backoff state. Call once a verdict (PASS or
-    FAIL) has been reached, so state doesn't leak into a later reconnect. */
-void resetReconnectBackoff();
+/** Clears the attempt count and the backoff. Call whenever the session is
+    ready again, so earlier disconnects never add up to "offline". */
+void resetReconnectBackoff(WebSocketsClient& webSocket);
 
-/** Logs any WebSocket event type a sketch doesn't give special handling to
+/** Logs any WebSocket event type the sketch doesn't give special handling to
     (BIN, ERROR, fragments, PING/PONG, and anything unrecognized). Call this
-    from a sketch's onWebSocketEvent default case so nothing goes unnoticed,
-    per Tomer's Guidelines - the sketch itself only needs explicit cases for
-    CONNECTED/DISCONNECTED/TEXT (or whichever it actually reacts to). */
+    from onWebSocketEvent's default case so nothing goes unnoticed. */
 void logGenericWsEvent(WStype_t type, uint8_t* payload, size_t length);
 
-namespace esp32va_openai {
-
-/** Disconnects counted since the last resetReconnectBackoff() - shown as
+/** Disconnects in a row since the session was last ready - shown as
     "reconnecting n/max" in the laptop app. */
 uint32_t reconnectAttemptCount();
 
-/** How many disconnects in a row registerDisconnectAndMaybeGiveUp() allows
-    before giving up. */
-uint32_t maxConnectAttempts();
+/** How many disconnects in a row make the board offline. */
+uint32_t attemptsBeforeOffline();
+
+/** True once attemptsBeforeOffline() disconnects in a row have happened and
+    the session hasn't been ready since. */
+bool isOffline();
+
+/** How often the board retries once offline. */
+unsigned long offlineRetryIntervalMs();
 
 }  // namespace esp32va_openai

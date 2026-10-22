@@ -31,4 +31,13 @@ bool runSdSelfTest();
     mountSdCard() succeeded. */
 void describeSdCard(char* out, size_t out_size);
 
+/** Records whether the card passed mounting, its self-test and the
+    recorders' setup. Without a usable card the board runs on without
+    recordings: the recorders skip their file work and LIST / GET / DELETE
+    answer with an error line. Call once from setup(). */
+void setSdCardUsable(bool usable);
+
+/** True when the card passed every startup check (setSdCardUsable()). */
+bool isSdCardUsable();
+
 }  // namespace esp32va_sd_card

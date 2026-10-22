@@ -2,101 +2,228 @@
 
 #include <Arduino.h>
 #include <WiFi.h>
+#include <string.h>
+#include <strings.h>
+#include <time.h>
 #include "parameters.h"
 #include "secrets_include.h"
 #include "log_utils.h"
+#include "settings_store_utils.h"
 #include "status_report_utils.h"
+
+namespace esp32va_wifi {
 
 namespace {
 constexpr unsigned long kStillWaitingReportMs = 15000;
 constexpr unsigned long kSignalReportIntervalMs = 10000;
+// Down this long: start over on the network (WiFi.begin again). The ESP32
+// reconnects by itself after most drops, but not after e.g. a wrong
+// password or a network that was off when it tried.
+constexpr unsigned long kRestartConnectAfterMs = 20000;
 constexpr size_t kStageDetailBufferSize = 64;
+constexpr size_t kMaxSsidLength = 32;      // 802.11 limit
+constexpr size_t kMaxPasswordLength = 64;  // WPA2 limit
+constexpr time_t kPlausibleEpochSeconds = 8 * 3600 * 2;  // still near 1970 means not synced yet
+const char kSsidSettingKey[] = "wifi_ssid";
+const char kPasswordSettingKey[] = "wifi_pass";
+
+char active_ssid[kMaxSsidLength + 1] = "";
+char active_password[kMaxPasswordLength + 1] = "";
+bool using_saved_network = false;
+char pending_ssid[kMaxSsidLength + 1] = "";  // from WIFI_SSID, until WIFI_PASSWORD saves it
+bool pending_ssid_set = false;
 
 unsigned long last_signal_report_ms = 0;
+unsigned long last_connect_start_ms = 0;
 bool wifi_was_connected = false;
-}  // namespace
+bool time_sync_started = false;
+bool time_synced = false;
 
-void connectToWifi() {
-  // Connection progress is printed directly (not via LOG_INFO) so it stays
-  // visible at LOG_LEVEL_ERROR - otherwise a Wi-Fi that never connects looks
-  // like an endless line of dots with no explanation.
-  Serial.printf("Connecting to Wi-Fi \"%s\"...\n", WIFI_SSID);
-  char stage_detail[kStageDetailBufferSize];
-  snprintf(stage_detail, sizeof(stage_detail), "connecting to %s", WIFI_SSID);
-  esp32va_status::reportStage(esp32va_status::Stage::kWifi, esp32va_status::StageState::kActive, stage_detail);
-  WiFi.mode(WIFI_STA);
-  WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
-
-  unsigned long started_ms = millis();
-  unsigned long last_report_ms = started_ms;
-  while (WiFi.status() != WL_CONNECTED) {
-    delay(300);
-    Serial.print(".");  // raw progress indicator, not a log message - always visible
-    if (millis() - last_report_ms >= kStillWaitingReportMs) {
-      last_report_ms = millis();
-      wl_status_t status = WiFi.status();
-      const char *reason = status == WL_NO_SSID_AVAIL   ? "network not found - check the name, and that it's 2.4 GHz"
-                           : status == WL_CONNECT_FAILED ? "connection failed - check the password"
-                           : status == WL_DISCONNECTED   ? "not connected yet - check the password and signal"
-                                                         : "still trying";
-      Serial.println();
-      LOG_ERROR("Wi-Fi \"%s\" not connected after %lu s (status %d: %s). Still retrying...\n", WIFI_SSID,
-                (millis() - started_ms) / 1000, (int)status, reason);
-      snprintf(stage_detail, sizeof(stage_detail), "%s - still retrying", reason);
-      esp32va_status::reportStage(esp32va_status::Stage::kWifi, esp32va_status::StageState::kActive, stage_detail);
-    }
+/** Loads the network to use: the one saved in flash, or SECRETS.h's. */
+void loadActiveNetwork() {
+  using_saved_network = esp32va_settings::loadTextSetting(kSsidSettingKey, active_ssid, sizeof(active_ssid));
+  if (using_saved_network) {
+    esp32va_settings::loadTextSetting(kPasswordSettingKey, active_password, sizeof(active_password));
+    return;
   }
+  snprintf(active_ssid, sizeof(active_ssid), "%s", WIFI_SSID);
+  snprintf(active_password, sizeof(active_password), "%s", WIFI_PASSWORD);
+}
 
-  Serial.println();
-  Serial.printf("Wi-Fi connected. IP address: %s\n", WiFi.localIP().toString().c_str());
+/** Starts connecting to the active network - dropping the current attempt
+    first when restarting. */
+void startConnecting(bool restart) {
+  WiFi.mode(WIFI_STA);
+  if (restart) {
+    WiFi.disconnect();
+  }
+  WiFi.begin(active_ssid, active_password[0] != '\0' ? active_password : nullptr);
+  last_connect_start_ms = millis();
+}
+
+/** Reports "connecting to <ssid>" as the Wi-Fi stage. */
+void reportConnecting() {
+  char stage_detail[kStageDetailBufferSize];
+  snprintf(stage_detail, sizeof(stage_detail), "connecting to %s", active_ssid);
+  esp32va_status::reportStage(esp32va_status::Stage::kWifi, esp32va_status::StageState::kActive, stage_detail);
+}
+
+/** Why Wi-Fi isn't connected, in a few words. */
+const char* notConnectedReason(wl_status_t status) {
+  switch (status) {
+    case WL_NO_SSID_AVAIL:
+      return "network not found - check the name, and that it's 2.4 GHz";
+    case WL_CONNECT_FAILED:
+      return "connection failed - check the password";
+    case WL_DISCONNECTED:
+      return "not connected yet - check the password and signal";
+    default:
+      return "still trying";
+  }
+}
+
+/** Reports the connection as up: the stage, the IP and the signal. */
+void reportConnected() {
+  wifi_was_connected = true;
   esp32va_status::reportStage(esp32va_status::Stage::kWifi, esp32va_status::StageState::kOk,
                               WiFi.localIP().toString().c_str());
-  wifi_was_connected = true;
-  esp32va_wifi::reportWifiSignal();
+  reportWifiSignal();
   last_signal_report_ms = millis();
 }
 
-void syncSystemTime() {
-  // SNTP sync is required before the WSS handshake: TLS cert validation
-  // fails without a correct system clock.
-  Serial.printf("Syncing time...\n");
+/** Starts SNTP once - the clock then keeps itself in sync. */
+void startTimeSync() {
+  if (time_sync_started) {
+    return;
+  }
+  time_sync_started = true;
   esp32va_status::reportStage(esp32va_status::Stage::kTimeSync, esp32va_status::StageState::kActive, nullptr);
-  // TIMEZONE_UTC_OFFSET_SEC only affects localtime_r() elsewhere (e.g. step
-  // 22's greeting) - SNTP itself, and this function's own gmtime()-based log
-  // line below, are unaffected and stay in UTC.
-  // Optional: a POSIX TZ string in parameters.h (e.g. #define TIMEZONE_POSIX
-  // "IST-2IDT,M3.5.5/2,M10.5.0" for Israel) also follows summer time, which
-  // matters now that "What time is it?" reads this clock. Without it, the
-  // fixed offset is used as before.
+  // TIMEZONE_UTC_OFFSET_SEC only affects localtime_r() (the greeting, "what
+  // time is it?") - SNTP itself always syncs to UTC. A POSIX TZ string in
+  // parameters.h (TIMEZONE_POSIX) also follows summer time.
 #ifdef TIMEZONE_POSIX
   configTzTime(TIMEZONE_POSIX, "pool.ntp.org", "time.nist.gov");
 #else
   configTime(TIMEZONE_UTC_OFFSET_SEC, 0, "pool.ntp.org", "time.nist.gov");
 #endif
+}
+
+/** Checks whether the clock has been set; reports it the first time. */
+bool checkTimeSynced() {
+  if (time_synced) {
+    return true;
+  }
+  time_t now = time(nullptr);
+  if (now < kPlausibleEpochSeconds) {
+    return false;
+  }
+  time_synced = true;
+  Serial.printf("Time synced: %s", asctime(gmtime(&now)));
+  esp32va_status::reportStage(esp32va_status::Stage::kTimeSync, esp32va_status::StageState::kOk, nullptr);
+  return true;
+}
+
+/** The rest of the line after word and a space, or nullptr if command isn't
+    word (with or without an argument). An argument-less word gives "". */
+const char* commandArgument(const char* command, const char* word) {
+  size_t word_length = strlen(word);
+  if (strncasecmp(command, word, word_length) != 0) {
+    return nullptr;
+  }
+  const char* rest = command + word_length;
+  if (*rest == '\0') {
+    return rest;
+  }
+  if (*rest != ' ') {
+    return nullptr;
+  }
+  while (*rest == ' ') {
+    rest++;
+  }
+  return rest;
+}
+
+/** Switches to the active network now, telling the user and the app. */
+void switchNetwork() {
+  announceWifiNetwork();
+  Serial.printf("Connecting to Wi-Fi \"%s\"...\n", active_ssid);
+  wifi_was_connected = false;
+  reportConnecting();
+  startConnecting(true);
+}
+
+}  // namespace
+
+bool connectToWifi(unsigned long wait_ms) {
+  // Progress is printed directly (not via LOG_INFO) so it stays visible at
+  // LOG_LEVEL_ERROR - otherwise a Wi-Fi that never connects looks like an
+  // endless line of dots with no explanation.
+  loadActiveNetwork();
+  announceWifiNetwork();
+  Serial.printf("Connecting to Wi-Fi \"%s\"...\n", active_ssid);
+  reportConnecting();
+  startConnecting(false);
 
   unsigned long started_ms = millis();
   unsigned long last_report_ms = started_ms;
-  time_t now = time(nullptr);
-  while (now < 8 * 3600 * 2) {  // still near the 1970 epoch means time hasn't synced yet
+  while (WiFi.status() != WL_CONNECTED) {
+    if (millis() - started_ms >= wait_ms) {
+      Serial.println();
+      wl_status_t status = WiFi.status();
+      LOG_ERROR("Wi-Fi \"%s\" not connected after %lu s (status %d: %s).\n", active_ssid, wait_ms / 1000,
+                (int)status, notConnectedReason(status));
+      Serial.printf("Going on without Wi-Fi - still trying in the background. Set another network from the "
+                    "control center (Wi-Fi card) if this one is wrong.\n");
+      char stage_detail[kStageDetailBufferSize];
+      snprintf(stage_detail, sizeof(stage_detail), "%s - still trying", notConnectedReason(status));
+      esp32va_status::reportStage(esp32va_status::Stage::kWifi, esp32va_status::StageState::kFail, stage_detail);
+      return false;
+    }
     delay(300);
     Serial.print(".");  // raw progress indicator, not a log message - always visible
-    now = time(nullptr);
     if (millis() - last_report_ms >= kStillWaitingReportMs) {
       last_report_ms = millis();
+      wl_status_t status = WiFi.status();
       Serial.println();
-      LOG_ERROR("Time not synced after %lu s - the network may block NTP (UDP port 123). Still retrying...\n",
-                (millis() - started_ms) / 1000);
-      esp32va_status::reportStage(esp32va_status::Stage::kTimeSync, esp32va_status::StageState::kActive,
-                                  "no answer from the time servers - still retrying");
+      LOG_ERROR("Wi-Fi \"%s\" not connected after %lu s (status %d: %s). Still retrying...\n", active_ssid,
+                (millis() - started_ms) / 1000, (int)status, notConnectedReason(status));
     }
   }
 
   Serial.println();
-  Serial.printf("Time synced: %s", asctime(gmtime(&now)));
-  esp32va_status::reportStage(esp32va_status::Stage::kTimeSync, esp32va_status::StageState::kOk, nullptr);
+  Serial.printf("Wi-Fi connected. IP address: %s\n", WiFi.localIP().toString().c_str());
+  reportConnected();
+  return true;
 }
 
-namespace esp32va_wifi {
+bool syncSystemTime(unsigned long wait_ms) {
+  // SNTP sync is required before the WSS handshake: TLS cert validation
+  // fails without a correct system clock.
+  Serial.printf("Syncing time...\n");
+  startTimeSync();
+  unsigned long started_ms = millis();
+  while (!checkTimeSynced()) {
+    if (millis() - started_ms >= wait_ms) {
+      Serial.println();
+      LOG_ERROR("Time not synced after %lu s - the network may block NTP (UDP port 123). Still trying.\n",
+                wait_ms / 1000);
+      esp32va_status::reportStage(esp32va_status::Stage::kTimeSync, esp32va_status::StageState::kActive,
+                                  "no answer from the time servers - still trying");
+      return false;
+    }
+    delay(300);
+    Serial.print(".");  // raw progress indicator, not a log message - always visible
+  }
+  return true;
+}
+
+bool isWifiConnected() {
+  return WiFi.status() == WL_CONNECTED;
+}
+
+bool isTimeSynced() {
+  return checkTimeSynced();
+}
 
 void reportWifiSignal() {
   if (WiFi.status() != WL_CONNECTED) {
@@ -105,20 +232,88 @@ void reportWifiSignal() {
   esp32va_status::printProtocolLine("@@WIFI %d", (int)WiFi.RSSI());
 }
 
+void announceWifiNetwork() {
+  esp32va_status::printProtocolLine("@@WIFI_NET %s %s", using_saved_network ? "saved" : "default", active_ssid);
+}
+
+bool handleWifiCommand(const char* command) {
+  const char* argument = nullptr;
+  if ((argument = commandArgument(command, "WIFI_SSID")) != nullptr) {
+    if (*argument == '\0' || strlen(argument) > kMaxSsidLength) {
+      Serial.printf("WIFI_SSID ignored - expected a network name of 1 to %u characters.\n",
+                    (unsigned)kMaxSsidLength);
+      return true;
+    }
+    snprintf(pending_ssid, sizeof(pending_ssid), "%s", argument);
+    pending_ssid_set = true;
+    Serial.printf("Wi-Fi network name set to \"%s\" - now send WIFI_PASSWORD <password> (or WIFI_PASSWORD alone "
+                  "for an open network) to save it and connect.\n",
+                  pending_ssid);
+    return true;
+  }
+  if ((argument = commandArgument(command, "WIFI_PASSWORD")) != nullptr) {
+    if (!pending_ssid_set) {
+      Serial.printf("WIFI_PASSWORD ignored - send WIFI_SSID <name> first.\n");
+      return true;
+    }
+    size_t password_length = strlen(argument);
+    if (password_length > kMaxPasswordLength || (password_length > 0 && password_length < 8)) {
+      Serial.printf("WIFI_PASSWORD ignored - a WPA2 password is 8 to %u characters (or none for an open "
+                    "network).\n",
+                    (unsigned)kMaxPasswordLength);
+      return true;
+    }
+    snprintf(active_ssid, sizeof(active_ssid), "%s", pending_ssid);
+    snprintf(active_password, sizeof(active_password), "%s", argument);
+    pending_ssid_set = false;
+    esp32va_settings::saveTextSetting(kSsidSettingKey, active_ssid);
+    esp32va_settings::saveTextSetting(kPasswordSettingKey, active_password);
+    using_saved_network = true;
+    LOG_INFO("Saved Wi-Fi network \"%s\" (password: %u characters).\n", active_ssid, (unsigned)password_length);
+    switchNetwork();
+    return true;
+  }
+  if ((argument = commandArgument(command, "WIFI_FORGET")) != nullptr) {
+    esp32va_settings::removeSetting(kSsidSettingKey);
+    esp32va_settings::removeSetting(kPasswordSettingKey);
+    pending_ssid_set = false;
+    loadActiveNetwork();
+    LOG_INFO("Forgot the saved Wi-Fi network - back to the default one.\n");
+    switchNetwork();
+    return true;
+  }
+  if ((argument = commandArgument(command, "WIFI")) != nullptr) {
+    announceWifiNetwork();
+    return true;
+  }
+  return false;
+}
+
 void monitorWifiConnection() {
   bool connected = WiFi.status() == WL_CONNECTED;
   if (connected != wifi_was_connected) {
-    wifi_was_connected = connected;
     if (connected) {
       LOG_INFO("Wi-Fi is back. IP address: %s\n", WiFi.localIP().toString().c_str());
-      esp32va_status::reportStage(esp32va_status::Stage::kWifi, esp32va_status::StageState::kOk,
-                                  WiFi.localIP().toString().c_str());
-      reportWifiSignal();
+      Serial.printf("Wi-Fi connected to \"%s\".\n", active_ssid);
+      reportConnected();
     } else {
+      wifi_was_connected = false;
+      last_connect_start_ms = millis();  // the ESP32 starts reconnecting by itself now
       LOG_ERROR("Wi-Fi connection lost - reconnecting.\n");
       esp32va_status::reportStage(esp32va_status::Stage::kWifi, esp32va_status::StageState::kFail,
                                   "connection lost - reconnecting");
     }
+  }
+  if (!connected && millis() - last_connect_start_ms >= kRestartConnectAfterMs) {
+    LOG_INFO("Wi-Fi still down after %lu s - starting over on \"%s\".\n", kRestartConnectAfterMs / 1000,
+             active_ssid);
+    startConnecting(true);
+    esp32va_status::reportStage(esp32va_status::Stage::kWifi, esp32va_status::StageState::kFail,
+                                notConnectedReason(WiFi.status()));
+  }
+  if (connected && !time_synced) {
+    startTimeSync();
+    checkTimeSynced();
   }
   if (connected && millis() - last_signal_report_ms >= kSignalReportIntervalMs) {
     last_signal_report_ms = millis();

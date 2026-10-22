@@ -49,6 +49,8 @@ const char* cardTypeName(sdcard_type_t card_type) {
   }
 }
 
+bool sd_card_usable = false;  // see setSdCardUsable()
+
 }  // namespace
 
 bool mountSdCard() {
@@ -114,6 +116,14 @@ bool runSdSelfTest() {
 
   LOG_INFO("SD card self-test passed (write, read back, delete).\n");
   return true;
+}
+
+void setSdCardUsable(bool usable) {
+  sd_card_usable = usable;
+}
+
+bool isSdCardUsable() {
+  return sd_card_usable;
 }
 
 }  // namespace esp32va_sd_card

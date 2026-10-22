@@ -164,7 +164,13 @@ CaptureProgress capture = {};
 bool last_turn_was_hands_free = false;   // the LISTEN awaiting its verdict started by voice
 bool last_turn_lost_mic_audio = false;   // ...and lost some mic audio on the way
 uint32_t hands_free_turns_passed = 0;    // in a row, toward this step's PASS
+unsigned long session_not_ready_since_ms = 0;  // when the session was last lost (or boot) - see isAssistantOffline()
+bool setup_finished = false;  // setup() returned - "offline" means something only after that
+bool openai_connection_started = false;  // see startOpenAiConnectionWhenNetworkReady()
 }  // namespace
+
+bool isAssistantOffline();
+void startOpenAiConnectionWhenNetworkReady();
 
 /** Milliseconds of audio in a number of 24 kHz samples. */
 uint32_t samplesToMs(uint32_t samples) {
@@ -299,10 +305,11 @@ void markReplyFailed(const char* reason) {
   countTowardStepVerdict(false);
 }
 
-/** Halts the sketch entirely - reserved for a non-transient problem (the SD card
-    being unusable, the mic task not starting, or the connection never
-    succeeding - see openai_realtime_utils's attempt cap), not for a single
-    LISTEN cycle failing. Fails this step's verdict too, unless it already
+/** Halts the sketch entirely - reserved for the one problem it can't run
+    around: the mic task not starting (out of memory at boot). A missing SD
+    card, no Wi-Fi or an unreachable OpenAI don't halt it - it runs on
+    without recordings, or offline, and keeps retrying. Fails this step's
+    verdict too, unless it already
     passed. Never gated behind a log level - see log_utils.h. */
 void haltSketch(const char* reason) {
   should_keep_running = false;
@@ -466,11 +473,18 @@ void handleServerMessage(uint8_t* payload, size_t length) {
       should_send_opening_greeting = true;
       esp32va_measure::markBootMilestone(esp32va_measure::BootMilestone::kSessionReady);
       esp32va_measure::reportBootTiming();
-      // A later mid-conversation disconnect gets its own fresh attempt
-      // budget, rather than one shared with however many retries startup
-      // itself needed.
-      resetReconnectBackoff();
+      // A later disconnect gets its own fresh attempt budget, rather than
+      // one shared with however many retries startup itself needed.
+      esp32va_openai::resetReconnectBackoff(webSocket);
     } else {
+      // Every successful reconnect starts the count again - otherwise a few
+      // unrelated disconnects over a long session (e.g. the server's own
+      // session timeout) would add up to "offline".
+      bool was_offline = esp32va_openai::isOffline();
+      esp32va_openai::resetReconnectBackoff(webSocket);
+      if (was_offline) {
+        Serial.printf("Back online - OpenAI is reachable again.\n");
+      }
       LOG_INFO("Reconnected (#%u) - conversation context lost. Resuming at LISTEN #%u.\n",
                connection_count - 1, listen_cycle + 1);
       esp32va_status::reportStage(esp32va_status::Stage::kOpenAi, esp32va_status::StageState::kOk,
@@ -657,7 +671,7 @@ void handleServerMessage(uint8_t* payload, size_t length) {
 
 /** Handles WebSocket lifecycle events. CONNECTED/DISCONNECTED/TEXT get
     explicit handling here; everything else is delegated to
-    logGenericWsEvent() so nothing goes unnoticed. */
+    esp32va_openai::logGenericWsEvent() so nothing goes unnoticed. */
 void onWebSocketEvent(WStype_t type, uint8_t* payload, size_t length) {
   switch (type) {
     case WStype_CONNECTED:
@@ -693,14 +707,21 @@ void onWebSocketEvent(WStype_t type, uint8_t* payload, size_t length) {
       esp32va_reply_recorder::noteReplyAborted();  // keeps what was saved; must come before the ring reset
       resetRingBuffer();  // any partial reply audio is now stale - don't play it
       markReplyFailed("disconnected before a reply arrived");
-      if (registerDisconnectAndMaybeGiveUp(webSocket)) {
-        esp32va_status::reportStage(esp32va_status::Stage::kOpenAi, esp32va_status::StageState::kFail,
-                                    "couldn't connect - check the API key and internet access");
-        haltSketch("connection never succeeded after repeated attempts");
-      } else {
+      session_not_ready_since_ms = millis();
+      if (esp32va_openai::registerDisconnect(webSocket)) {
+        // Offline - but never halted: it keeps retrying, and the timer and
+        // the controls keep working meanwhile.
+        char stage_detail[kStateDetailBufferSize];
+        snprintf(stage_detail, sizeof(stage_detail), "offline - retrying every %lu s",
+                 esp32va_openai::offlineRetryIntervalMs() / 1000);
+        esp32va_status::reportStage(esp32va_status::Stage::kOpenAi, esp32va_status::StageState::kFail, stage_detail);
+        Serial.printf("OpenAI unreachable - offline. The timer and the controls still work; retrying every %lu s.\n",
+                      esp32va_openai::offlineRetryIntervalMs() / 1000);
+      } else if (!esp32va_openai::isOffline()) {
         char stage_detail[kStateDetailBufferSize];
         snprintf(stage_detail, sizeof(stage_detail), "disconnected - reconnecting (attempt %u of %u)",
-                 (unsigned)esp32va_openai::reconnectAttemptCount(), (unsigned)esp32va_openai::maxConnectAttempts());
+                 (unsigned)esp32va_openai::reconnectAttemptCount(),
+                 (unsigned)esp32va_openai::attemptsBeforeOffline());
         esp32va_status::reportStage(esp32va_status::Stage::kOpenAi, esp32va_status::StageState::kActive,
                                     stage_detail);
       }
@@ -709,7 +730,7 @@ void onWebSocketEvent(WStype_t type, uint8_t* payload, size_t length) {
       handleServerMessage(payload, length);
       break;
     default:
-      logGenericWsEvent(type, payload, length);
+      esp32va_openai::logGenericWsEvent(type, payload, length);
       break;
   }
 }
@@ -1029,6 +1050,7 @@ bool commandPausesHandsFree(const char* command) {
 void reprintFullStatus() {
   esp32va_status::reprintStatusSnapshot();
   esp32va_wifi::reportWifiSignal();
+  esp32va_wifi::announceWifiNetwork();
   esp32va_controls::announceControlStates();
   esp32va_light_sensor::announceLightState();
   esp32va_hands_free::announceHandsFreeState();
@@ -1042,6 +1064,8 @@ void reprintFullStatus() {
 void startManualListen() {
   if (!should_keep_running) {
     Serial.printf("LISTEN ignored - the sketch has halted (see the HALTED line above).\n");
+  } else if (!session_ready && isAssistantOffline()) {
+    Serial.printf("LISTEN ignored - offline (no Wi-Fi or no OpenAI). The timer and the controls still work.\n");
   } else if (!session_ready) {
     Serial.printf("LISTEN ignored - not ready yet (still connecting/setting up).\n");
   } else if (is_capturing) {
@@ -1102,7 +1126,8 @@ void askTypedQuestion(const String& text) {
     / BEEP / LED / LED_BRIGHTNESS control the hardware
     (device_controls_utils.h), LIGHT [<value>] / LIGHT_BANDS set/show the
     simulated light sensor (light_sensor_utils.h), VAD / VAD_SENSITIVITY /
-    VAD_HANGOVER set hands-free listening (hands_free_utils.h) - all at any
+    VAD_HANGOVER set hands-free listening (hands_free_utils.h), WIFI /
+    WIFI_SSID / WIFI_PASSWORD / WIFI_FORGET the network (wifi_utils.h) - all at any
     time; BEEP and GET stop hands-free listening first. LISTEN starts a
     manual capture if the board can take one (startManualListen()). ASK
     <text> sends a typed question (askTypedQuestion()).
@@ -1132,7 +1157,8 @@ void checkForSerialCommand() {
   if (!handled) {
     handled = esp32va_controls::handleControlCommand(command.c_str(), isIdleForFileTransfer()) ||
               esp32va_light_sensor::handleLightCommand(command.c_str()) ||
-              esp32va_hands_free::handleHandsFreeCommand(command.c_str());
+              esp32va_hands_free::handleHandsFreeCommand(command.c_str()) ||
+              esp32va_wifi::handleWifiCommand(command.c_str());
   }
   if (pauses_hands_free) {
     esp32va_hands_free::holdOff();  // again: the cooldown counts from after the beep or the transfer
@@ -1149,7 +1175,7 @@ void checkForSerialCommand() {
     return;
   }
   if (!command.equalsIgnoreCase("LISTEN")) {
-    Serial.printf("Unknown command \"%s\" - expected LISTEN, CANCEL, ASK <text>, STATUS, CLOCK, VAD on|off, VAD_SENSITIVITY <1-5>, VAD_HANGOVER <600-1500>, LIGHT <0-%d>, LIGHT_BANDS <evening> <day>, VOLUME <0-100>, MUTE on|off, BEEP, LED on|off, LED_BRIGHTNESS <0-100>, LIST, GET <name>, DELETE <name> or DELETE_ALL [replies|commands].\n",
+    Serial.printf("Unknown command \"%s\" - expected LISTEN, CANCEL, ASK <text>, STATUS, CLOCK, VAD on|off, VAD_SENSITIVITY <1-5>, VAD_HANGOVER <600-1500>, LIGHT <0-%d>, LIGHT_BANDS <evening> <day>, VOLUME <0-100>, MUTE on|off, BEEP, LED on|off, LED_BRIGHTNESS <0-100>, WIFI, WIFI_SSID <name>, WIFI_PASSWORD [<password>], WIFI_FORGET, LIST, GET <name>, DELETE <name> or DELETE_ALL [replies|commands].\n",
              command.c_str(), esp32va_light_sensor::kMaxLightSensorValue);
     return;
   }
@@ -1213,6 +1239,19 @@ void checkPlaybackComplete() {
   markReplyReceived();
 }
 
+/** True when the assistant can't answer for now and isn't about to: OpenAI
+    failed attempts-before-offline times in a row, or the session has been
+    down longer than the offline retry interval (e.g. Wi-Fi up but no
+    internet, where connection attempts fail before any disconnect event).
+    Never while setup() is still running. */
+bool isAssistantOffline() {
+  if (session_ready || !setup_finished) {
+    return false;
+  }
+  return esp32va_openai::isOffline() ||
+         millis() - session_not_ready_since_ms > esp32va_openai::offlineRetryIntervalMs();
+}
+
 /** Works out what the assistant is doing from this sketch's flags and
     reports it as @@STATE when it changes (status_report_utils.h). Called
     every loop() pass. */
@@ -1222,13 +1261,21 @@ void updatePipelineState() {
     return;  // haltSketch() already reported halted
   }
   if (!session_ready) {
+    if (setup_finished && !esp32va_wifi::isWifiConnected()) {
+      esp32va_status::reportPipelineState(PipelineState::kOffline, "no Wi-Fi");
+      return;
+    }
+    if (isAssistantOffline()) {
+      esp32va_status::reportPipelineState(PipelineState::kOffline, "OpenAI unreachable");
+      return;
+    }
     if (!session_ever_ready) {
       esp32va_status::reportPipelineState(PipelineState::kBooting, nullptr);
       return;
     }
     char reconnect_detail[kStateDetailBufferSize];
     snprintf(reconnect_detail, sizeof(reconnect_detail), "attempt %u of %u",
-             (unsigned)esp32va_openai::reconnectAttemptCount(), (unsigned)esp32va_openai::maxConnectAttempts());
+             (unsigned)esp32va_openai::reconnectAttemptCount(), (unsigned)esp32va_openai::attemptsBeforeOffline());
     esp32va_status::reportPipelineState(PipelineState::kReconnecting, reconnect_detail);
     return;
   }
@@ -1266,8 +1313,8 @@ void updatePipelineState() {
     mount + self-test + recorders, Wi-Fi, time sync, then open the secure
     WebSocket connection - with a heap snapshot after each stage, and each
     startup check reported as @@STAGE for the laptop app. Also loads the
-    saved volume / brightness / hands-free settings. Halts (step FAILED) if
-    the SD card isn't usable or the mic task can't start. */
+    saved volume / brightness / hands-free settings. Halts only if the mic
+    task can't start; without an SD card it runs on without recordings. */
 void setup() {
   Serial.begin(kSerialBaudRate);
   esp32va_heap::startCountingFailedAllocations();
@@ -1311,31 +1358,59 @@ void setup() {
                         esp32va_command_recorder::setupVoiceCommandRecorder(
                             esp32va_sd_transfer::announceDeletedRecording);
   esp32va_heap::recordHeapSnapshot("after SD + recorder setup");
+  esp32va_sd_card::setSdCardUsable(sd_card_usable);
   if (!sd_card_usable) {
+    // Recordings are a feature, not a requirement: the assistant runs on
+    // without them (the recorders skip their file work, LIST/GET answer
+    // with an error line).
     esp32va_status::reportStage(esp32va_status::Stage::kSdCard, esp32va_status::StageState::kFail,
-                                "not usable - no card, loose wiring, or not FAT32");
-    haltSketch("SD card not usable - see the error above");
-    return;
+                                "no card (or not FAT32) - running without recordings");
+    Serial.printf("No usable SD card - running without recordings. Insert one and press Reset to record again.\n");
+  } else {
+    char sd_summary[kStateDetailBufferSize / 2];
+    esp32va_sd_card::describeSdCard(sd_summary, sizeof(sd_summary));
+    snprintf(stage_detail, sizeof(stage_detail), "%s, self-test passed", sd_summary);
+    esp32va_status::reportStage(esp32va_status::Stage::kSdCard, esp32va_status::StageState::kOk, stage_detail);
+    // Now, not on request: loop() - which answers LIST - only starts after
+    // Wi-Fi and time sync, 10+ s from here.
+    esp32va_sd_transfer::announceRecordingList();
   }
-  char sd_summary[kStateDetailBufferSize / 2];
-  esp32va_sd_card::describeSdCard(sd_summary, sizeof(sd_summary));
-  snprintf(stage_detail, sizeof(stage_detail), "%s, self-test passed", sd_summary);
-  esp32va_status::reportStage(esp32va_status::Stage::kSdCard, esp32va_status::StageState::kOk, stage_detail);
-  // Now, not on request: loop() - which answers LIST - only starts after
-  // Wi-Fi and time sync, 10+ s from here.
-  esp32va_sd_transfer::announceRecordingList();
   esp32va_measure::markBootMilestone(esp32va_measure::BootMilestone::kSdReady);
 
-  connectToWifi();
-  esp32va_measure::markBootMilestone(esp32va_measure::BootMilestone::kWifiConnected);
-  syncSystemTime();
-  esp32va_measure::markBootMilestone(esp32va_measure::BootMilestone::kTimeSynced);
+  // Neither waits for good: without Wi-Fi (or the clock) the board goes on
+  // offline, and loop() starts the OpenAI connection once both are up.
+  if (esp32va_wifi::connectToWifi(esp32va_params::kWifiBootWaitMs)) {
+    esp32va_measure::markBootMilestone(esp32va_measure::BootMilestone::kWifiConnected);
+    if (esp32va_wifi::syncSystemTime(esp32va_params::kTimeSyncBootWaitMs)) {
+      esp32va_measure::markBootMilestone(esp32va_measure::BootMilestone::kTimeSynced);
+    }
+  }
   esp32va_heap::recordHeapSnapshot("after Wi-Fi + time sync");
 
+  webSocket.onEvent(onWebSocketEvent);
+  startOpenAiConnectionWhenNetworkReady();
+  if (!openai_connection_started) {
+    Serial.printf("The OpenAI connection starts by itself once Wi-Fi and the clock are up. Meanwhile the timer "
+                  "and the controls work.\n");
+  }
+  session_not_ready_since_ms = millis();
+  setup_finished = true;
+}
+
+/** Opens the OpenAI connection the first time Wi-Fi is connected and the
+    clock is set (TLS needs both) - from setup() when they came up in time,
+    otherwise from loop() whenever they do. The WebSocket library reconnects
+    by itself after that. */
+void startOpenAiConnectionWhenNetworkReady() {
+  if (openai_connection_started || !esp32va_wifi::isWifiConnected() || !esp32va_wifi::isTimeSynced()) {
+    return;
+  }
+  openai_connection_started = true;
+  esp32va_measure::markBootMilestone(esp32va_measure::BootMilestone::kWifiConnected);  // no-ops when setup() marked them
+  esp32va_measure::markBootMilestone(esp32va_measure::BootMilestone::kTimeSynced);
   Serial.printf("Connecting to OpenAI Realtime API...\n");
   esp32va_status::reportStage(esp32va_status::Stage::kOpenAi, esp32va_status::StageState::kActive, "connecting");
-  webSocket.onEvent(onWebSocketEvent);
-  beginOpenAiRealtimeConnection(webSocket);
+  esp32va_openai::beginOpenAiRealtimeConnection(webSocket);
 }
 
 /** Services the WebSocket connection (unless paused for backpressure - see
@@ -1409,5 +1484,6 @@ void loop() {
     last_reply_activity_ms = millis();
   }
   esp32va_wifi::monitorWifiConnection();
+  startOpenAiConnectionWhenNetworkReady();
   updatePipelineState();
 }

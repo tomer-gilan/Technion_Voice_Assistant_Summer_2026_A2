@@ -14,8 +14,10 @@
 //       check. detail is free text to the end of the line.
 //   @@STATE <state> [detail]
 //       state: booting | ready | armed | listening | processing | tool |
-//              speaking | saving | reconnecting | halted - what the
-//              assistant is doing (armed: hands-free, waiting for speech).
+//              speaking | saving | reconnecting | offline | halted - what
+//              the assistant is doing (armed: hands-free, waiting for
+//              speech; offline: no Wi-Fi or no OpenAI for a while, still
+//              retrying - the timer and the controls keep working).
 //   @@RESULT <pass|fail> <LISTEN number> [reason]   - a LISTEN cycle's verdict
 //   @@MIC_LEVEL <dBFS>       - the mic's level, every ~100 ms while listening
 //   @@HEARD <text>           - what the user said (input transcription)
@@ -25,7 +27,9 @@
 // Other modules add their own state lines the same way (@@LED, @@VOLUME in
 // device_controls_utils.h, @@LIGHT in light_sensor_utils.h, @@BOOT_TIMING /
 // @@TIMING in measurement_utils.h, @@TIMER / @@CLOCK in clock_timer_utils.h, @@HEAP in heap_diagnostics_utils.h, @@VAD /
-// @@VAD_LEVEL / @@VAD_EVENT in hands_free_utils.h). The STATUS
+// @@VAD_LEVEL / @@VAD_EVENT in hands_free_utils.h, @@WIFI_NET in
+// wifi_utils.h, @@BUTTON in button_utils.h, @@SOUNDS in
+// device_controls_utils.h). The STATUS
 // serial command reprints all of them, so an app that connects mid-session
 // gets the full picture.
 
@@ -48,6 +52,7 @@ enum class PipelineState : uint8_t {
   kSpeaking,
   kSaving,
   kReconnecting,
+  kOffline,  // no Wi-Fi, or OpenAI unreachable for a while - still retrying; timer and controls work
   kHalted,
 };
 

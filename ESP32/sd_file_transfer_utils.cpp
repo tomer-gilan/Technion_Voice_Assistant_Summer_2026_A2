@@ -10,6 +10,7 @@
 #include <unistd.h>
 #include "log_utils.h"
 #include "recording_folder_utils.h"
+#include "sd_card_utils.h"
 
 namespace esp32va_sd_transfer {
 
@@ -206,6 +207,10 @@ bool handleFileCommand(const char* command, bool transfers_allowed) {
     return false;
   }
 
+  if (!esp32va_sd_card::isSdCardUsable()) {
+    Serial.printf("@@%s_ERROR - no SD card (the board runs without recordings)\n", command_word);
+    return true;
+  }
   if (!transfers_allowed) {
     Serial.printf("@@BUSY %s\n", command_word);
     LOG_DEBUG("%s refused - a reply is in progress, still playing, or still being saved.\n", command);
@@ -233,6 +238,9 @@ bool handleFileCommand(const char* command, bool transfers_allowed) {
 }
 
 void announceRecordingList() {
+  if (!esp32va_sd_card::isSdCardUsable()) {
+    return;
+  }
   listRecordings();
 }
 

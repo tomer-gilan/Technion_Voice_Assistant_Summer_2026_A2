@@ -6,6 +6,7 @@
 #include <string.h>
 #include <unistd.h>
 #include "log_utils.h"
+#include "sd_card_utils.h"
 
 namespace esp32va_command_recorder {
 
@@ -46,6 +47,9 @@ bool setupVoiceCommandRecorder(esp32va_recordings::RecordingDeletedListener on_r
 }
 
 void beginVoiceCommand() {
+  if (!esp32va_sd_card::isSdCardUsable()) {
+    return;  // running without a card - nothing is saved
+  }
   esp32va_recordings::formatRecordingName(kVoiceCommandFolder, next_command_number, current_file_name,
                                           sizeof(current_file_name));
   next_command_number++;
@@ -102,6 +106,9 @@ void appendMicSamples(const int16_t* samples, uint32_t sample_count) {
 }
 
 void cancelVoiceCommand() {
+  if (!esp32va_sd_card::isSdCardUsable()) {
+    return;  // nothing was created
+  }
   if (file_descriptor >= 0) {
     close(file_descriptor);
     file_descriptor = -1;
