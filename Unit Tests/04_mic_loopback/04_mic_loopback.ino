@@ -9,7 +9,7 @@
 //
 // Note: buffering a whole clip in RAM is fine for this bring-up test (no
 // Wi-Fi/TLS loaded yet, so there's plenty of free heap), but the real
-// Gemini pipeline streams audio in small live chunks instead - see the
+// firmware streams audio in small live chunks instead - see the
 // memory notes in Documentation/decisions.md.
 //
 // PASS (by ear): after the first cycle the sketch prints once either

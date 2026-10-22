@@ -20,7 +20,7 @@
 
 namespace {
 constexpr i2s_port_t kI2sPort = I2S_NUM_1;  // kept separate from the speaker's I2S_NUM_0 (see step 4)
-constexpr uint32_t kSampleRateHz = 16000;   // matches the Gemini Live API input rate
+constexpr uint32_t kSampleRateHz = 16000;   // 16 kHz is plenty for speech
 constexpr uint32_t kSamplesPerReport = kSampleRateHz / 2;  // ~0.5s reporting window
 constexpr uint32_t kReadChunkSamples = 256;
 constexpr uint32_t kVerdictDeadlineMs = 15000;  // time to talk before a FAILED verdict
