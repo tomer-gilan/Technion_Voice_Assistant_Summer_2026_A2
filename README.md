@@ -177,7 +177,7 @@
 | `set_volume` | קובע עוצמה באחוזים (‏10-100), או מגביר / מנמיך ב-20% | `Set the volume to 30 percent`, `Louder` |
 | `get_current_time` | התאריך והשעה מהשעון של הלוח (מסונכרן מהאינטרנט, לפי שעון ישראל כולל שעון קיץ), וכמה נשאר לטיימר | `What time is it?` |
 | `get_board_status` | עוצמת ה-Wi-Fi, כמה דקות הלוח דלוק וכמה זיכרון פנוי | `How are you doing?` |
-| `set_timer` | טיימר של 1 עד 3600 שניות (בהדגמה 20 עד 60 שניות), או ביטול. בסוף העוזר אומר את זה בקול (גם על מה התזכורת), ואפשר להדליק או לכבות את האור | `Remind me in 30 seconds to check the oven`, `Turn off the light in 20 seconds` |
+| `set_timer` | טיימר של 1 עד 3600 שניות (בהדגמה 20 עד 60 שניות), או ביטול (0). מעל שעה נקבעת שעה והעוזר אומר זאת. ערך שלילי או קצר משנייה נדחה, והעוזר מבקש שוב בלי לגעת בטיימר שרץ. בסוף העוזר אומר את זה בקול (גם על מה התזכורת), ואפשר להדליק או לכבות את האור | `Remind me in 30 seconds to check the oven`, `Turn off the light in 20 seconds` |
 
 ![מה קורה כשמבקשים להדליק את האור](Documentation/images/led-sequence.png)
 
