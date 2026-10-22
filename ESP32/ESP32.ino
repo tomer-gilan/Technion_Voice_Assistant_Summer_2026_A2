@@ -290,6 +290,7 @@ void markReplyFailed(const char* reason) {
   if (reply_received_this_cycle || !awaiting_reply) return;
   reply_received_this_cycle = true;
   awaiting_reply = false;
+  function_call_turn_pending = false;  // else @@STATE stays "tool" after the failure
   Serial.printf("===== LISTEN #%u FAILED: %s =====\n", listen_cycle, reason);
   esp32va_status::printProtocolLine("@@RESULT fail %u %s", listen_cycle, reason);
   esp32va_controls::requestStatusSound(esp32va_controls::StatusSound::kFailed);
@@ -619,6 +620,7 @@ void handleServerMessage(uint8_t* payload, size_t length) {
     }
     if (strcmp(status, "failed") == 0) {
       response_in_flight = false;
+      function_call_turn_pending = false;
       const char* error_message = doc["response"]["status_details"]["error"]["message"] | "(no error detail)";
       markReplyFailed(error_message);
     } else if (function_call_turn_pending) {
@@ -695,6 +697,7 @@ void onWebSocketEvent(WStype_t type, uint8_t* payload, size_t length) {
       }
       session_ready = false;
       response_in_flight = false;
+      function_call_turn_pending = false;
       dropping_reply_audio = false;
       if (is_capturing) {
         abortCapture("disconnected while recording");  // stops the mic (no send happens here)
@@ -1223,6 +1226,7 @@ void checkReplyTimeout() {
     return;
   }
   response_in_flight = false;  // a response that silent isn't coming any more
+  function_call_turn_pending = false;
   dropping_reply_audio = false;
   if (!awaiting_reply) {
     LOG_ERROR("No word from the server for %lu ms about the last response - not waiting for it any more.\n",
