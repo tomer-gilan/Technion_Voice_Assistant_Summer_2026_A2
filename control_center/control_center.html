@@ -2463,7 +2463,10 @@ function handleStatusLine(tag, rest) {
       board.statusSounds = words[0] === "on";
       renderBoardOptions();
       break;
+    case "CLOCK":
+      break;  // only the self-test reads it (waitForStatus, above)
     default:
+      appendLog(`(app) Unhandled status line @@${tag} - this page doesn't know it yet.`);
       break;
   }
 }
@@ -2481,6 +2484,8 @@ function onVadEvent([kind, first, second]) {
     elements.vadNote.textContent = `Ignored ${formatSeconds(Number(second) / 1000)} of sound - ${DISCARD_TEXT[first] || first}.`;
   } else if (kind === "paused") {
     elements.vadNote.textContent = `Several noises in a row - hands-free pauses for ${Math.round(Number(first) / 1000)} s.`;
+  } else {
+    appendLog(`(app) Unknown hands-free event "${kind}" in @@VAD_EVENT - ignored.`);
   }
 }
 
