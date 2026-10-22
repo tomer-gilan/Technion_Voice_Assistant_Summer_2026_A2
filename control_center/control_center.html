@@ -2361,6 +2361,7 @@ function handleStatusLine(tag, rest) {
       // app's own "offline" already means "no board connected".
       const boardState = words[0] === "offline" ? "netdown" : words[0];
       board.pipeline = { state: boardState, detail: words.slice(1).join(" ") };
+      if (words[0] === "booting") onUsageBoardBooting();
       if (wasRunning && words[0] === "booting") {
         elements.result.className = "result";
         elements.result.textContent = "The board restarted.";
@@ -3140,7 +3141,23 @@ let usage = newUsage();
 function newUsage() {
   return { turns: 0, failed: 0, handsFree: 0, responseMs: [], ledByVoice: 0, timeOfDayAsks: 0, volumeByVoice: 0,
            lightBand: null, lightChanges: 0, noisesIgnored: 0, bootMs: null,
-           history: [] };  // one entry per @@TIMING: { n, at, mode, tool, result, serverMs, firstSoundMs, doneMs }
+           boardSession: 1,           // counts the board's restarts seen: its command number n starts at 1 again after each
+           turnsThisBoardSession: 0,
+           history: [] };  // one entry per @@TIMING: { n, boardSession, at, mode, tool, result, serverMs, firstSoundMs, doneMs }
+}
+
+/** Starts a new board session for the command numbers when the board
+    restarted (@@STATE booting) after answering something. */
+function onUsageBoardBooting() {
+  if (usage.turnsThisBoardSession === 0) return;
+  usage.boardSession++;
+  usage.turnsThisBoardSession = 0;
+}
+
+/** A command's label, unique across board restarts: "#7", or "#2.7" (the
+    7th command after the board's 2nd start) once it has restarted. */
+function turnLabel(turn) {
+  return usage.boardSession > 1 ? `#${turn.boardSession}.${turn.n}` : `#${turn.n}`;
 }
 
 /** "a=1 b=x" -> { a: "1", b: "x" }. */
@@ -3163,8 +3180,13 @@ function onUsageTiming(fields) {
   const firstAudioMs = Number(fields.first_audio_after_rec_ms);
   if (firstAudioMs >= 0) usage.responseMs.push(firstAudioMs);  // -1: the turn had no reply audio
   const number = (key) => (Number(fields[key]) >= 0 ? Number(fields[key]) : null);
+  const n = Number(fields.n) || usage.turns;
+  const previous = usage.history[usage.history.length - 1];
+  // A restart that happened while no board was connected shows as the number going back.
+  if (previous && previous.boardSession === usage.boardSession && n <= previous.n) onUsageBoardBooting();
+  usage.turnsThisBoardSession++;
   usage.history.push({
-    n: Number(fields.n) || usage.turns, at: new Date(), mode: fields.mode || "button", tool: fields.tool || "-",
+    n, boardSession: usage.boardSession, at: new Date(), mode: fields.mode || "button", tool: fields.tool || "-",
     result: fields.result || "?", serverMs: number("first_event_after_rec_ms"), firstSoundMs: number("first_audio_after_rec_ms"),
     doneMs: number("playback_done_after_rec_ms"),
   });
@@ -3279,7 +3301,7 @@ function renderResponseChart() {
     const icon = { set_board_state: "💡", get_time_of_day: "🔆", set_volume: "🔊", set_timer: "⏰", get_current_time: "🕒", get_board_status: "📶" }[turn.tool] || "";
     if (icon && sound !== null) svg.append(svgElement("text", { x: x + barW / 2, y: yOf(sound) - 4, "text-anchor": "middle", "font-size": 11 }, icon));
     if (index % labelEvery === 0 || index === turns.length - 1) {
-      svg.append(svgElement("text", { class: "axis-label", x: x + barW / 2, y: height - 6, "text-anchor": "middle" }, `#${turn.n}`));
+      svg.append(svgElement("text", { class: "axis-label", x: x + barW / 2, y: height - 6, "text-anchor": "middle" }, turnLabel(turn)));
     }
     const hit = svgElement("rect", { class: "hit", x: left + index * slot, y: top, width: slot, height: plotH, rx: 3 });
     hit.addEventListener("pointerenter", () => {
@@ -3288,7 +3310,7 @@ function renderResponseChart() {
                          set_timer: "timer", get_current_time: "clock time", get_board_status: "board status" }[turn.tool];
       tip.innerHTML = "";
       const title = document.createElement("b");
-      title.textContent = `Command #${turn.n} · ${clockStamp(turn.at).slice(0, 8)}`;
+      title.textContent = `Command ${turnLabel(turn)} · ${clockStamp(turn.at).slice(0, 8)}`;
       const lines = [
         ["var(--seg-server)", `OpenAI started answering: ${seconds(server)}`],
         ["var(--seg-sound)", `First sound of the reply: ${seconds(sound)}`],
@@ -3321,12 +3343,21 @@ function renderResponseChart() {
   container.replaceChildren(svg, tip);
 }
 
-/** Saves every command's timing since connecting (or Reset) as a CSV file. */
+/** Saves every command's timing in Statistics (since the page opened, or
+    Reset) as a CSV file. index is the row's own number; board_session and
+    board_command identify the command on the board, whose numbering starts
+    over after a restart. UTF-8 with a BOM, so Excel reads any non-ASCII text. */
 function onUsageExportClick() {
-  const header = "command,time,mode,tool,result,openai_started_ms,first_sound_ms,reply_done_ms";
-  const rows = usage.history.map((turn) => [turn.n, clockStamp(turn.at).slice(0, 8), turn.mode, turn.tool, turn.result,
-    turn.serverMs ?? "", turn.firstSoundMs ?? "", turn.doneMs ?? ""].join(","));
-  const blob = new Blob([[header, ...rows].join("\n") + "\n"], { type: "text/csv" });
+  const header = "index,date,time,board_session,board_command,mode,tool,result,openai_started_ms,first_sound_ms,reply_done_ms";
+  const field = (value) => {
+    const text = String(value);
+    return /[",\r\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
+  };
+  const rows = usage.history.map((turn, index) => [index + 1,
+    `${turn.at.getFullYear()}-${pad(turn.at.getMonth() + 1)}-${pad(turn.at.getDate())}`, clockStamp(turn.at).slice(0, 8),
+    turn.boardSession, turn.n, turn.mode, turn.tool, turn.result,
+    turn.serverMs ?? "", turn.firstSoundMs ?? "", turn.doneMs ?? ""].map(field).join(","));
+  const blob = new Blob(["\uFEFF" + [header, ...rows].join("\r\n") + "\r\n"], { type: "text/csv;charset=utf-8" });
   const url = URL.createObjectURL(blob);
   const anchor = Object.assign(document.createElement("a"), { href: url, download: `esp32_statistics_${fileStamp(new Date())}.csv` });
   anchor.click();
@@ -3832,7 +3863,7 @@ function onSaveReportClick() {
   conversation.removeAttribute("id");
   const escape = (text) => String(text).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
   const seconds = (ms) => (ms === null ? "-" : (ms / 1000).toFixed(2));
-  const rows = usage.history.map((turn) => `<tr><td>${turn.n}</td><td>${escape(clockStamp(turn.at).slice(0, 8))}</td>` +
+  const rows = usage.history.map((turn) => `<tr><td>${escape(turnLabel(turn))}</td><td>${escape(clockStamp(turn.at).slice(0, 8))}</td>` +
     `<td>${turn.mode === "vad" ? "hands-free" : "Talk"}</td><td>${escape(turn.tool === "-" ? "" : turn.tool)}</td>` +
     `<td>${escape(turn.result)}</td><td>${seconds(turn.serverMs)}</td><td>${seconds(turn.firstSoundMs)}</td><td>${seconds(turn.doneMs)}</td></tr>`).join("");
   const board = state.board;
