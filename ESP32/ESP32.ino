@@ -1081,7 +1081,8 @@ bool commandPausesHandsFree(const char* command) {
 
 /** Prints everything the laptop app shows about the board right now: every
     startup check, the assistant's state, Wi-Fi signal, volume, LED, the
-    light sensor, hands-free, the timer and the clock - the answer to STATUS. */
+    light sensor, hands-free, the timer, the clock and the board's fixed
+    limits (@@LIMITS) - the answer to STATUS. */
 void reprintFullStatus() {
   esp32va_status::reprintStatusSnapshot();
   esp32va_wifi::reportWifiSignal();
@@ -1092,6 +1093,7 @@ void reprintFullStatus() {
   esp32va_hands_free::announceHandsFreeState();
   esp32va_clock::announceTimerState();
   esp32va_clock::announceClock();
+  esp32va_info::announceLimits();
 }
 
 /** Starts a manual LISTEN (the command, or the app's Talk button) if the
@@ -1497,6 +1499,7 @@ void setup() {
   esp32va_button::announceButtonState();
   esp32va_hands_free::setupHandsFree();
   esp32va_hands_free::announceHandsFreeState();
+  esp32va_info::announceLimits();
   esp32va_status::reportStage(esp32va_status::Stage::kSpeaker, esp32va_status::StageState::kOk,
                               "ready - check it by ear with Test beep");
   char stage_detail[kStateDetailBufferSize];

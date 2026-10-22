@@ -3,7 +3,13 @@
 #include <Arduino.h>
 #include <WiFi.h>
 #include "heap_diagnostics_utils.h"
+#include "light_sensor_utils.h"
 #include "log_utils.h"
+#include "parameters.h"
+#include "recording_folder_utils.h"
+#include "status_report_utils.h"
+#include "vad_utils.h"
+#include "wifi_utils.h"
 
 namespace esp32va_info {
 
@@ -48,6 +54,19 @@ bool handleGetBoardStatusCall(JsonDocument& doc, WebSocketsClient& webSocket) {
   webSocket.sendTXT(tool_response_message);
   LOG_DEBUG("Sent function_call_output.\n");
   return true;
+}
+
+void announceLimits() {
+  esp32va_status::printProtocolLine(
+      "@@LIMITS max_ask_bytes=%u max_ssid_bytes=%u min_password_bytes=%u max_password_bytes=%u "
+      "max_kept_recordings=%u mic_gain=%d light_max=%d max_utterance_ms=%u vad_sensitivity_min=%u "
+      "vad_sensitivity_max=%u vad_hangover_min_ms=%u vad_hangover_max_ms=%u",
+      (unsigned)esp32va_params::kMaxTypedQuestionBytes, (unsigned)esp32va_wifi::kMaxSsidLength,
+      (unsigned)esp32va_wifi::kMinPasswordLength, (unsigned)esp32va_wifi::kMaxPasswordLength,
+      (unsigned)esp32va_recordings::kMaxKeptRecordings, (int)esp32va_params::kMicSoftwareGain,
+      (int)esp32va_light_sensor::kMaxLightSensorValue, (unsigned)esp32va_vad::kMaxUtteranceMs,
+      (unsigned)esp32va_vad::kMinSensitivity, (unsigned)esp32va_vad::kMaxSensitivity,
+      (unsigned)esp32va_vad::kMinHangoverMs, (unsigned)esp32va_vad::kMaxHangoverMs);
 }
 
 }  // namespace esp32va_info

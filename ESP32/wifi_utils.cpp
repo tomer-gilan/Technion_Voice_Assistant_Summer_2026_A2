@@ -23,8 +23,6 @@ constexpr unsigned long kSignalReportIntervalMs = 10000;
 // core's own retries.
 constexpr unsigned long kRestartConnectAfterMs = esp32va_params::kWifiRestartConnectAfterMs;
 constexpr size_t kStageDetailBufferSize = 64;
-constexpr size_t kMaxSsidLength = 32;      // 802.11 limit
-constexpr size_t kMaxPasswordLength = 64;  // WPA2 limit
 constexpr time_t kPlausibleEpochSeconds = 8 * 3600 * 2;  // still near 1970 means not synced yet
 const char kSsidSettingKey[] = "wifi_ssid";
 const char kPasswordSettingKey[] = "wifi_pass";
@@ -325,10 +323,10 @@ bool handleWifiCommand(const char* command, const char* raw_line) {
       argument = raw_password;
     }
     size_t password_length = strlen(argument);
-    if (password_length > kMaxPasswordLength || (password_length > 0 && password_length < 8)) {
-      Serial.printf("WIFI_PASSWORD ignored - a WPA2 password is 8 to %u characters (or none for an open "
+    if (password_length > kMaxPasswordLength || (password_length > 0 && password_length < kMinPasswordLength)) {
+      Serial.printf("WIFI_PASSWORD ignored - a WPA2 password is %u to %u characters (or none for an open "
                     "network).\n",
-                    (unsigned)kMaxPasswordLength);
+                    (unsigned)kMinPasswordLength, (unsigned)kMaxPasswordLength);
       return true;
     }
     snprintf(active_ssid, sizeof(active_ssid), "%s", pending_ssid);

@@ -30,7 +30,7 @@
 // @@TIMING in measurement_utils.h, @@TIMER / @@CLOCK in clock_timer_utils.h, @@HEAP in heap_diagnostics_utils.h, @@VAD /
 // @@VAD_LEVEL / @@VAD_EVENT in hands_free_utils.h, @@WIFI_NET in
 // wifi_utils.h, @@BUTTON in button_utils.h, @@SOUNDS in
-// device_controls_utils.h). The STATUS
+// device_controls_utils.h, @@LIMITS in board_info_utils.h). The STATUS
 // serial command reprints all of them, so an app that connects mid-session
 // gets the full picture.
 

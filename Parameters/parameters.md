@@ -87,6 +87,7 @@
 | `kMaxLabelLength` | `clock_timer_utils.cpp` | 48 | אורך מקסימלי לתיאור של תזכורת ("check the oven") |
 | `kTimePrefixChancePercent` | `greeting_utils.cpp` | 20 | הסיכוי שהברכה בהדלקה תתחיל ב-"Good morning/afternoon/evening" |
 | `kSignalReportIntervalMs`, `kStillWaitingReportMs` | `wifi_utils.cpp` | 10000, 15000 | כל כמה זמן מדווחים את עוצמת ה-Wi-Fi, ו"עדיין מחכה" בזמן התחברות |
+| `kMaxSsidLength`, `kMinPasswordLength`, `kMaxPasswordLength` | `wifi_utils.h` | 32, 8, 64 | גבולות שם רשת ה-Wi-Fi והסיסמה, בבתים (מגבלות 802.11 ו-WPA2). הלוח שולח אותם למרכז הבקרה בשורת `@@LIMITS`, יחד עם שאר הגבולות שהדף בודק |
 | `kWifiReturnFastRetryMs` | `ESP32.ino` | 10000 | כשה-Wi-Fi חוזר, מנסים להתחבר ל-OpenAI כל שנייה במשך 10 שניות, ואז חוזרים לקצב ה-offline |
 | `kHandsFreeTurnsToPass`, `kMinLowestHeapBytes` | `ESP32.ino` | 5, 20KB | תנאי ה-PASS של בדיקת שלב 30 ("HANDS-FREE PASSED"): 5 שאלות Hands-free ברצף, והזיכרון הפנוי לא ירד מתחת ל-20KB |
 | `kPreRollMs` | `vad_utils.h` | 500 | כמה אודיו מלפני תחילת הדיבור נשלח (ה-pre-roll) |

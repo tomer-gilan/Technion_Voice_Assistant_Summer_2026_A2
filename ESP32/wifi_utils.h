@@ -20,7 +20,16 @@
 //                             both in flash and connects to it right away
 //   WIFI_FORGET             - back to SECRETS.h's network
 
+#include <stddef.h>
+
 namespace esp32va_wifi {
+
+/** Wi-Fi name and password limits, in bytes (UTF-8): 802.11's longest SSID
+    and WPA2's passphrase range (an open network has no password at all).
+    Also reported to the laptop app in @@LIMITS (board_info_utils.h). */
+constexpr size_t kMaxSsidLength = 32;
+constexpr size_t kMinPasswordLength = 8;
+constexpr size_t kMaxPasswordLength = 64;
 
 /** Starts connecting to the network in use and waits up to wait_ms for it,
     printing progress. Returns true once connected; false if it isn't yet -
