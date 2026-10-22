@@ -104,10 +104,14 @@ stateDiagram-v2
   armed --> listening: speech detected
   armed --> ready: Hands-free off
   listening --> processing: 3 s recorded or speech ended
+  listening --> ready: Cancel / not speech (hands-free)
   processing --> tool: model calls a tool
   tool --> processing: tool result sent back
   processing --> speaking: reply audio arrives
+  processing --> ready: failed (15 s silence, server error)
   speaking --> saving: last audio played
+  speaking --> ready: nothing left to save
+  speaking --> armed: Hands-free on, nothing left to save
   saving --> ready
   saving --> armed: Hands-free on
   ready --> reconnecting: connection lost
