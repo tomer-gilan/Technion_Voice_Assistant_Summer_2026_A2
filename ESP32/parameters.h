@@ -8,6 +8,8 @@
 // hands-free, Wi-Fi network...) are set from the control center instead and
 // kept in flash; see Parameters/parameters.md.
 // Secrets (Wi-Fi password, API key) are in SECRETS.h, not here.
+// This file is this project's config_parameters.h (the rubric's name for it).
+// The assistant's instructions and tools are in realtime_session_config.h.
 //
 // Pure C++ on purpose (no Arduino headers): tools/vad_replay.cpp compiles
 // vad_utils on the laptop, and anything it includes must build there too.

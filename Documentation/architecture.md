@@ -41,7 +41,7 @@ flowchart LR
 | Wi-Fi והשעון | `wifi_utils` | `esp32va_wifi` |
 | זיכרון קבוע (NVS) | `settings_store_utils` | `esp32va_settings` |
 
-שני קבצים בלי קוד: `parameters.h` (כל הפרמטרים הקבועים - ראו [Parameters/parameters.md](../Parameters/parameters.md)) ו-`SECRETS.h` (סיסמת ה-Wi-Fi ומפתח ה-API, לא בגיט; התבנית היא `SECRETS.example.h`).
+שלושה קבצים בלי קוד: `parameters.h` (כל הפרמטרים הקבועים - ראו [Parameters/parameters.md](../Parameters/parameters.md)), `realtime_session_config.h` (הודעת ההגדרות של הסשן: ההוראות למודל ורשימת הכלים) ו-`SECRETS.h` (סיסמת ה-Wi-Fi ומפתח ה-API, לא בגיט; התבנית היא `SECRETS.example.h`).
 
 | מודול | מה הוא עושה |
 |---|---|
@@ -267,7 +267,7 @@ flowchart TD
 
 ככה הוספנו את `set_volume`, `get_current_time`, `set_timer` ו-`get_board_status`:
 
-1. מוסיפים את הכלי לרשימת הכלים בהודעת ההגדרות של הסשן (`kSessionUpdateMessage` ב-`ESP32.ino`): שם, תיאור באנגלית למודל, וסכמת JSON של הפרמטרים.
+1. מוסיפים את הכלי לרשימת הכלים בהודעת ההגדרות של הסשן (`kSessionUpdateMessage` ב-`realtime_session_config.h`): שם, תיאור באנגלית למודל, וסכמת JSON של הפרמטרים.
 2. כותבים פונקציה במודול המתאים שקוראת את הפרמטרים, מבצעת, מדפיסה שורת `@@` ושולחת ל-OpenAI את התוצאה (`function_call_output`) ובקשה לענות (`response.create`).
 3. מוסיפים את שם הכלי ל-dispatch ב-`ESP32.ino`. אם צריך, מלמדים את מרכז הבקרה את שורת ה-`@@` החדשה.
 
