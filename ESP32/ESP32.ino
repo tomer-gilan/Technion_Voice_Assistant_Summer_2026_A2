@@ -64,9 +64,9 @@
 #include "button_utils.h"
 
 namespace {
-// Unchanged from step 21 except for the get_time_of_day, set_volume,
-// get_current_time, set_timer and get_board_status tools and their instructions sentences: 24kHz PCM in / 8kHz mu-law out, manual turn
-// control, the set_board_state tool, and the one-short-sentence instructions.
+// The session: 24kHz PCM in / 8kHz mu-law out, manual turn control (the
+// board's own voice detector, not the server's), the one-short-sentence
+// instructions and the six tools.
 const char kSessionUpdateMessage[] =
     R"JSON({"type":"session.update","session":{"type":"realtime","model":")JSON"
     OPENAI_MODEL
@@ -104,8 +104,7 @@ constexpr uint32_t kJsonMessageBufferSize =
 constexpr uint32_t kHandsFreeTurnsToPass = 5;
 constexpr uint32_t kMinLowestHeapBytes = 20 * 1024;
 
-// Static, not stack-local: too big for the Arduino loop task's stack (same
-// reasoning as old step 8b/step 12).
+// Static, not stack-local: too big for the Arduino loop task's stack.
 int16_t mic_chunk[kChunkSamples];       // one chunk taken from the mic task: the mic's own samples
 int16_t gain_block[kGainBlockSamples];  // one block of it with the software gain applied
 char json_message[kJsonMessageBufferSize];
@@ -128,7 +127,7 @@ struct CaptureProgress {
 };
 
 WebSocketsClient webSocket;
-bool should_keep_running = true;   // only false if the connection itself can never be established
+bool should_keep_running = true;   // only false if the mic task can't start - see haltSketch()
 bool should_send_session_update = false;
 bool should_send_opening_greeting = false;  // set once, on the very first session.updated - see handleServerMessage()
 bool session_ready = false;        // true once session.updated has been received at least once
@@ -501,7 +500,7 @@ void handleServerMessage(uint8_t* payload, size_t length) {
       esp32va_status::reportStage(esp32va_status::Stage::kOpenAi, esp32va_status::StageState::kOk,
                                   "reconnected - the conversation started fresh");
       LOG_DEBUG("session.updated received (reconnect #%u) - OpenAI's Realtime API has "
-                "no session-resumption mechanism, unlike old Gemini step 8b's handle, so the model has "
+                "no session-resumption mechanism, so the model has "
                 "no memory of anything before this reconnect.\n",
                 connection_count - 1);
     }
@@ -725,11 +724,9 @@ void onWebSocketEvent(WStype_t type, uint8_t* payload, size_t length) {
       should_send_session_update = true;
       break;
     case WStype_DISCONNECTED:
-      // Distinguishing why matters for a soak test: mid-turn is a real,
-      // visible failure (that LISTEN cycle's reply is lost); idle is
-      // expected/benign, most likely the server's own idle timeout - no
-      // specific duration has been measured yet, which is exactly what step
-      // 16 was meant to find out.
+      // Distinguishing why matters: mid-turn is a real, visible failure
+      // (that LISTEN cycle's reply is lost); idle is expected/benign, most
+      // likely the server's own idle timeout.
       if (is_capturing || awaiting_reply) {
         LOG_ERROR("Disconnected mid-turn (LISTEN #%u lost).\n", listen_cycle);
       } else {
@@ -1573,11 +1570,10 @@ void startOpenAiConnectionWhenNetworkReady() {
     chunks, its commit), drains playback audio to the speaker, saves reply
     audio to the SD card, checks for a reply timeout / playback completion,
     lets hands-free listening start or stop, and keeps the laptop app's
-    Wi-Fi and assistant-state display current. This is a soak-test sketch by
-    design: it keeps running across as many LISTEN cycles and reconnects as
-    it keeps getting fed, and only ever stops if the SD card is unusable or
-    the connection itself can never be (re-)established - and even then
-    keeps answering LIST/GET. */
+    Wi-Fi and assistant-state display current. It keeps running across as
+    many LISTEN cycles and reconnects as it keeps getting fed, and only ever
+    stops if the mic task can't start (haltSketch()) - and even then keeps
+    answering LIST/GET. */
 void loop() {
   if (!should_keep_running) {
     serviceReplyRecording();  // closes a recording cut short by the halt

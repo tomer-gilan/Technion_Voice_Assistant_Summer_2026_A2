@@ -4,8 +4,7 @@
 
 // Shared plumbing for talking to OpenAI's Realtime API over WSS: connection
 // setup (host/port/path/auth header/root CA), reconnect backoff, and the
-// generic WebSocket event logging every sketch since step 09 has needed. All
-// of it reads OPENAI_API_KEY / OPENAI_MODEL straight from SECRETS.h /
+// generic WebSocket event logging. All of it reads OPENAI_API_KEY / OPENAI_MODEL straight from SECRETS.h /
 // parameters.h - no parameters needed for setup.
 //
 // The board never gives up on the connection: after
@@ -17,7 +16,7 @@ namespace esp32va_openai {
 
 /** Opens a WSS connection to the OpenAI Realtime API ("/v1/realtime?model=..."
     per parameters.h's OPENAI_MODEL), with the Authorization header and root CA
-    (GTS Root R4 - see step 9 for how this was verified) already applied,
+    (GTS Root R4 - openai_realtime_utils.cpp says how it was verified) already applied,
     and the ping/pong heartbeat (parameters.h's kHeartbeatIntervalMs) on.
     Caller must set webSocket.onEvent(...) before calling this. */
 void beginOpenAiRealtimeConnection(WebSocketsClient& webSocket);

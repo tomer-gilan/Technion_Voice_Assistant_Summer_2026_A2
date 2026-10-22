@@ -15,8 +15,7 @@ const char kOpenAiAuthHeader[] = "Authorization: Bearer " OPENAI_API_KEY;
 // -> Google Trust Services "WE1" intermediate -> this root). Verified
 // directly against the live chain via `openssl s_client -connect
 // api.openai.com:443 -showcerts` and fetched from
-// https://pki.goog/repo/certs/gtsr4.pem. Different root than the GTS Root
-// R1 (RSA) used by the historical Gemini-era test sketches.
+// https://pki.goog/repo/certs/gtsr4.pem.
 const char kOpenAiRootCaCert[] = R"EOF(
 -----BEGIN CERTIFICATE-----
 MIICCTCCAY6gAwIBAgINAgPlwGjvYxqccpBQUjAKBggqhkjOPQQDAzBHMQswCQYD
