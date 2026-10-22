@@ -6,6 +6,8 @@
 
 מקרא לעמודת "נשען על": **נמדד** (יש מספרים בלוג), **נוסה** (ניסינו על הלוח וראינו), **תיעוד** (לפי התיעוד של היצרן), **הערכה** (הנחה סבירה שלא אומתה עד הסוף).
 
+בהחלטות שנשענות על תיעוד יש גם שורת **מקורות:** עם הקישורים לדפים שעליהם נשענו (נבדקו ב-23.10.2026).
+
 ## ארכיטקטורה
 
 ### הבנת הדיבור בענן, כל השאר על הבקר
@@ -16,6 +18,8 @@
 
 **נשען על:** תיעוד (מגבלות ה-ESP32), נמדד (הזיכרון הפנוי בזמן שיחה הוא כ-45KB).
 
+**מקורות:** [גיליון הנתונים של ESP32-WROOM-32](https://www.espressif.com/sites/default/files/documentation/esp32-wroom-32_datasheet_en.pdf) (‏520KB SRAM, ובלי PSRAM ברשימת התכונות של המודול); [OpenAI, Realtime API: שיחות](https://developers.openai.com/api/docs/guides/realtime-conversations).
+
 ### מ-Gemini Live ל-OpenAI Realtime (שלבים 6-9)
 
 **ההחלטה:** התחלנו עם Gemini Live (שלבים 6-8b, החיבור, ההגדרה ושליחת אודיו עבדו) ועברנו ל-OpenAI Realtime בשלב 9.
@@ -23,6 +27,8 @@
 **למה:** בשלב 8a גילינו שמודלי האודיו של Gemini שהיו זמינים עונים רק באודיו ולא מחזירים טקסט של התשובה, בזמן ש-OpenAI מחזיר גם אודיו וגם תמלול של שני הצדדים. התמלול משמש אותנו למרכז הבקרה ולבדיקת התוצאות. ל-OpenAI יש גם מנגנון כלים (function calling) מתועד היטב באותו חיבור. *(השיקולים הנוספים שהיו לצוות, כמו עלות וזמינות, לא תועדו אז בכתב.)*
 
 **נשען על:** נוסה (שלב 8a).
+
+**מקורות:** [Gemini Live API](https://ai.google.dev/gemini-api/docs/live-guide) (מודלי ה-native audio תומכים בתשובה באודיו בלבד; התיעוד הנוכחי מציין גם תמלול של פלט האודיו, `output_audio_transcription`, ולא בדקנו אם הוא היה זמין בשלב 8a); [OpenAI, function calling ב-Realtime API](https://developers.openai.com/api/docs/guides/realtime-function-calling).
 
 ### חיבור WebSocket מוצפן אחד, ושליחה בחתיכות של 100ms
 
@@ -32,6 +38,8 @@
 
 **נשען על:** נמדד (`@@HEAP`), תיעוד.
 
+**מקורות:** [OpenAI, Realtime API: שיחות](https://developers.openai.com/api/docs/guides/realtime-conversations) (הקלט `audio/pcm` מוגדר ב-24kHz).
+
 ### תשובה ב-mu-law ‏8kHz
 
 **ההחלטה:** ביקשנו מ-OpenAI את התשובה ב-G.711 mu-law ב-8kHz, ולא PCM ב-24kHz.
@@ -39,6 +47,8 @@
 **למה:** בית אחד לדגימה ו-8000 דגימות בשנייה, פי 6 פחות מ-PCM ב-24kHz (‏64 במקום 384 kbps). כך מאגר של 32KB מחזיק כ-4 שניות של תשובה. האיכות מספיקה לדיבור. הפענוח ל-PCM וההעלאה ל-24kHz קורים רק ברגע הניגון.
 
 **נשען על:** נמדד (גודל המאגר, הזיכרון), נוסה (איכות השמע).
+
+**מקורות:** [OpenAI, Realtime API: שיחות](https://developers.openai.com/api/docs/guides/realtime-conversations) (הפורמט `audio/pcmu` מופיע כפורמט פלט בדוגמת `session.update`).
 
 ### פורט I2S אחד משותף למיקרופון ולמגבר
 
@@ -55,6 +65,8 @@
 **למה:** השדה לא היה מאותחל, כלומר 0. מנהל ההתקן של ה-ESP32 מוציא את שעון ה-MCLK לאחד מהפינים 0, 1 או 3, ו-0 הוא GPIO0, הפין של כפתור BOOT. אף אחד מהרכיבים שלנו לא צריך MCLK. זה כנראה גם ההסבר לקריאות הלא מוסברות מכפתור BOOT בשלבים 19-20.
 
 **נשען על:** תיעוד (`driver/i2s.h`, הודעת השגיאה בספריית ה-driver), ונוסה על הלוח: בדיקת היחידה `Unit Tests/08_boot_button` עברה (0 שינויים גולמיים כשלא נוגעים בכפתור, ו-PASSED אחרי 5 לחיצות). עם `kStartI2sWithMclkOnGpio0 = true` היא מחקה את ההגדרה הישנה לצורך השוואה (ראו [board-tests-toSubmit.md](board-tests-toSubmit.md)).
+
+**מקורות:** [`driver/i2s.h` ב-ESP-IDF 4.4](https://github.com/espressif/esp-idf/blob/release/v4.4/components/driver/include/driver/i2s.h) (ההערה על `mck_io_num`: ב-ESP32 אפשר להוציא MCK רק על GPIO0, GPIO1 או GPIO3); [תיעוד ה-I2S של ESP-IDF 4.4](https://docs.espressif.com/projects/esp-idf/en/v4.4/esp32/api-reference/peripherals/i2s.html) (`i2s_pin_config_t` ו-`I2S_PIN_NO_CHANGE`); [גיליון הנתונים של ESP32-WROOM-32](https://www.espressif.com/sites/default/files/documentation/esp32-wroom-32_datasheet_en.pdf) (GPIO0 הוא גם פין ה-strapping שקובע את מצב האתחול).
 
 ## זיכרון
 
@@ -128,6 +140,8 @@
 
 **נשען על:** תיעוד (OpenAI, אומת מול התיעוד ב-21.9.2026).
 
+**מקורות:** [OpenAI, Realtime API: שיחות](https://developers.openai.com/api/docs/guides/realtime-conversations) (`response.create` מתחיל תשובה של המודל).
+
 ### `turn_detection: null`: גלאי הקול על הבקר ולא בשרת
 
 **ההחלטה:** כיבינו את זיהוי סוף הדיבור של השרת, והלוח מחליט מתי להתחיל ולהפסיק להקליט (`vad_utils`), ושולח `commit` בעצמו.
@@ -135,6 +149,8 @@
 **למה:** עם זיהוי בצד השרת היינו צריכים להזרים אודיו כל הזמן, גם שקט ורעש. זה בזבוז של רשת ושל עלות, והלוח היה מוגבל ביכולת לזרוק רעשים. על הבקר אנחנו גם יודעים בדיוק מתי ההקלטה התחילה, ושומרים 0.5 שניות לפני (pre-roll) כדי שהמילה הראשונה לא תיחתך.
 
 **נשען על:** נמדד (112 קטעי רעש ו-100 קטעי דיבור עם `tools/vad_replay.cpp`). **לא נמדד** עם המיקרופון שלנו בחדר.
+
+**מקורות:** [OpenAI, Realtime API: שיחות](https://developers.openai.com/api/docs/guides/realtime-conversations) (כיבוי ה-VAD של השרת עם `turn_detection: null`, ואז הלקוח שולח בעצמו `input_audio_buffer.commit` ו-`response.create`).
 
 ## קוד
 
@@ -179,6 +195,8 @@
 **למה:** שרת web על הבקר דורש עוד זיכרון בזמן שהחיבור המוצפן פתוח, ושם נשארים כ-45KB. Web Serial לא דורש שום דבר מהלוח חוץ מהדפסת שורות `@@`. הלוח עצמו עובד גם בלי המחשב: Hands-free נשמר ב-flash, ויש כפתור BOOT ו-צלילי מצב כאופציה.
 
 **החיסרון:** בלי כבל אין מסך. "Debug mode בלי מחשב" נשאר חלקי (צלילי המצב).
+
+**מקורות:** [Chrome, Web Serial API](https://developer.chrome.com/docs/capabilities/serial) (דף ביכולת לקרוא ולכתוב להתקן טורי).
 
 ## רובסטיות (שלב ההגשה)
 
