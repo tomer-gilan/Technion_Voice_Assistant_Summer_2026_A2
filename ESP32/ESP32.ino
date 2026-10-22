@@ -166,6 +166,7 @@ bool wifi_was_up = false;  // see dropDeadSocketOnWifiLoss()
 constexpr unsigned long kWifiReturnFastRetryMs = 10000;
 bool wifi_return_fast_retry = false;
 unsigned long wifi_returned_ms = 0;
+uint32_t listen_started_by_last_press = 0;  // the LISTEN the latest BOOT press started, 0 if none - see runTechnicianCheck()
 
 // Everything below, up to setup(), stays in this file's anonymous namespace
 // too - only setup() and loop() must be global (the Arduino core calls them).
@@ -1226,14 +1227,48 @@ void handleTalkButtonPress() {
     return;
   }
   if (is_capturing || awaiting_reply) {
+    listen_started_by_last_press = 0;
     Serial.printf("Talk button: cancelling LISTEN #%u.\n", listen_cycle);
     cancelListenTurn();
     return;
   }
   Serial.printf("Talk button pressed.\n");
-  if (!startManualListen()) {
+  bool started = startManualListen();
+  listen_started_by_last_press = started ? listen_cycle : 0;
+  if (!started) {
     playRefusedTone();
   }
+}
+
+/** The technician beep check, for BOOT held kTechnicianHoldMs: one beep per
+    startup check in a fixed order - Wi-Fi, OpenAI, SD card, mic - high = ok,
+    low = failed, as things stand right now (the mic: its startup check, as
+    the mic task is running if this runs at all). Works with no PC and no
+    network. The press already started a LISTEN when it went down - that one
+    is cancelled first. Hands-free is held off around it, as for BEEP. Blocks
+    ~2 s; loop() only (i2s_write). */
+void runTechnicianCheck() {
+  if (listen_started_by_last_press != 0 && listen_started_by_last_press == listen_cycle &&
+      (is_capturing || awaiting_reply)) {
+    Serial.printf("Talk button held - cancelling LISTEN #%u for the technician check.\n", listen_cycle);
+    cancelListenTurn();
+  }
+  listen_started_by_last_press = 0;
+  const bool wifi_ok = esp32va_wifi::isWifiConnected();
+  const bool openai_ok = session_ready;
+  const bool sd_ok = esp32va_sd_card::isSdCardUsable();
+  const bool mic_ok = esp32va_status::isStageOk(esp32va_status::Stage::kMicrophone);
+  LOG_INFO("Technician check: Wi-Fi %s, OpenAI %s, SD %s, mic %s.\n", wifi_ok ? "OK" : "FAILED",
+           openai_ok ? "OK" : "FAILED", sd_ok ? "OK" : "FAILED", mic_ok ? "OK" : "FAILED");
+  const bool checks_in_beep_order[] = {wifi_ok, openai_ok, sd_ok, mic_ok};
+  esp32va_hands_free::holdOff();
+  for (bool check_ok : checks_in_beep_order) {
+    esp32va_audio::playTone(check_ok ? esp32va_params::kTechnicianOkToneHz : esp32va_params::kTechnicianFailToneHz,
+                            esp32va_params::kTechnicianToneMs);
+    esp32va_audio::waitUntilPlayedOut();
+    delay(esp32va_params::kTechnicianGapMs);
+  }
+  esp32va_hands_free::holdOff();
 }
 
 /** Checks Serial for a typed command. LIST / GET / DELETE <name> / DELETE_ALL answer the laptop
@@ -1696,6 +1731,9 @@ void loop() {
   checkForSerialCommand();
   if (esp32va_button::takeButtonPress()) {
     handleTalkButtonPress();
+  }
+  if (esp32va_button::takeButtonLongPress()) {
+    runTechnicianCheck();
   }
   serviceCapture();
   esp32va_audio::drainRingBufferToSpeaker();

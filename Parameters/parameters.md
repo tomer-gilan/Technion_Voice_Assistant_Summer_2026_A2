@@ -69,6 +69,8 @@
 | `kButtonSampleMs`, `kButtonDebounceSamples` | 5, 6 | ה-debounce של כפתור BOOT: נדגם כל 5ms בטיימר, ולחיצה נספרת אחרי 6 דגימות (‏30ms) |
 | `kStartToneHz`, `kStartToneMs` | 1320, 60 | "טיק" גבוה וקצר רגע לפני שהקלטה ידנית מתחילה (BOOT, Talk, LISTEN; לא ב-Hands-free). תמיד פועל, לא תלוי בצלילי המצב; שקט רק בהשתקה |
 | `kRefusedToneHz`, `kRefusedToneMs` | 220, 120 | צליל נמוך וקצר כשלחיצה על BOOT לא יכולה להתחיל שאלה (offline, עוד לא מוכן, עסוק). תמיד פועל, כמו ה"טיק" |
+| `kTechnicianHoldMs` | 2000 | בדיקת הטכנאי: כשכפתור BOOT מופעל, לחיצה ארוכה של 2 שניות משמיעה צפצוף אחד לכל בדיקת הדלקה, בסדר קבוע: Wi-Fi, OpenAI, כרטיס SD, מיקרופון |
+| `kTechnicianOkToneHz`, `kTechnicianFailToneHz`, `kTechnicianToneMs`, `kTechnicianGapMs` | 880, 220, 150, 150 | הצפצופים של בדיקת הטכנאי: גבוה = תקין, נמוך = נכשל, 150ms כל אחד ולפחות 150ms שקט ביניהם (לפי המצב ברגע הלחיצה) |
 
 ### קבועים פנימיים בקוד
 

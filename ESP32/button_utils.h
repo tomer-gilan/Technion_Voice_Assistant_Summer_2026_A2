@@ -3,8 +3,10 @@
 // The onboard BOOT button (TALK_BUTTON_PIN, GPIO0) as an optional physical
 // Talk button, so the board can be used without the laptop: a press starts
 // a LISTEN like the Talk button, and a press while it records or answers
-// cancels it. Off until switched on (BUTTON on), and the choice is kept in
-// flash - a board that hasn't been tested with it behaves as before.
+// cancels it. Held for kTechnicianHoldMs it also plays the technician beep
+// check (one beep per startup check - see ESP32.ino). Off until switched on
+// (BUTTON on), and the choice is kept in flash - a board that hasn't been
+// tested with it behaves as before.
 //
 // Debounced with a saturating counter sampled every kButtonSampleMs by a
 // periodic esp_timer (so a slow loop() pass doesn't stretch it): a press
@@ -28,5 +30,11 @@ void announceButtonState();
 /** Call every loop() pass. Returns true exactly once per press (on the
     debounced press, not the release) - never while the button is off. */
 bool takeButtonPress();
+
+/** Call every loop() pass. Returns true exactly once per press held for
+    kTechnicianHoldMs (parameters.h) - the technician beep check. The same
+    press has already counted for takeButtonPress() when it went down.
+    Never while the button is off. */
+bool takeButtonLongPress();
 
 }  // namespace esp32va_button

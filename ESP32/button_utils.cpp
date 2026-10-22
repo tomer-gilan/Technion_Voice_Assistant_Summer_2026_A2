@@ -22,13 +22,18 @@ bool pin_ready = false;
 // ~40 ms during playback, which would stretch the debounce to ~240 ms and
 // miss a quick tap.
 esp_timer_handle_t sample_timer = nullptr;
+// Samples a press must stay held, from its debounced start, to count as long.
+constexpr uint32_t kLongPressSamples = esp32va_params::kTechnicianHoldMs / esp32va_params::kButtonSampleMs;
 volatile int debounce_count = 0;  // 0 = surely released ... kButtonDebounceSamples = surely pressed
 volatile bool is_pressed = false;
+volatile uint32_t held_samples = 0;  // samples since the debounced press, stopping at kLongPressSamples
 std::atomic<bool> press_pending{false};  // set by the timer on a debounced press, taken by takeButtonPress()
+std::atomic<bool> long_press_pending{false};  // set once per hold of kLongPressSamples, taken by takeButtonLongPress()
 
 /** The sample timer's callback (esp_timer task, every kButtonSampleMs):
     nudges the saturating counter by one toward the pin's level and flags a
-    press when it saturates on "pressed". */
+    press when it saturates on "pressed" - and a long press, once per hold,
+    when it has stayed pressed for kLongPressSamples since. */
 void sampleButton(void* /*unused*/) {
   if (digitalRead(TALK_BUTTON_PIN) == kPressedLevel) {
     debounce_count = min(debounce_count + 1, esp32va_params::kButtonDebounceSamples);
@@ -38,8 +43,15 @@ void sampleButton(void* /*unused*/) {
   if (!is_pressed && debounce_count == esp32va_params::kButtonDebounceSamples) {
     is_pressed = true;
     press_pending = true;
+    held_samples = 0;
   } else if (is_pressed && debounce_count == 0) {
     is_pressed = false;
+  }
+  if (is_pressed && held_samples < kLongPressSamples) {
+    held_samples = held_samples + 1;
+    if (held_samples == kLongPressSamples) {
+      long_press_pending = true;
+    }
   }
 }
 
@@ -74,7 +86,9 @@ void preparePin() {
   bool held_now = digitalRead(TALK_BUTTON_PIN) == kPressedLevel;
   debounce_count = held_now ? esp32va_params::kButtonDebounceSamples : 0;
   is_pressed = held_now;
+  held_samples = held_now ? kLongPressSamples : 0;  // a hold already under way isn't a long press either
   press_pending = false;
+  long_press_pending = false;
   uint64_t period_us = static_cast<uint64_t>(esp32va_params::kButtonSampleMs) * 1000;
   esp_err_t result = esp_timer_start_periodic(sample_timer, period_us);
   if (result != ESP_OK) {
@@ -126,6 +140,14 @@ bool takeButtonPress() {
     return false;
   }
   LOG_DEBUG("Talk button pressed.\n");
+  return true;
+}
+
+bool takeButtonLongPress() {
+  if (!button_enabled || !long_press_pending.exchange(false)) {
+    return false;
+  }
+  LOG_DEBUG("Talk button held for %u ms.\n", (unsigned)esp32va_params::kTechnicianHoldMs);
   return true;
 }
 

@@ -168,5 +168,13 @@ constexpr uint32_t kStartToneHz = 1320;
 constexpr uint32_t kStartToneMs = 60;
 constexpr uint32_t kRefusedToneHz = 220;
 constexpr uint32_t kRefusedToneMs = 120;
+// Technician beep check: BOOT held this long (with the button switched on)
+// plays one beep per startup check - Wi-Fi, OpenAI, SD card, mic, in that
+// order - high = ok, low = failed, at least kTechnicianGapMs of silence between.
+constexpr uint32_t kTechnicianHoldMs = 2000;
+constexpr uint32_t kTechnicianOkToneHz = 880;
+constexpr uint32_t kTechnicianFailToneHz = 220;
+constexpr uint32_t kTechnicianToneMs = 150;
+constexpr uint32_t kTechnicianGapMs = 150;
 
 }  // namespace esp32va_params
