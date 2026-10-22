@@ -2,6 +2,12 @@
 // Reads raw I2S audio from the INMP441 and prints periodic min/max/RMS
 // stats to Serial, so mic wiring can be confirmed before anything
 // downstream (loopback, streaming) is built.
+//
+// PASS: within kVerdictDeadlineMs of boot, talk or clap near the mic -
+// "===== MIC TEST PASSED =====" once a window's RMS is clearly above the
+// quietest window seen. If that never happens: "===== MIC TEST FAILED: ... ====="
+// (all zeros usually means the wrong channel or a loose data wire). The verdict
+// prints once; the stats keep running after it.
 
 #include <stdint.h>
 #include <math.h>
@@ -17,6 +23,13 @@ constexpr i2s_port_t kI2sPort = I2S_NUM_1;  // kept separate from the speaker's 
 constexpr uint32_t kSampleRateHz = 16000;   // matches the Gemini Live API input rate
 constexpr uint32_t kSamplesPerReport = kSampleRateHz / 2;  // ~0.5s reporting window
 constexpr uint32_t kReadChunkSamples = 256;
+constexpr uint32_t kVerdictDeadlineMs = 15000;  // time to talk before a FAILED verdict
+constexpr double kMinRmsRiseFactor = 2.0;       // speech must be this many times the quietest window
+constexpr double kMinRmsRiseAbsolute = 20.0;    // and at least this much above it (raw 16-bit units)
+
+double quietest_rms = 1e9;
+bool saw_nonzero_sample = false;
+bool verdict_printed = false;
 }  // namespace
 
 /** Configures and starts I2S1 as a mono master input wired to the INMP441. */
@@ -56,6 +69,25 @@ int16_t convertRawSampleTo16Bit(int32_t raw_sample) {
   return static_cast<int16_t>(raw_sample >> 16);
 }
 
+/** Prints the PASSED/FAILED verdict once, as soon as it is known. */
+void reportVerdictIfKnown(double latest_rms) {
+  if (verdict_printed) {
+    return;
+  }
+  if (saw_nonzero_sample && latest_rms >= quietest_rms * kMinRmsRiseFactor &&
+      latest_rms - quietest_rms >= kMinRmsRiseAbsolute) {
+    verdict_printed = true;
+    Serial.println("===== MIC TEST PASSED =====");
+  } else if (millis() >= kVerdictDeadlineMs) {
+    verdict_printed = true;
+    if (!saw_nonzero_sample) {
+      Serial.println("===== MIC TEST FAILED: the mic only returned zeros (check wiring and the L/R channel) =====");
+    } else {
+      Serial.println("===== MIC TEST FAILED: the level never rose when talking (too quiet, or you didn't make a sound) =====");
+    }
+  }
+}
+
 /** Reads one reporting window of mic audio and prints min/max/RMS to Serial. */
 void captureAndReportWindow() {
   int32_t raw_buffer[kReadChunkSamples];
@@ -80,8 +112,13 @@ void captureAndReportWindow() {
   }
 
   double rms = sqrt(sum_of_squares / samples_collected);
+  if (min_sample != 0 || max_sample != 0) {
+    saw_nonzero_sample = true;
+  }
+  quietest_rms = min(quietest_rms, rms);
   Serial.printf("[mic_stats][Step 3] window=%u samples  min=%d  max=%d  rms=%.1f\n",
                 samples_collected, min_sample, max_sample, rms);
+  reportVerdictIfKnown(rms);
 }
 
 /** One-time setup: start Serial and the mic's I2S input. */
@@ -92,7 +129,7 @@ void setup() {
   setupI2sInput();
 
   Serial.println("[mic_stats][Step 3] I2S ready. Reporting mic level stats every ~0.5s.");
-  Serial.println("[mic_stats][Step 3] Talk or clap near the mic and watch the values move.");
+  Serial.println("[mic_stats][Step 3] Stay quiet for a second, then talk or clap near the mic (15 s to do it).");
 }
 
 /** Continuously captures a reporting window and logs its stats, forever. */

@@ -11,6 +11,11 @@
 // Wi-Fi/TLS loaded yet, so there's plenty of free heap), but the real
 // Gemini pipeline streams audio in small live chunks instead - see the
 // memory notes in Documentation/decisions.md.
+//
+// PASS (by ear): after the first cycle the sketch prints once either
+// "===== LOOPBACK TEST FAILED: ... =====" (the mic returned only silence) or
+// "===== LOOPBACK TEST DONE - PASS if ... =====" - only a person can hear
+// whether the playback is the recording. Speak during the LED-on phase.
 
 #include <stdint.h>
 #include <driver/i2s.h>
@@ -32,6 +37,9 @@ constexpr uint32_t kChunkSamples = 256;
 constexpr int32_t kSoftwareGain = 4;  // mic levels are otherwise quiet - see step 3 findings
 
 int16_t audio_buffer[kRecordSamples];  // ~2s of mono 16-bit audio, static to avoid stack overflow
+constexpr int32_t kMinPeakForSound = 200;  // a clip quieter than this counts as silence
+int32_t last_clip_peak = 0;
+bool verdict_printed = false;
 }  // namespace
 
 /** Configures I2S0 as a full-duplex master: RX from the INMP441, TX to the MAX98357A. */
@@ -82,6 +90,7 @@ int16_t processMicSample(int32_t raw_sample) {
 /** Records kRecordDurationSec of mic audio into audio_buffer, LED on throughout. */
 void recordClip() {
   setLed(true);
+  last_clip_peak = 0;
   Serial.printf("[mic_loopback][Step 4] Recording %us clip...\n", kRecordDurationSec);
 
   int32_t raw_chunk[kChunkSamples];
@@ -95,6 +104,8 @@ void recordClip() {
 
     for (uint32_t i = 0; i < samples_read; i++) {
       audio_buffer[samples_recorded + i] = processMicSample(raw_chunk[i]);
+      int32_t magnitude = abs(static_cast<int32_t>(audio_buffer[samples_recorded + i]));
+      last_clip_peak = max(last_clip_peak, magnitude);
     }
     samples_recorded += samples_read;
   }
@@ -136,8 +147,22 @@ void setup() {
                 kRecordDurationSec);
 }
 
+/** Prints the verdict once, after the first record-then-playback cycle. */
+void reportVerdictOnce() {
+  if (verdict_printed) {
+    return;
+  }
+  verdict_printed = true;
+  if (last_clip_peak < kMinPeakForSound) {
+    Serial.println("===== LOOPBACK TEST FAILED: the mic recorded only silence (check the mic wiring, or speak louder) =====");
+  } else {
+    Serial.println("===== LOOPBACK TEST DONE - PASS if you heard your own voice played back clearly =====");
+  }
+}
+
 /** Repeats record-then-playback cycles forever. */
 void loop() {
   recordClip();
   playbackClip();
+  reportVerdictOnce();
 }
