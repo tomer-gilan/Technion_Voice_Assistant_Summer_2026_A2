@@ -2371,6 +2371,8 @@ function handleStatusLine(tag, rest) {
       if (wasRunning && words[0] === "booting") {
         elements.result.className = "result";
         elements.result.textContent = "The board restarted.";
+        board.timer = null;  // the timer lived in the board's RAM - gone with the restart
+        renderTimer();
       }
       onPipelineState(board.pipeline);
       if (words[0] === "halted") showAlert("The board stopped.", board.pipeline.detail || "See the serial terminal for why, then press Reset on the board.");
