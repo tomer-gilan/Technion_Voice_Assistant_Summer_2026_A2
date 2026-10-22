@@ -170,6 +170,126 @@ bool isAssistantOffline();
 void startOpenAiConnectionWhenNetworkReady();
 void dropDeadSocketOnWifiLoss();
 
+// ===== State machine: the transitions =====
+// The assistant's state is derived in one place, updatePipelineState(),
+// from the flags above. These are the transitions that change several of
+// them at once - each one the same statements, in the same order, its call
+// sites used to write inline. Flag writes only: the calls, sends and logs
+// around them stay with their callers.
+
+/** Idle -> listening: a LISTEN's recording starts (beginListenTurn()). */
+void enterListening() {
+  is_capturing = true;
+  awaiting_reply = false;
+  reply_received_this_cycle = false;
+  response_fully_received = false;
+  function_call_turn_pending = false;
+  dropping_reply_audio = false;
+  speech_in_progress = false;
+}
+
+/** Listening -> processing: the recording is all sent and committed, the
+    reply timeout starts (finishCapture()). */
+void enterAwaitingReply() {
+  is_capturing = false;
+  awaiting_reply = true;
+  last_reply_activity_ms = millis();
+}
+
+/** Listening -> failed: the connection dropped while recording
+    (abortCapture()), just before markReplyFailed(). */
+void noteCaptureAborted() {
+  is_capturing = false;
+  awaiting_reply = true;  // so markReplyFailed() reports this LISTEN's verdict
+}
+
+/** Listening (hands-free) -> idle: the utterance wasn't speech, so the
+    LISTEN never happened and its number is reused (handleVoiceDiscarded()). */
+void noteListenDropped() {
+  is_capturing = false;
+  listen_cycle--;
+}
+
+/** Listening / processing / speaking -> idle: CANCEL dropped the LISTEN
+    (cancelListenTurn()). */
+void noteListenCancelled() {
+  awaiting_reply = false;
+  reply_received_this_cycle = true;
+  function_call_turn_pending = false;
+  speech_in_progress = false;
+}
+
+/** Processing / speaking -> idle: this LISTEN got its verdict, PASSED or
+    FAILED (markReplyReceived(), markReplyFailed()). */
+void noteVerdictReached() {
+  reply_received_this_cycle = true;
+  awaiting_reply = false;
+}
+
+/** A response the board asked for on its own (the opening greeting) is on
+    its way: hands-free waits for it, the reply timeout watches it. */
+void noteResponseRequested() {
+  response_in_flight = true;
+  last_reply_activity_ms = millis();
+}
+
+/** Like noteResponseRequested(), for speech no LISTEN asked for that
+    @@STATE names: "timer" (a timer announcement) or "typed" (ASK). */
+void noteUnpromptedResponseRequested(const char* speech_detail) {
+  unprompted_speech_detail = speech_detail;
+  noteResponseRequested();
+}
+
+/** The server's response.created: a response is running. */
+void noteResponseCreated() {
+  server_response_running = true;
+  response_in_flight = true;
+  last_reply_activity_ms = millis();
+}
+
+/** response.done for a response CANCEL stopped: it is over, nothing more
+    of it is dropped. */
+void noteCancelledResponseOver() {
+  dropping_reply_audio = false;
+  response_in_flight = false;
+  function_call_turn_pending = false;
+}
+
+/** response.done with status "failed", just before markReplyFailed(). */
+void noteFailedResponseDone() {
+  response_in_flight = false;
+  function_call_turn_pending = false;
+}
+
+/** The "error" response_cancel_not_active after a CANCEL: the response had
+    already ended. */
+void noteCancelledResponseAlreadyOver() {
+  dropping_reply_audio = false;  // the response had already ended - nothing left to drop
+  response_in_flight = false;
+}
+
+/** An "error" while no response is running (e.g. a rejected
+    response.create): no response.done will come to clear these. */
+void noteResponseRejected() {
+  response_in_flight = false;
+  dropping_reply_audio = false;
+}
+
+/** No response is coming any more (the socket closed, or the server went
+    silent - checkReplyTimeout()). */
+void clearResponseFlags() {
+  response_in_flight = false;
+  server_response_running = false;
+  function_call_turn_pending = false;
+  dropping_reply_audio = false;
+}
+
+/** Ready -> reconnecting: the WebSocket disconnected (onWebSocketEvent()). */
+void noteSessionLost() {
+  session_ready = false;
+  clearResponseFlags();
+}
+
 /** Milliseconds of audio in a number of 24 kHz samples. */
 uint32_t samplesToMs(uint32_t samples) {
   return static_cast<uint32_t>(static_cast<uint64_t>(samples) * 1000 / kSampleRateHz);
@@ -278,8 +398,7 @@ void printNextTurnHint() {
     Verdicts are never gated behind a log level - see log_utils.h. */
 void markReplyReceived() {
   if (reply_received_this_cycle) return;
-  reply_received_this_cycle = true;
-  awaiting_reply = false;
+  noteVerdictReached();
   Serial.printf("===== LISTEN #%u PASSED =====\n", listen_cycle);
   printNextTurnHint();
   esp32va_status::printProtocolLine("@@RESULT pass %u", listen_cycle);
@@ -293,8 +412,7 @@ void markReplyReceived() {
     gated behind a log level - see log_utils.h. */
 void markReplyFailed(const char* reason) {
   if (reply_received_this_cycle || !awaiting_reply) return;
-  reply_received_this_cycle = true;
-  awaiting_reply = false;
+  noteVerdictReached();
   function_call_turn_pending = false;  // else @@STATE stays "tool" after the failure
   Serial.printf("===== LISTEN #%u FAILED: %s =====\n", listen_cycle, reason);
   esp32va_status::printProtocolLine("@@RESULT fail %u %s", listen_cycle, reason);
@@ -376,8 +494,7 @@ void abortCapture(const char* reason) {
   esp32va_mic_capture::stopCapture();
   recordCaptureMeasurements(stats, -1, -1);
   finishVoiceCommandRecording();
-  is_capturing = false;
-  awaiting_reply = true;  // so markReplyFailed() reports this LISTEN's verdict
+  noteCaptureAborted();
   markReplyFailed(reason);
 }
 
@@ -620,9 +737,7 @@ void handleServerMessage(uint8_t* payload, size_t length) {
   if (strcmp(type, "response.created") == 0) {
     // Also after an error that cleared response_in_flight (see "error"
     // below) but didn't stop this response: it is still on its way.
-    server_response_running = true;
-    response_in_flight = true;
-    last_reply_activity_ms = millis();
+    noteResponseCreated();
     LOG_DEBUG("response.created - a response is running.\n");
     return;
   }
@@ -635,15 +750,12 @@ void handleServerMessage(uint8_t* payload, size_t length) {
     // function-call-only response.done has no recording open - a no-op.
     esp32va_reply_recorder::noteReplyFinished();
     if (dropping_reply_audio) {  // the response CANCEL stopped is over
-      dropping_reply_audio = false;
-      response_in_flight = false;
-      function_call_turn_pending = false;
+      noteCancelledResponseOver();
       LOG_INFO("The cancelled response is over (%s).\n", status);
       return;
     }
     if (strcmp(status, "failed") == 0) {
-      response_in_flight = false;
-      function_call_turn_pending = false;
+      noteFailedResponseDone();
       const char* error_message = doc["response"]["status_details"]["error"]["message"] | "(no error detail)";
       markReplyFailed(error_message);
     } else if (function_call_turn_pending) {
@@ -676,8 +788,7 @@ void handleServerMessage(uint8_t* payload, size_t length) {
     const char* message = doc["error"]["message"] | "(no message)";
     const char* code = doc["error"]["code"] | "";
     if (dropping_reply_audio && strcmp(code, "response_cancel_not_active") == 0) {
-      dropping_reply_audio = false;  // the response had already ended - nothing left to drop
-      response_in_flight = false;
+      noteCancelledResponseAlreadyOver();
       return;
     }
     LOG_ERROR("Error: %s\n", message);
@@ -685,8 +796,7 @@ void handleServerMessage(uint8_t* payload, size_t length) {
       // No response is running (e.g. the response.create was rejected), so
       // no response.done will clear it - else hands-free waits for the
       // reply timeout.
-      response_in_flight = false;
-      dropping_reply_audio = false;
+      noteResponseRejected();
     }
     markReplyFailed(message);
     return;
@@ -731,11 +841,7 @@ void onWebSocketEvent(WStype_t type, uint8_t* payload, size_t length) {
         LOG_INFO("Disconnected (idle) - reconnecting.\n");
         LOG_DEBUG("Disconnected while idle between LISTEN cycles - likely a server idle timeout.\n");
       }
-      session_ready = false;
-      response_in_flight = false;
-      server_response_running = false;
-      function_call_turn_pending = false;
-      dropping_reply_audio = false;
+      noteSessionLost();
       if (is_capturing) {
         abortCapture("disconnected while recording");  // stops the mic (no send happens here)
       }
@@ -774,13 +880,7 @@ void onWebSocketEvent(WStype_t type, uint8_t* payload, size_t length) {
 void beginListenTurn(esp32va_measure::ListenMode mode) {
   listen_cycle++;
   esp32va_measure::beginTurn(listen_cycle);
-  is_capturing = true;
-  awaiting_reply = false;
-  reply_received_this_cycle = false;
-  response_fully_received = false;
-  function_call_turn_pending = false;
-  dropping_reply_audio = false;
-  speech_in_progress = false;
+  enterListening();
   capture = {};
   capture.mode = mode;
   capture.level_min = INT16_MAX;
@@ -836,8 +936,7 @@ void handleVoiceDiscarded() {
   esp32va_mic_capture::CaptureStats stats;
   esp32va_mic_capture::getCaptureStats(&stats);
   Serial.printf("LISTEN #%u dropped - that didn't sound like speech. Still listening.\n", listen_cycle);
-  is_capturing = false;
-  listen_cycle--;
+  noteListenDropped();
   esp32va_hands_free::noteUtteranceDiscarded(stats.discard_reason, samplesToMs(stats.captured_samples));
 }
 
@@ -865,10 +964,7 @@ void cancelListenTurn() {
     Serial.printf("CANCEL ignored - no LISTEN to cancel.\n");
     return;
   }
-  awaiting_reply = false;
-  reply_received_this_cycle = true;
-  function_call_turn_pending = false;
-  speech_in_progress = false;
+  noteListenCancelled();
   esp32va_hands_free::holdOff();
   Serial.printf("===== LISTEN #%u CANCELLED =====\n", listen_cycle);
   esp32va_status::printProtocolLine("@@RESULT cancel %u", listen_cycle);
@@ -981,9 +1077,7 @@ void finishCapture() {
   recordCaptureMeasurements(stats, speech_ms, end_of_speech_to_commit_ms);
   finishVoiceCommandRecording();
 
-  is_capturing = false;
-  awaiting_reply = true;
-  last_reply_activity_ms = millis();
+  enterAwaitingReply();
 }
 
 /** Moves the capture along, once per loop() pass: acts on the mic task's
@@ -1209,9 +1303,7 @@ void askTypedQuestion(const String& text) {
   webSocket.sendTXT(message);
   webSocket.sendTXT(kResponseCreateMessage);
   esp32va_status::reportTextLine("HEARD", question.c_str());
-  unprompted_speech_detail = "typed";
-  response_in_flight = true;  // like the greeting: hands-free waits for it to be heard
-  last_reply_activity_ms = millis();
+  noteUnpromptedResponseRequested("typed");  // like the greeting: hands-free waits for it to be heard
   LOG_INFO("Typed question sent: \"%s\"\n", question.c_str());
 }
 
@@ -1367,10 +1459,7 @@ void checkReplyTimeout() {
   if (millis() - last_reply_activity_ms < kReplyTimeoutMs) {
     return;
   }
-  response_in_flight = false;  // a response that silent isn't coming any more
-  server_response_running = false;
-  function_call_turn_pending = false;
-  dropping_reply_audio = false;
+  clearResponseFlags();  // a response that silent isn't coming any more
   if (!awaiting_reply) {
     LOG_ERROR("No word from the server for %lu ms about the last response - not waiting for it any more.\n",
               kReplyTimeoutMs);
@@ -1717,8 +1806,7 @@ void loop() {
   if (should_send_opening_greeting) {
     should_send_opening_greeting = false;
     esp32va_greeting::sendOpeningGreeting(webSocket);
-    response_in_flight = true;  // hands-free waits for the greeting to be heard
-    last_reply_activity_ms = millis();
+    noteResponseRequested();  // hands-free waits for the greeting to be heard
   }
 
   // Before the commands: a LIST / GET in this same pass then already knows
@@ -1744,9 +1832,7 @@ void loop() {
   bool board_quiet = isIdleForFileTransfer() && !response_in_flight && !speech_in_progress;
   if (esp32va_clock::serviceTimer(board_quiet) && session_ready) {
     esp32va_clock::sendTimerAnnouncement(webSocket);
-    unprompted_speech_detail = "timer";
-    response_in_flight = true;  // like the greeting: hands-free waits for it to be heard
-    last_reply_activity_ms = millis();
+    noteUnpromptedResponseRequested("timer");  // like the greeting: hands-free waits for it to be heard
   }
   if (board_quiet && !response_in_flight && esp32va_controls::hasPendingStatusSound()) {
     esp32va_hands_free::holdOff();  // as for BEEP: the mic mustn't take it for speech
