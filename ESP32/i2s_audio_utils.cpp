@@ -8,6 +8,8 @@
 #include "log_utils.h"
 #include "status_report_utils.h"
 
+namespace esp32va_audio {
+
 namespace {
 constexpr i2s_port_t kI2sPort = I2S_NUM_0;
 constexpr uint32_t kSampleRateHz = 24000;
@@ -19,7 +21,7 @@ constexpr uint32_t kI2sDmaBufCount = 12;  // 12*300 = 3600 samples of ring capac
 // 24: with the SD card mounted, 64KB left only ~9KB free once the OpenAI
 // session was up, and the first reply/LISTEN ran the heap dry. A 48KB
 // midpoint was tried too, but 32KB was kept to leave RAM for future
-// features (see PROJECT_OVERVIEW.md step 24). Backpressure, not buffer
+// features (see Documentation/decisions.md step 24). Backpressure, not buffer
 // size, is what paces long replies - a smaller ring only shrinks the
 // cushion against network stalls.
 constexpr uint32_t kRingBufferBytes = 32 * 1024;
@@ -403,3 +405,5 @@ void returnRingFromMic() {
 bool isRingLentToMic() {
   return ring_lent_to_mic;
 }
+
+}  // namespace esp32va_audio

@@ -59,7 +59,7 @@ void openRecordingFile() {
   if (file_descriptor < 0) {
     LOG_ERROR("Couldn't create %s (errno %d) - this reply won't be saved.\n", current_file_name, errno);
     write_failed = true;
-    ringStopRecordingTap();
+    esp32va_audio::ringStopRecordingTap();
     state = RecorderState::kAborting;
   }
 }
@@ -70,18 +70,18 @@ void openRecordingFile() {
     kAborting. */
 void writePendingBlocks() {
   for (uint32_t block = 0; block < kMaxBlocksPerService; block++) {
-    uint32_t pending = ringRecordingTapPendingBytes();
+    uint32_t pending = esp32va_audio::ringRecordingTapPendingBytes();
     bool is_final_flush = state == RecorderState::kFinishing;
     if (pending == 0 || (pending < kWriteBlockBytes && !is_final_flush)) {
       return;
     }
-    uint32_t block_bytes = ringReadRecordingTap(write_block, kWriteBlockBytes);
+    uint32_t block_bytes = esp32va_audio::ringReadRecordingTap(write_block, kWriteBlockBytes);
     ssize_t result = write(file_descriptor, write_block, block_bytes);
     if (result != static_cast<ssize_t>(block_bytes)) {
       LOG_ERROR("Writing %s failed (errno %d) after %u bytes - stopping this recording.\n", current_file_name,
                 errno, (unsigned)bytes_written);
       write_failed = true;
-      ringStopRecordingTap();
+      esp32va_audio::ringStopRecordingTap();
       state = RecorderState::kAborting;
       return;
     }
@@ -92,7 +92,7 @@ void writePendingBlocks() {
 /** Closes the file, logs the outcome, fills *finished, and returns to idle. */
 void closeRecording(FinishedRecording* finished) {
   bool was_aborted = state == RecorderState::kAborting;
-  ringStopRecordingTap();
+  esp32va_audio::ringStopRecordingTap();
   if (file_descriptor >= 0 && close(file_descriptor) != 0) {
     LOG_ERROR("Closing %s failed (errno %d) - the file may be incomplete.\n", current_file_name, errno);
     write_failed = true;
@@ -176,7 +176,7 @@ void noteReplyAudioArriving() {
   next_reply_number++;
   bytes_written = 0;
   write_failed = false;
-  ringStartRecordingTap();
+  esp32va_audio::ringStartRecordingTap();
   state = RecorderState::kRecording;
   LOG_DEBUG("Recording %s started.\n", current_file_name);
 }
@@ -189,7 +189,7 @@ void noteReplyFinished() {
 
 void noteReplyAborted() {
   if (state == RecorderState::kRecording || state == RecorderState::kFinishing) {
-    ringStopRecordingTap();
+    esp32va_audio::ringStopRecordingTap();
     state = RecorderState::kAborting;
   }
 }
@@ -206,13 +206,13 @@ bool serviceReplyRecorder(FinishedRecording* finished) {
   if (state == RecorderState::kRecording || state == RecorderState::kFinishing) {
     writePendingBlocks();
   }
-  if (state == RecorderState::kRecording && ringRecordingTapPendingBytes() == 0 &&
+  if (state == RecorderState::kRecording && esp32va_audio::ringRecordingTapPendingBytes() == 0 &&
       millis() - last_audio_arrival_ms > kStalledReplyTimeoutMs) {
     LOG_INFO("No more reply audio for %lu s and no response.done - closing %s as it is.\n",
              kStalledReplyTimeoutMs / 1000, current_file_name);
     state = RecorderState::kFinishing;
   }
-  bool fully_written = state == RecorderState::kFinishing && ringRecordingTapPendingBytes() == 0;
+  bool fully_written = state == RecorderState::kFinishing && esp32va_audio::ringRecordingTapPendingBytes() == 0;
   if (fully_written || state == RecorderState::kAborting) {
     closeRecording(finished);
     if (finished->bytes_written > 0) {  // a new file was kept - make room by dropping the oldest

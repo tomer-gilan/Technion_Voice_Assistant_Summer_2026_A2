@@ -8,10 +8,12 @@
 // that streams mic audio into the OpenAI Realtime API and plays its spoken
 // reply back out, over this board's single shared-clock I2S port (BCLK/LRC
 // are physically the same GPIOs for both the INMP441 and the MAX98357A - see
-// PROJECT_OVERVIEW.md "Shared I2S port, not two independent ones"). Pin
+// Documentation/decisions.md "Shared I2S port, not two independent ones"). Pin
 // assignments come straight from parameters.h; sample rate/DMA sizing and the
 // ring buffer's capacity are fixed internally to the values steps 12-14
 // confirmed working on real hardware.
+
+namespace esp32va_audio {
 
 /** Configures I2S_NUM_0 as a full-duplex master: RX from the INMP441, TX to
     the MAX98357A, both at 24kHz (the input-rate floor discovered in step 10).
@@ -75,7 +77,7 @@ uint32_t micBufferCapacityMs();
 
 /** Allocates the ring buffer on the heap (not as a static array - growing it
     to 64KB previously overflowed the linker's much smaller static-allocation
-    budget; see PROJECT_OVERVIEW.md "Ring buffer is heap-allocated, not
+    budget; see Documentation/decisions.md "Ring buffer is heap-allocated, not
     static"). Call once from setup(), before Wi-Fi/TLS have fragmented the
     heap. Halts if allocation fails. */
 void initPlaybackRingBuffer();
@@ -121,7 +123,7 @@ uint32_t ringReadRecordingTap(uint8_t* out, uint32_t max_len);
     Drops (and logs) a slice that doesn't fit in the ring rather than
     blocking or overwriting unread data, and the whole span while the ring
     is lent to the mic (below). Never allocates proportionally to b64_len
-    (see PROJECT_OVERVIEW.md "Audio blew the heap, again"). */
+    (see Documentation/decisions.md "Audio blew the heap, again"). */
 void decodeAndRingAudioDelta(const uint8_t* b64_data, size_t b64_len);
 
 /** Drains a small, fixed amount of raw mu-law audio from the ring buffer (if
@@ -140,7 +142,7 @@ void drainRingBufferToSpeaker();
     different thresholds so this doesn't flip on/off right at one boundary.
     Not reading from the socket makes TCP's own flow control tell the server
     to pause, which is what actually paces an arbitrarily long reply to real
-    playback speed (see PROJECT_OVERVIEW.md "Backpressure, not a bigger
+    playback speed (see Documentation/decisions.md "Backpressure, not a bigger
     buffer"). */
 bool ringShouldPauseReads(bool currently_paused);
 
@@ -176,3 +178,5 @@ uint8_t linearPcm16ToUlaw(int16_t sample);
 /** One 8-bit mu-law code as a 16-bit PCM sample (the classic public-domain
     G.711 decode). */
 int16_t ulawToLinearPcm16(uint8_t ulaw_sample);
+
+}  // namespace esp32va_audio

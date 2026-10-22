@@ -42,6 +42,8 @@ void applyLedOutput() {
 }
 }  // namespace
 
+namespace esp32va_board {
+
 void setupBoardState() {
 #if ESP_ARDUINO_VERSION_MAJOR >= 3
   ledcAttach(LED_PIN, kLedPwmFrequencyHz, kLedPwmResolutionBits);
@@ -56,8 +58,6 @@ void setLed(bool on) {
   led_on = on;
   applyLedOutput();
 }
-
-namespace esp32va_board {
 
 void setLedBrightness(uint8_t percent) {
   led_brightness_percent = percent > 100 ? 100 : percent;
@@ -76,7 +76,6 @@ void announceLedState(const char* source) {
   esp32va_status::printProtocolLine("@@LED %s %u %s", led_on ? "on" : "off", (unsigned)led_brightness_percent, source);
 }
 
-}  // namespace esp32va_board
 
 bool handleSetBoardStateCall(JsonDocument& doc, WebSocketsClient& webSocket) {
   const char* call_id = doc["call_id"] | (const char*)nullptr;
@@ -133,3 +132,5 @@ bool handleSetBoardStateCall(JsonDocument& doc, WebSocketsClient& webSocket) {
   LOG_DEBUG("Sent function_call_output.\n");
   return true;
 }
+
+}  // namespace esp32va_board

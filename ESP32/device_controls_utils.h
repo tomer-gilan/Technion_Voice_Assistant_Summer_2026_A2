@@ -30,7 +30,7 @@
 namespace esp32va_controls {
 
 /** Loads the saved volume, mute and LED brightness and applies them. Call
-    once from setup(), after setupBoardState() and setupI2sFullDuplex(). */
+    once from setup(), after esp32va_board::setupBoardState() and esp32va_audio::setupI2sFullDuplex(). */
 void setupDeviceControls();
 
 /** Handles a typed Serial command if it's one of the above

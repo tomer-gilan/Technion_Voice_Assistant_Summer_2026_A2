@@ -100,7 +100,7 @@ void setupDeviceControls() {
   int32_t saved_brightness = esp32va_settings::loadSetting(kLedBrightnessSettingKey, kDefaultLedBrightnessPercent);
   volume_percent = static_cast<uint8_t>(constrain(saved_volume, 0, kMaxPercent));
   is_muted = esp32va_settings::loadSetting(kMutedSettingKey, 0) != 0;
-  setPlaybackVolume(volume_percent, is_muted);
+  esp32va_audio::setPlaybackVolume(volume_percent, is_muted);
   esp32va_board::setLedBrightness(static_cast<uint8_t>(constrain(saved_brightness, 0, kMaxPercent)));
   status_sounds_on = esp32va_settings::loadSetting(kSoundsSettingKey, 0) != 0;
   LOG_INFO("Speaker volume %u%%%s, LED brightness %u%% (saved settings).\n", (unsigned)volume_percent,
@@ -116,7 +116,7 @@ bool handleControlCommand(const char* command, bool idle_for_beep) {
       Serial.printf("VOLUME ignored - expected a whole number from 0 to %d, got \"%s\".\n", kMaxPercent, argument);
     } else {
       volume_percent = requested;
-      setPlaybackVolume(volume_percent, is_muted);
+      esp32va_audio::setPlaybackVolume(volume_percent, is_muted);
       esp32va_settings::saveSetting(kVolumeSettingKey, volume_percent);
       LOG_INFO("Speaker volume set to %u%%.\n", (unsigned)volume_percent);
     }
@@ -130,7 +130,7 @@ bool handleControlCommand(const char* command, bool idle_for_beep) {
       Serial.printf("MUTE ignored - expected on or off, got \"%s\".\n", argument);
     } else {
       is_muted = mute;
-      setPlaybackVolume(volume_percent, is_muted);
+      esp32va_audio::setPlaybackVolume(volume_percent, is_muted);
       esp32va_settings::saveSetting(kMutedSettingKey, is_muted ? 1 : 0);
       LOG_INFO("Speaker %s.\n", is_muted ? "muted" : "unmuted");
     }
@@ -144,7 +144,7 @@ bool handleControlCommand(const char* command, bool idle_for_beep) {
       Serial.printf("BEEP ignored - something is recording or playing right now.\n");
       return true;
     }
-    playTestBeep();
+    esp32va_audio::playTestBeep();
     esp32va_status::printProtocolLine("@@BEEP played");
     LOG_INFO("Test beep played%s.\n", is_muted ? " (muted, so silent)" : "");
     return true;
@@ -171,7 +171,7 @@ bool handleControlCommand(const char* command, bool idle_for_beep) {
     if (!parseOnOff(argument, &turn_on)) {
       Serial.printf("LED ignored - expected on or off, got \"%s\".\n", argument);
     } else {
-      setLed(turn_on);
+      esp32va_board::setLed(turn_on);
       LOG_INFO("LED turned %s (laptop app / typed command).\n", turn_on ? "on" : "off");
     }
     esp32va_board::announceLedState("gui");
@@ -240,7 +240,7 @@ bool handleSetVolumeCall(JsonDocument& doc, WebSocketsClient& webSocket) {
   // even say that it did it.
   volume_percent = static_cast<uint8_t>(constrain(requested, esp32va_params::kMinVoiceVolumePercent, kMaxPercent));
   is_muted = false;
-  setPlaybackVolume(volume_percent, is_muted);
+  esp32va_audio::setPlaybackVolume(volume_percent, is_muted);
   esp32va_settings::saveSetting(kVolumeSettingKey, volume_percent);
   esp32va_settings::saveSetting(kMutedSettingKey, 0);
   LOG_INFO("Speaker volume set to %u%% (voice command).\n", (unsigned)volume_percent);
@@ -277,17 +277,17 @@ void playPendingStatusSound() {
     case StatusSound::kNone:
       return;
     case StatusSound::kOffline:
-      playTone(kHighToneHz, kStatusToneMs);
+      esp32va_audio::playTone(kHighToneHz, kStatusToneMs);
       delay(kStatusToneGapMs);
-      playTone(kLowToneHz, kStatusToneMs);
+      esp32va_audio::playTone(kLowToneHz, kStatusToneMs);
       break;
     case StatusSound::kOnline:
-      playTone(kLowToneHz, kStatusToneMs);
+      esp32va_audio::playTone(kLowToneHz, kStatusToneMs);
       delay(kStatusToneGapMs);
-      playTone(kHighToneHz, kStatusToneMs);
+      esp32va_audio::playTone(kHighToneHz, kStatusToneMs);
       break;
     case StatusSound::kFailed:
-      playTone(kFailedToneHz, kFailedToneMs);
+      esp32va_audio::playTone(kFailedToneHz, kFailedToneMs);
       break;
     default:
       LOG_ERROR("Unexpected status sound %d - not played.\n", (int)sound);

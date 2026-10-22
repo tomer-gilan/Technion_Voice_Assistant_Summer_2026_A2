@@ -38,7 +38,7 @@ bool setupVoiceCommandRecorder(esp32va_recordings::RecordingDeletedListener on_r
 void beginVoiceCommand();
 
 /** Appends one chunk of mic audio. raw_i2s_words is the raw 32-bit I2S
-    buffer readMicChunkGained() filled; it's converted to the mic's 16-bit
+    buffer esp32va_audio::readMicChunkGained() filled; it's converted to the mic's 16-bit
     samples (the same conversion, minus the gain) in place, so its contents
     are destroyed. Does nothing if no file is open. */
 void appendMicChunk(int32_t* raw_i2s_words, uint32_t sample_count);

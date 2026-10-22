@@ -9,6 +9,8 @@
 // worth acting on. Both functions scan the WebSocket library's own
 // already-allocated payload buffer directly - no copy, no JsonDocument.
 
+namespace esp32va_json {
+
 /** Extracts the "type" field's value from a raw JSON event payload without a
     full parse, by scanning for the literal `"type":"..."` that every event
     observed so far starts with. Returns false if not found within the first
@@ -23,3 +25,5 @@ bool extractEventType(const uint8_t* payload, size_t length, char* out, size_t o
     end. */
 bool findRawStringField(const uint8_t* payload, size_t length, const char* field_name,
                          const uint8_t** value_start, size_t* value_len);
+
+}  // namespace esp32va_json

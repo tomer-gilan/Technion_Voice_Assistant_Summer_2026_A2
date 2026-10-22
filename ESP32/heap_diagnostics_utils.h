@@ -16,7 +16,7 @@ namespace esp32va_heap {
     logHeapSummary() can report them. Call once, first thing in setup().
     Worth having because an allocation failure deep inside the TLS handshake
     can surface as an unrelated-looking error (suspected, not confirmed: the
-    "X509 - Certificate verification failed" in PROJECT_OVERVIEW.md step 24). */
+    "X509 - Certificate verification failed" in Documentation/decisions.md step 24). */
 void startCountingFailedAllocations();
 
 /** Bytes malloc() can use right now. */

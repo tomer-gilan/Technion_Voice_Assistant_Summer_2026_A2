@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Diagnostic for the step 13 mid-response disconnect (see PROJECT_OVERVIEW.md).
+"""Diagnostic for the step 13 mid-response disconnect (see Documentation/decisions.md).
 
 Reproduces the exact same session.update -> conversation.item.create ->
 response.create flow the ESP32 sketch (ESP32/ESP32.ino) sends, but from a

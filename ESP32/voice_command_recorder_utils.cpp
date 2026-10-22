@@ -72,7 +72,7 @@ void appendMicChunk(int32_t* raw_i2s_words, uint32_t sample_count) {
   // words already read (word i is read before it's written over).
   uint8_t* packed_bytes = reinterpret_cast<uint8_t*>(raw_i2s_words);
   for (uint32_t i = 0; i < sample_count; i++) {
-    int16_t mic_sample = static_cast<int16_t>(raw_i2s_words[i] >> 16);  // as readMicChunkGained(), without the gain
+    int16_t mic_sample = static_cast<int16_t>(raw_i2s_words[i] >> 16);  // as esp32va_audio::readMicChunkGained(), without the gain
     memcpy(packed_bytes + i * sizeof(int16_t), &mic_sample, sizeof(mic_sample));
   }
   size_t chunk_bytes = sample_count * sizeof(int16_t);

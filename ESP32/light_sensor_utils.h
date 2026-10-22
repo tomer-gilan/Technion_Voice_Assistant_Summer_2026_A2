@@ -56,7 +56,7 @@ bool handleLightCommand(const char* command);
     to "day"/"evening"/"night", logs it, and sends the function_call_output
     plus a follow-up response.create so the model speaks the answer. Returns
     true if handled - the caller should then expect the next response.done
-    to be the function-call-only turn, same as handleSetBoardStateCall() -
+    to be the function-call-only turn, same as esp32va_board::handleSetBoardStateCall() -
     or false (logged) if call_id is missing. */
 bool handleGetTimeOfDayCall(JsonDocument& doc, WebSocketsClient& webSocket);
 

@@ -76,12 +76,12 @@ void ringAlarm() {
   bool led_was_on = esp32va_board::isLedOn();
   esp32va_hands_free::holdOff();
   for (int beep = 0; beep < kAlarmBeeps; beep++) {
-    setLed(true);
-    playTestBeep();
-    setLed(false);
+    esp32va_board::setLed(true);
+    esp32va_audio::playTestBeep();
+    esp32va_board::setLed(false);
     delay(kAlarmGapMs);
   }
-  setLed(led_was_on);
+  esp32va_board::setLed(led_was_on);
   esp32va_hands_free::holdOff();  // restart the cooldown after the last beep
 }
 
@@ -182,7 +182,7 @@ bool serviceTimer(bool board_idle) {
   }
   ringAlarm();
   if (timer_light_action >= 0) {
-    setLed(timer_light_action == 1);
+    esp32va_board::setLed(timer_light_action == 1);
     LOG_INFO("Timer done - LED turned %s, as asked.\n", timer_light_action ? "on" : "off");
     esp32va_board::announceLedState("voice");  // asked for by voice, just later
     timer_light_action = -1;

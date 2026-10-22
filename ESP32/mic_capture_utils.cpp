@@ -168,10 +168,10 @@ void writeFrameToRing(uint8_t* target, uint32_t capacity, uint32_t position, con
   uint32_t offset = position % capacity;
   uint32_t first_part = capacity - offset < kFrameSamples ? capacity - offset : kFrameSamples;
   for (uint32_t i = 0; i < first_part; i++) {
-    target[offset + i] = linearPcm16ToUlaw(samples[i]);
+    target[offset + i] = esp32va_audio::linearPcm16ToUlaw(samples[i]);
   }
   for (uint32_t i = first_part; i < kFrameSamples; i++) {
-    target[i - first_part] = linearPcm16ToUlaw(samples[i]);
+    target[i - first_part] = esp32va_audio::linearPcm16ToUlaw(samples[i]);
   }
 }
 
@@ -181,7 +181,7 @@ void micTask(void* /*unused*/) {
   unsigned long previous_read_ms = millis();
   unsigned long last_active_frame_ms = 0;
   for (;;) {
-    readMicSamples(raw_frame, frame_samples, kFrameSamples);
+    esp32va_audio::readMicSamples(raw_frame, frame_samples, kFrameSamples);
     unsigned long now_ms = millis();
     uint32_t read_gap_ms = now_ms - previous_read_ms;
     previous_read_ms = now_ms;
@@ -266,7 +266,7 @@ bool borrowRing() {
     return true;
   }
   uint32_t capacity = 0;
-  uint8_t* borrowed = lendRingToMic(&capacity);
+  uint8_t* borrowed = esp32va_audio::lendRingToMic(&capacity);
   if (borrowed == nullptr) {
     return false;
   }
@@ -369,7 +369,7 @@ void stopCapture() {
   ring = nullptr;
   ring_capacity = 0;
   portEXIT_CRITICAL(&state_lock);
-  returnRingFromMic();
+  esp32va_audio::returnRingFromMic();
 }
 
 CaptureMode captureMode() {
@@ -416,10 +416,10 @@ uint32_t takeCaptureSamples(int16_t* out, uint32_t max_samples) {
   uint32_t offset = start % capacity;
   uint32_t first_part = capacity - offset < count ? capacity - offset : count;
   for (uint32_t i = 0; i < first_part; i++) {
-    out[i] = ulawToLinearPcm16(source[offset + i]);
+    out[i] = esp32va_audio::ulawToLinearPcm16(source[offset + i]);
   }
   for (uint32_t i = first_part; i < count; i++) {
-    out[i] = ulawToLinearPcm16(source[i - first_part]);
+    out[i] = esp32va_audio::ulawToLinearPcm16(source[i - first_part]);
   }
   // If the task skipped read_position ahead meanwhile (overflow) or the
   // capture was discarded, what was copied may be overwritten - drop it.

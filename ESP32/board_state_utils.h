@@ -10,6 +10,8 @@
 // towards the current LISTEN cycle's state machine (e.g.
 // function_call_turn_pending) stays a decision for the caller.
 
+namespace esp32va_board {
+
 /** One-time setup: attaches LED_PIN to a PWM channel (so it can be dimmed -
     step 28) and drives it to the default (off) state. Call once from setup(). */
 void setupBoardState();
@@ -31,7 +33,6 @@ void setLed(bool on);
     turn (no audio), not the real reply - false if nothing was done. */
 bool handleSetBoardStateCall(JsonDocument& doc, WebSocketsClient& webSocket);
 
-namespace esp32va_board {
 
 /** Sets how bright the LED is when on, 0-100% (higher counts as 100%).
     Takes effect at once if it's on; remembered if it's off. */

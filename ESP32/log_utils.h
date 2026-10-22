@@ -42,7 +42,7 @@ enum LogLevel {
 // libraries (WiFi/lwIP/ESP-IDF/WebSockets/etc. all being plausible, "log
 // level" being a generic enough name to collide). Namespacing it changes its
 // mangled linker symbol entirely, which rules that class of collision out
-// regardless of which library it actually was. See PROJECT_OVERVIEW.md step
+// regardless of which library it actually was. See Documentation/decisions.md step
 // 17 for the full bisection.
 namespace esp32va_log {
 /** Defined in log_utils.cpp. Defaults to LOG_LEVEL_INFO as of step 20a (was

@@ -82,7 +82,7 @@ struct LevelReading {
 };
 
 /** Starts the mic task, in kOff. Call once from setup(), after
-    setupI2sFullDuplex(), initPlaybackRingBuffer() and the startup mic check
+    esp32va_audio::setupI2sFullDuplex(), esp32va_audio::initPlaybackRingBuffer() and the startup mic check
     (which reads the mic directly). Returns false (logged) if the task
     couldn't be created. */
 bool beginMicCapture();

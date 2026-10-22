@@ -3,6 +3,8 @@
 #include <string.h>
 #include <stdio.h>
 
+namespace esp32va_json {
+
 bool extractEventType(const uint8_t* payload, size_t length, char* out, size_t out_size) {
   constexpr char kNeedle[] = "\"type\":\"";
   constexpr size_t kNeedleLen = sizeof(kNeedle) - 1;
@@ -39,3 +41,5 @@ bool findRawStringField(const uint8_t* payload, size_t length, const char* field
   }
   return false;
 }
+
+}  // namespace esp32va_json

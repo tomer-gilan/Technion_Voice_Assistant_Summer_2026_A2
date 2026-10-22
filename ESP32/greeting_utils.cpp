@@ -63,7 +63,7 @@ constexpr char kGreetingResponseTemplate[] =
 constexpr size_t kGreetingJsonBufferSize = kMaxGreetingLen + 160;  // the ~130-char template plus the greeting
 
 // Static, not stack-local: same reasoning as ESP32.ino's own buffers (avoids
-// heap fragmentation - see CLAUDE.md's Engineering Constraints).
+// heap fragmentation - see Documentation/decisions.md).
 char greeting_text[kMaxGreetingLen];
 char greeting_json[kGreetingJsonBufferSize];
 

@@ -12,7 +12,7 @@
 //
 // Split by context: the note*() calls only flip state and are safe from
 // inside the WebSocket callback; every SD card operation happens in
-// serviceReplyRecorder(), called from loop() (CLAUDE.md: no blocking work
+// serviceReplyRecorder(), called from loop() (Documentation/decisions.md: no blocking work
 // inside the callback). Files are written with POSIX open()/write() rather
 // than the SD library's File class, which would add a 4KB stdio buffer per
 // open file on top of the FAT driver's own per-file cache.

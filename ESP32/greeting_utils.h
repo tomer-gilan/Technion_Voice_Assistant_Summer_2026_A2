@@ -9,7 +9,7 @@
 // response.create, the same mechanism session.update's top-level
 // "instructions" uses for the persistent system prompt, just scoped to a
 // single response instead - confirmed against OpenAI's current Realtime API
-// docs (2026-09-21), not assumed. See PROJECT_OVERVIEW.md step 22.
+// docs (2026-09-21), not assumed. See Documentation/decisions.md step 22.
 
 namespace esp32va_greeting {
 

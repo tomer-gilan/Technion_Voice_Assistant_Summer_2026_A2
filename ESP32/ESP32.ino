@@ -1,47 +1,36 @@
-// Step 30 - Hands-free listening: speech starts and ends the recording by itself
-// Builds directly on step 29 (Documentation/development_steps/29_measurements.ino.inactive): the same
-// session, tools, status lines, controls, recordings and measurements. Adds:
-// - A mic task of its own (mic_capture_utils.h): the mic is read every 20 ms
-//   whatever loop() is busy with, into the playback ring buffer (borrowed
-//   while nothing plays; ~1.36 s of mu-law audio), so a slow WebSocket send
-//   or SD write delays the audio instead of losing it - step 29 lost some in
-//   most LISTENs. LISTEN and the Talk button record through it too, still a
-//   fixed 3 s.
-// - Hands-free listening (hands_free_utils.h, "VAD on"): while the board is
-//   idle, a voice activity detector (vad_utils.h) waits for speech - voiced,
-//   syllable-paced speech, not a door slam, a knock or an air conditioner -
-//   and records from 500 ms before it was sure (so the first word isn't
-//   cut) until ~1 s of silence (VAD_HANGOVER) or 10 s at most. The audio
-//   streams to OpenAI as it's captured, as before; an utterance that turns
-//   out not to be speech is cleared (input_audio_buffer.clear) instead of
-//   committed, and its recording deleted. Half-duplex: it never listens
-//   while the board is answering, and waits 600 ms after (the speaker's
-//   echo); a BEEP or a file transfer stops it first.
-// - Status lines for the laptop app: @@STATE armed (waiting for speech) and
-//   @@STATE listening vad, @@VAD / @@VAD_LEVEL / @@VAD_EVENT (see
-//   hands_free_utils.h), and new @@TIMING keys: mode, preroll_ms, speech_ms,
-//   eos_to_commit_ms (end of speech -> commit), fifo_max_ms, dropped_ms,
-//   mic_gap_max_ms (see measurement_utils.h).
-// tools/vad_replay.cpp runs the same detector on a laptop, over recordings
-// downloaded from the SD card, to see and tune where it starts and stops.
+// ESP32 voice assistant - firmware (ESP32-WROOM-32, no PSRAM)
 //
-// PASS criterion: "===== HANDS-FREE PASSED =====" prints once, after
-// kHandsFreeTurnsToPass LISTENs in a row that started by voice, were each
-// answered, and lost no mic audio - with every startup check ok and the
-// lowest free heap since boot at least kMinLowestHeapBytes. (Manual LISTENs
-// in between neither count nor break the streak.) It FAILS instead if a
-// startup check failed or the heap went lower. The rest - no trigger on
-// knocks, slams or a running fan, none on the board's own voice - is
-// checked by ear; see this step's "What to expect?".
+// Talk to it, and it answers out loud and works the board: the LED, the
+// speaker volume, a timer, the clock, the part of the day (light sensor) and
+// its own health. Speech is understood in the cloud (OpenAI Realtime API,
+// over one TLS WebSocket); this board records, streams, plays and runs the
+// tools. Every option and parameter: parameters.h (compile time) and the
+// control center (run time - control_center/control_center.html).
 //
-// Unchanged from step 29: @@STAGE / @@STATE / @@RESULT / @@MIC_LEVEL /
-// @@HEARD / @@SAID / @@WIFI status lines and the STATUS command for the
-// laptop app; VOLUME / MUTE / BEEP / LED / LED_BRIGHTNESS / LIGHT_BANDS
-// controls kept across reboots; every LISTEN's mic audio saved as
-// /voice_commands/command_NNNN.pcm and every reply as /replies/reply_NNNN.ulaw
-// (newest 5 of each), with LIST / GET / DELETE / DELETE_ALL, refused with
-// @@BUSY while a reply is in progress, playing or being saved; @@BOOT_TIMING,
-// @@TIMING and @@HEAP. Serial stays at 115200 baud.
+// This file holds the conversation itself: the session and its server
+// events, a LISTEN's capture -> send -> reply -> playback cycle, the tools'
+// dispatch, the assistant's state (@@STATE, see updatePipelineState()) and
+// the serial commands. Everything else is in the *_utils modules next to it -
+// Documentation/architecture.md has the map.
+//
+// How a LISTEN starts: the Talk button / LISTEN command / BOOT button (a
+// fixed kManualRecordDurationSec), or by voice when hands-free is on
+// (hands_free_utils.h: a voice activity detector on this board starts and
+// ends the recording). The mic is read by its own task (mic_capture_utils.h)
+// so a slow send delays audio instead of losing it.
+//
+// Robustness: without an SD card it runs on without recordings; without
+// Wi-Fi or OpenAI it goes offline (@@STATE offline) and keeps retrying while
+// the timer and the controls keep working; the Wi-Fi network can be changed
+// from the control center; a question with no answer times out after
+// kReplyTimeoutMs. Only a mic task that can't start halts it.
+//
+// Built step by step - this is step 30 and the improvements after it
+// (Documentation/versions.md; the earlier sketches are in
+// Documentation/development_steps/). The step's own verdict still prints:
+// "===== HANDS-FREE PASSED =====" once after kHandsFreeTurnsToPass hands-free
+// LISTENs in a row were answered with no mic audio lost, and
+// "===== LISTEN #N PASSED/FAILED =====" for every question.
 
 #include <WebSocketsClient.h>
 #include <ArduinoJson.h>
@@ -154,7 +143,7 @@ bool response_in_flight = false;   // a response.create (greeting or LISTEN) has
 uint32_t listen_cycle = 0;         // deliberately never reset - keeps counting across reconnects for a soak test
 uint32_t connection_count = 0;     // how many times WStype_CONNECTED has fired this run (1 = first connect, 2+ = reconnect)
 unsigned long last_reply_activity_ms = 0;  // last time ANY server message arrived while a response was due - see checkReplyTimeout()
-bool ws_reads_paused_for_backpressure = false;  // see i2s_audio_utils.h's ringShouldPauseReads()
+bool ws_reads_paused_for_backpressure = false;  // see i2s_audio_utils.h's esp32va_audio::ringShouldPauseReads()
 bool step_verdict_reported = false;  // this step's own control-center verdict - see reportStepVerdict()
 const char* unprompted_speech_detail = "greeting";  // @@STATE speaking detail for speech no LISTEN asked for - "timer" once a timer announced itself, "typed" for ASK
 bool speech_in_progress = false;  // reply (or greeting) audio has started arriving and hasn't finished playing yet
@@ -169,8 +158,9 @@ unsigned long session_not_ready_since_ms = 0;  // when the session was last lost
 bool setup_finished = false;  // setup() returned - "offline" means something only after that
 bool openai_connection_started = false;  // see startOpenAiConnectionWhenNetworkReady()
 bool offline_sound_requested = false;  // the "offline" status sound went out, so "back online" is due once ready
-}  // namespace
 
+// Everything below, up to setup(), stays in this file's anonymous namespace
+// too - only setup() and loop() must be global (the Arduino core calls them).
 bool isAssistantOffline();
 void startOpenAiConnectionWhenNetworkReady();
 
@@ -344,7 +334,7 @@ void recordCaptureMeasurements(const esp32va_mic_capture::CaptureStats& stats, l
   // The mic task's reads keep up unless one waited longer than the I2S
   // driver's buffer; loop() keeps up unless it fell further behind than
   // the borrowed ring holds.
-  uint32_t mic_buffer_ms = micBufferCapacityMs();
+  uint32_t mic_buffer_ms = esp32va_audio::micBufferCapacityMs();
   LOG_INFO("Mic timing: longest gap between reads %u ms (the driver holds %u ms); sending fell %u ms behind at "
            "most, %u ms dropped; a %u ms chunk took %lu ms at most to handle, %lu ms on average.\n",
            (unsigned)stats.max_read_gap_ms, (unsigned)mic_buffer_ms, (unsigned)samplesToMs(stats.max_backlog_samples),
@@ -383,7 +373,7 @@ void handleServerMessage(uint8_t* payload, size_t length) {
   // Any server message at all, while a response is due, proves the
   // connection/response is still alive - resets the inactivity clock so a
   // long reply (paced by playback backpressure) doesn't trip
-  // checkReplyTimeout() just for taking a while. See PROJECT_OVERVIEW.md
+  // checkReplyTimeout() just for taking a while. See Documentation/decisions.md
   // step 16's "reply timeout fired mid-reply" discovery.
   if (awaiting_reply || response_in_flight) {
     last_reply_activity_ms = millis();
@@ -393,16 +383,16 @@ void handleServerMessage(uint8_t* payload, size_t length) {
   }
 
   char type_buf[48];
-  bool have_type = extractEventType(payload, length, type_buf, sizeof(type_buf));
+  bool have_type = esp32va_json::extractEventType(payload, length, type_buf, sizeof(type_buf));
 
   if (have_type && strcmp(type_buf, "response.output_audio.delta") == 0) {
     const uint8_t* value_start = nullptr;
     size_t value_len = 0;
-    if (!findRawStringField(payload, length, "delta", &value_start, &value_len)) {
+    if (!esp32va_json::findRawStringField(payload, length, "delta", &value_start, &value_len)) {
       LOG_ERROR("Audio delta missing 'delta' field.\n");
       return;
     }
-    if (isRingLentToMic()) {
+    if (esp32va_audio::isRingLentToMic()) {
       // Half-duplex says this can't happen: the ring is only lent while no
       // response is coming. Playing it would mean overwriting the mic.
       LOG_ERROR("Reply audio arrived while the mic was listening - dropped it.\n");
@@ -417,7 +407,7 @@ void handleServerMessage(uint8_t* payload, size_t length) {
       esp32va_measure::markTurnEvent(esp32va_measure::TurnEvent::kFirstAudio);
       esp32va_measure::addReplyAudio(value_len);
     }
-    decodeAndRingAudioDelta(value_start, value_len);
+    esp32va_audio::decodeAndRingAudioDelta(value_start, value_len);
     return;
   }
 
@@ -519,7 +509,7 @@ void handleServerMessage(uint8_t* payload, size_t length) {
     esp32va_measure::markTurnEvent(esp32va_measure::TurnEvent::kToolCall);
     esp32va_measure::setToolName(function_name);
     if (strcmp(function_name, "set_board_state") == 0) {
-      handled = handleSetBoardStateCall(doc, webSocket);
+      handled = esp32va_board::handleSetBoardStateCall(doc, webSocket);
     } else if (strcmp(function_name, "get_time_of_day") == 0) {
       handled = esp32va_light_sensor::handleGetTimeOfDayCall(doc, webSocket);
     } else if (strcmp(function_name, "set_volume") == 0) {
@@ -686,7 +676,7 @@ void onWebSocketEvent(WStype_t type, uint8_t* payload, size_t length) {
                                   "setting up the session");
       // Deferred to loop() rather than sent here: calling sendTXT() directly
       // inside this callback can deadlock the library (discovered in old
-      // step 7 - see PROJECT_OVERVIEW.md "Discoveries").
+      // step 7 - see Documentation/decisions.md "Discoveries").
       should_send_session_update = true;
       break;
     case WStype_DISCONNECTED:
@@ -708,7 +698,7 @@ void onWebSocketEvent(WStype_t type, uint8_t* payload, size_t length) {
         abortCapture("disconnected while recording");  // stops the mic (no send happens here)
       }
       esp32va_reply_recorder::noteReplyAborted();  // keeps what was saved; must come before the ring reset
-      resetRingBuffer();  // any partial reply audio is now stale - don't play it
+      esp32va_audio::resetRingBuffer();  // any partial reply audio is now stale - don't play it
       markReplyFailed("disconnected before a reply arrived");
       session_not_ready_since_ms = millis();
       if (esp32va_openai::registerDisconnect(webSocket)) {
@@ -831,7 +821,7 @@ void cancelListenTurn() {
       dropping_reply_audio = true;
     }
     esp32va_reply_recorder::noteReplyAborted();  // keeps what was saved; must come before the ring reset
-    resetRingBuffer();
+    esp32va_audio::resetRingBuffer();
   } else {
     Serial.printf("CANCEL ignored - no LISTEN to cancel.\n");
     return;
@@ -1020,7 +1010,7 @@ void serviceCapture() {
     play, nothing left to save. A GET holds loop() for its whole transfer, so
     it must never overlap playback or recording. */
 bool isIdleForFileTransfer() {
-  return !is_capturing && !esp32va_mic_capture::isCaptureInProgress() && !awaiting_reply && ringUsedBytes() == 0 &&
+  return !is_capturing && !esp32va_mic_capture::isCaptureInProgress() && !awaiting_reply && esp32va_audio::ringUsedBytes() == 0 &&
          esp32va_reply_recorder::isRecorderIdle();
 }
 
@@ -1029,7 +1019,7 @@ bool isIdleForFileTransfer() {
     or saved, with no response still on its way. */
 bool boardCanListen() {
   return should_keep_running && session_ready && !should_send_opening_greeting && !is_capturing &&
-         !awaiting_reply && !response_in_flight && !speech_in_progress && ringUsedBytes() == 0 &&
+         !awaiting_reply && !response_in_flight && !speech_in_progress && esp32va_audio::ringUsedBytes() == 0 &&
          esp32va_reply_recorder::isRecorderIdle();
 }
 
@@ -1220,7 +1210,7 @@ void serviceReplyRecording() {
     kReplyTimeoutMs from the start of the cycle - what should never happen is
     total silence from the server for that long. (A total-duration cap fired
     while transcript/audio was still actively arriving in a real run - see
-    PROJECT_OVERVIEW.md step 16's "reply timeout fired mid-reply" discovery.)
+    Documentation/decisions.md step 16's "reply timeout fired mid-reply" discovery.)
     The same silence ends a response nobody waits on (the greeting), so
     hands-free listening isn't held off forever by one that never finished. */
 void checkReplyTimeout() {
@@ -1253,7 +1243,7 @@ void checkPlaybackComplete() {
   if (!response_fully_received || !awaiting_reply) {
     return;
   }
-  if (ringUsedBytes() > 0) {
+  if (esp32va_audio::ringUsedBytes() > 0) {
     return;  // still playing
   }
   esp32va_measure::markTurnEvent(esp32va_measure::TurnEvent::kPlaybackDone);
@@ -1312,7 +1302,7 @@ void updatePipelineState() {
   // Speech is over once nothing is left to play and either the server said
   // the response is done or no LISTEN is waiting on it (the opening greeting,
   // or a cycle that already failed).
-  if (speech_in_progress && ringUsedBytes() == 0 && (response_fully_received || !awaiting_reply)) {
+  if (speech_in_progress && esp32va_audio::ringUsedBytes() == 0 && (response_fully_received || !awaiting_reply)) {
     speech_in_progress = false;
   }
   if (function_call_turn_pending) {
@@ -1338,6 +1328,8 @@ void updatePipelineState() {
   }
 }
 
+}  // namespace
+
 /** One-time setup: playback ring buffer, full-duplex mic+speaker I2S, onboard
     LED, (simulated) light sensor, the mic check and the mic task, SD card
     mount + self-test + recorders, Wi-Fi, time sync, then open the secure
@@ -1355,12 +1347,12 @@ void setup() {
   esp32va_status::reprintStatusSnapshot();
   esp32va_heap::recordHeapSnapshot("boot");
 
-  initPlaybackRingBuffer();
-  setupBoardState();
+  esp32va_audio::initPlaybackRingBuffer();
+  esp32va_board::setupBoardState();
   esp32va_light_sensor::setupLightSensor();
   esp32va_light_sensor::announceLightState();
   esp32va_status::reportStage(esp32va_status::Stage::kMicrophone, esp32va_status::StageState::kActive, nullptr);
-  setupI2sFullDuplex();
+  esp32va_audio::setupI2sFullDuplex();
   esp32va_controls::setupDeviceControls();
   esp32va_controls::announceControlStates();
   esp32va_button::setupTalkButton();
@@ -1370,7 +1362,7 @@ void setup() {
   esp32va_status::reportStage(esp32va_status::Stage::kSpeaker, esp32va_status::StageState::kOk,
                               "ready - check it by ear with Test beep");
   char stage_detail[kStateDetailBufferSize];
-  bool mic_ok = checkMicrophoneSignal(stage_detail, sizeof(stage_detail));
+  bool mic_ok = esp32va_audio::checkMicrophoneSignal(stage_detail, sizeof(stage_detail));
   // After the mic check: it reads the mic itself, and from here on only the task does.
   if (!esp32va_mic_capture::beginMicCapture()) {
     esp32va_status::reportStage(esp32va_status::Stage::kMicrophone, esp32va_status::StageState::kFail,
@@ -1429,6 +1421,8 @@ void setup() {
   setup_finished = true;
 }
 
+namespace {
+
 /** Opens the OpenAI connection the first time Wi-Fi is connected and the
     clock is set (TLS needs both) - from setup() when they came up in time,
     otherwise from loop() whenever they do. The WebSocket library reconnects
@@ -1445,8 +1439,10 @@ void startOpenAiConnectionWhenNetworkReady() {
   esp32va_openai::beginOpenAiRealtimeConnection(webSocket);
 }
 
+}  // namespace
+
 /** Services the WebSocket connection (unless paused for backpressure - see
-    i2s_audio_utils.h's ringShouldPauseReads()), sends session.update once
+    i2s_audio_utils.h's esp32va_audio::ringShouldPauseReads()), sends session.update once
     flagged ready, sends the one-time opening greeting once flagged ready,
     watches for a typed command, moves a capture along (its events, its
     chunks, its commit), drains playback audio to the speaker, saves reply
@@ -1465,9 +1461,9 @@ void loop() {
   }
 
   // Backpressure pause/resume can fire many times over one long reply - too
-  // frequent to be useful at LOG_INFO (see PROJECT_OVERVIEW.md step 17's
+  // frequent to be useful at LOG_INFO (see Documentation/decisions.md step 17's
   // logging doctrine), so this is LOG_DEBUG-only.
-  bool should_pause = ringShouldPauseReads(ws_reads_paused_for_backpressure);
+  bool should_pause = esp32va_audio::ringShouldPauseReads(ws_reads_paused_for_backpressure);
   if (should_pause != ws_reads_paused_for_backpressure) {
     // LOG_DEBUG's fmt must be a string literal (see log_utils.h) - it's
     // concatenated with the "[LEVEL][%s:%d] " prefix at compile time, so a
@@ -1502,7 +1498,7 @@ void loop() {
     handleTalkButtonPress();
   }
   serviceCapture();
-  drainRingBufferToSpeaker();
+  esp32va_audio::drainRingBufferToSpeaker();
   serviceReplyRecording();
   checkPlaybackComplete();
   checkReplyTimeout();
