@@ -16,6 +16,8 @@ flowchart LR
   ESP <-- "TLS WebSocket over Wi-Fi<br/>audio in, audio + tool calls out" --> AI["OpenAI Realtime API"]
   ESP <-- "USB serial, 115200<br/>@@ status lines + commands" --> GUI["Control center<br/>control_center/control_center.html"]
   ESP --> LED["Onboard LED"]
+  BTN["BOOT button<br/>(optional Talk)"] --> ESP
+  LDR["LDR light sensor<br/>(or simulated)"] -- "ADC1" --> ESP
 ```
 
 </div>
@@ -24,13 +26,15 @@ flowchart LR
 
 ## המודולים
 
-כל מודול הוא זוג קבצים `xxx_utils.h/.cpp` בתיקייה `ESP32/`, עם namespace משלו. הקובץ `ESP32.ino` מחבר את כולם: הוא מחזיק את מצב השיחה ומחליט מה לעשות בכל רגע.
+כל מודול הוא זוג קבצים `xxx_utils.h/.cpp` בתיקייה `ESP32/`, עם namespace משלו (`esp32va_...`). הקובץ `ESP32.ino` מחבר את כולם: הוא מחזיק את מצב השיחה ומחליט מה לעשות בכל רגע. הגישה לכל רכיב חומרה מרוכזת במודול אחד: I2S רק ב-`i2s_audio_utils`, ה-LED רק ב-`board_state_utils`, ה-SD רק במודולי ה-SD, הכפתור רק ב-`button_utils`.
+
+שני קבצים בלי קוד: `parameters.h` (כל הפרמטרים הקבועים - ראו [Parameters/parameters.md](../Parameters/parameters.md)) ו-`SECRETS.h` (סיסמת ה-Wi-Fi ומפתח ה-API, לא בגיט; התבנית היא `SECRETS.example.h`).
 
 | מודול | מה הוא עושה |
 |---|---|
 | `ESP32.ino` | הלולאה הראשית, מצב השיחה, הטיפול באירועים של OpenAI והפעלת הכלים |
-| `wifi_utils` | התחברות ל-Wi-Fi לפי `config.h` |
-| `openai_realtime_utils` | החיבור המאובטח ל-OpenAI, אימות, והתחברות מחדש כשהחיבור נופל |
+| `wifi_utils` | Wi-Fi ושעון: התחברות בלי להיתקע, הרשת השמורה ב-flash (או זו של `SECRETS.h`), פקודות `WIFI_*`, וסנכרון השעה |
+| `openai_realtime_utils` | החיבור המאובטח ל-OpenAI, אימות, התחברות מחדש עם המתנה שגדלה, ומצב offline (אף פעם לא מוותר) |
 | `realtime_json_utils` | סריקה מהירה של הודעות גדולות מהשרת בלי לפענח את כל ה-JSON |
 | `i2s_audio_utils` | המיקרופון והרמקול (I2S), ה-ring buffer של הניגון ופענוח mu-law |
 | `mic_capture_utils` | משימה נפרדת (FreeRTOS) שקוראת את המיקרופון בלי הפסקה |
@@ -38,12 +42,13 @@ flowchart LR
 | `hands_free_utils` | מצב Hands-free: מקשיב לבד כשהלוח פנוי ושולח רק דיבור אמיתי |
 | `board_state_utils` | ה-LED (כולל בהירות) והכלי `set_board_state` |
 | `light_sensor_utils` | חיישן האור (מדומה, או LDR אמיתי כשמגדירים `LIGHT_SENSOR_PIN`) והכלי `get_time_of_day` |
-| `device_controls_utils` | פקודות עוצמה, השתקה, צפצוף ו-LED מהמחשב, והכלי `set_volume` |
+| `device_controls_utils` | פקודות עוצמה, השתקה, צפצוף ו-LED מהמחשב, צלילי המצב (`SOUNDS`), והכלי `set_volume` |
+| `button_utils` | כפתור BOOT ככפתור Talk פיזי (כבוי כברירת מחדל, `BUTTON on`), עם debounce |
 | `clock_timer_utils` | הכלים `get_current_time` ו-`set_timer`, הצלצול של הטיימר, וההודעה בקול כשהוא נגמר |
 | `board_info_utils` | הכלי `get_board_status`: עוצמת ה-Wi-Fi, זמן מההדלקה וזיכרון פנוי |
 | `greeting_utils` | משפט פתיחה אקראי כשהחיבור מוכן |
 | `settings_store_utils` | שמירת הגדרות בזיכרון הקבוע (NVS), כך שהן נשארות אחרי כיבוי |
-| `sd_card_utils` | חיבור כרטיס ה-SD ובדיקה שהוא באמת כותב וקורא |
+| `sd_card_utils` | חיבור כרטיס ה-SD, בדיקה שהוא באמת כותב וקורא, וסימון אם יש כרטיס תקין (בלעדיו הלוח ממשיך בלי הקלטות) |
 | `recording_folder_utils` | שמות הקבצים והתיקיות של ההקלטות |
 | `reply_recorder_utils` | שומר כל תשובה של העוזר ל-SD בזמן שהיא מגיעה |
 | `voice_command_recorder_utils` | שומר את מה שהמיקרופון שמע בכל פקודה |
@@ -62,7 +67,11 @@ flowchart LR
 3. שולחת ל-OpenAI את חתיכות המיקרופון שמוכנות.
 4. בודקת אם הניגון הסתיים, ואם עבר יותר מדי זמן בלי תשובה.
 5. נותנת ל-Hands-free להחליט אם להתחיל להקליט, ולטיימר אם לצלצל.
-6. מדווחת למרכז הבקרה אם המצב השתנה.
+6. בודקת את כפתור BOOT (אם הודלק) ומנגנת צליל מצב שמחכה (אם הודלקו), רק כשהלוח שקט.
+7. שומרת על ה-Wi-Fi (ומתחילה מחדש אם הוא נפל ל-20 שניות), ופותחת את החיבור ל-OpenAI ברגע שיש רשת ושעון.
+8. מחשבת את המצב של העוזר ומדווחת למרכז הבקרה אם הוא השתנה.
+
+`setup()` לא מחכה לנצח לאף דבר: Wi-Fi עד 20 שניות, שעון עד 15. בלעדיהם הלוח ממשיך במצב offline, והפקודות, הטיימר והפקדים עובדים.
 
 ## המצבים של העוזר
 
@@ -74,7 +83,9 @@ flowchart LR
 stateDiagram-v2
   [*] --> booting
   booting --> ready: Wi-Fi, clock and OpenAI OK
-  booting --> halted: a startup check failed
+  booting --> offline: no Wi-Fi / no OpenAI (keeps retrying)
+  offline --> ready: connection back
+  booting --> halted: mic task couldn't start (out of memory)
   ready --> listening: Talk / LISTEN
   ready --> armed: Hands-free on
   armed --> listening: speech detected
@@ -88,6 +99,7 @@ stateDiagram-v2
   saving --> armed: Hands-free on
   ready --> reconnecting: connection lost
   reconnecting --> ready
+  reconnecting --> offline: 5 failed attempts, or 30 s down
 ```
 
 </div>
@@ -103,7 +115,59 @@ stateDiagram-v2
 | `speaking` | מנגן את התשובה. הפרטים `greeting`, `timer` או `typed` כשהוא עונה בלי הקלטה |
 | `saving` | מסיים לשמור את התשובה ל-SD |
 | `reconnecting` | החיבור ל-OpenAI נפל ומתחבר מחדש |
-| `halted` | נעצר בגלל תקלה (למשל אין מספיק זיכרון). צריך Reset |
+| `offline` | אין Wi-Fi או אין OpenAI. ממשיך לנסות כל 30 שניות; הטיימר והפקדים עובדים. הפרטים אומרים `no Wi-Fi` או `OpenAI unreachable` |
+| `halted` | נעצר: משימת המיקרופון לא עלתה (חוסר זיכרון בהדלקה). המצב היחיד שדורש Reset |
+
+### איך המצב מחושב (מכונת המצבים)
+
+הלוגיקה של השיחה מחזיקה דגלים, אחד לכל מקור של אירועים: ההקלטה (`is_capturing`), השאלה שמחכה לתשובה (`awaiting_reply`), תשובה שעוד לא הסתיימה בשרת (`response_in_flight`), ניגון (`speech_in_progress`), וכלי (`function_call_turn_pending`). הפונקציה `updatePipelineState()` ב-`ESP32.ino` היא המקום היחיד שמחליט מה המצב, בסדר עדיפויות קבוע:
+
+| עדיפות | תנאי | מצב |
+|---|---|---|
+| 1 | נעצר | `halted` |
+| 2 | אין סשן, ו-(אין Wi-Fi, או 5 ניסיונות, או 30 שניות בלי חיבור) | `offline` |
+| 3 | אין סשן, עוד לא היה חיבור | `booting` |
+| 4 | אין סשן, היה חיבור | `reconnecting` |
+| 5 | כלי באמצע | `tool` |
+| 6 | מנגן | `speaking` |
+| 7 | מקליט | `listening` |
+| 8 | מחכה לתשובה | `processing` |
+| 9 | שומר תשובה ל-SD | `saving` |
+| 10 | Hands-free מחכה לדיבור | `armed` |
+| 11 | אחרת | `ready` |
+
+הסיבה לדגלים ולא ל-enum עם מעברים מתועדת ב-[decisions.md](decisions.md).
+
+## זרימת השימוש
+
+<div dir="ltr">
+
+```mermaid
+flowchart TD
+  ON([Power on]) --> CHECKS[Startup checks<br/>SD, mic, speaker]
+  CHECKS --> NET{Wi-Fi and clock<br/>within 20 s?}
+  NET -- no --> OFF[Offline<br/>timer + controls work,<br/>retrying]
+  OFF -- network back --> CONNECT
+  NET -- yes --> CONNECT[Connect to OpenAI]
+  CONNECT --> READY[Ready / Waiting for speech]
+  READY -- "Talk, Space, BOOT,<br/>or speech (hands-free)" --> LISTEN[Listening]
+  LISTEN -- "Cancel / BOOT again" --> READY
+  LISTEN -- "not speech (hands-free)" --> READY
+  LISTEN --> PROC[Processing]
+  PROC -- "tool call" --> TOOL[Run the tool on the board<br/>LED, volume, timer...]
+  TOOL --> PROC
+  PROC --> SPEAK[Speaking]
+  PROC -- "15 s with no answer" --> FAIL[LISTEN failed<br/>low tone if sounds on]
+  FAIL --> READY
+  SPEAK --> READY
+  READY -- "connection lost" --> RECON[Reconnecting]
+  RECON --> READY
+  RECON -- "5 attempts" --> OFF
+```
+
+</div>
+
+אין מצב "תקוע": כל מצב שמחכה לשרת נגמר אחרי 15 שניות של שקט, ו-Cancel (או כפתור BOOT) מבטל הקלטה או תשובה בכל רגע.
 
 ## הפרוטוקול בין הלוח למרכז הבקרה
 
@@ -132,6 +196,9 @@ stateDiagram-v2
 | `@@TIMING` | `@@TIMING n=4 result=pass ...` | הזמנים של פקודה אחת, לגרף ולטבלת המדידות |
 | `@@BOOT_TIMING` | `@@BOOT_TIMING ... total_ms=6120` | כמה זמן לקח כל שלב בעלייה |
 | `@@HEAP` | `@@HEAP free=139900 largest=110580 ...` | הזיכרון הפנוי אחרי כל שלב |
+| `@@WIFI_NET` | `@@WIFI_NET saved iphone itamar` | איזו רשת הלוח משתמש בה: `saved` (נשמרה ממרכז הבקרה) או `default` (מ-`SECRETS.h`). אף פעם לא הסיסמה |
+| `@@BUTTON` | `@@BUTTON off` | האם כפתור BOOT משמש ככפתור Talk |
+| `@@SOUNDS` | `@@SOUNDS on` | האם צלילי המצב מודלקים |
 
 ### שורות של העברת קבצים (מהלוח)
 
@@ -144,10 +211,14 @@ stateDiagram-v2
 | פקודה | מה היא עושה |
 |---|---|
 | `LISTEN` | מקליט 3 שניות ושולח (כמו הכפתור Talk) |
+| `CANCEL` | מבטל את ההקלטה או התשובה שבאמצע |
 | `ASK <text>` | שולח שאלה כתובה, עד 200 תווים. התשובה נאמרת בקול כרגיל, בלי הקלטה ובלי `@@TIMING`. הלוח מחזיר את הטקסט כ-`@@HEARD` |
 | `STATUS` | מדפיס מחדש את כל שורות הסטטוס |
 | `CLOCK` | מדפיס רק את `@@CLOCK` |
 | `VOLUME <0-100>`, `MUTE on\|off`, `BEEP` | הרמקול |
+| `SOUNDS on\|off` | צלילי מצב |
+| `BUTTON on\|off` | כפתור BOOT ככפתור Talk |
+| `WIFI`, `WIFI_SSID <name>`, `WIFI_PASSWORD [<password>]`, `WIFI_FORGET` | הרשת: מה בשימוש, שמירת רשת חדשה (השם, ואז הסיסמה, שמירה והתחברות), חזרה לברירת המחדל |
 | `LED on\|off`, `LED_BRIGHTNESS <0-100>` | ה-LED |
 | `LIGHT <0-6142>`, `LIGHT_BANDS <evening> <day>` | חיישן האור המדומה והספים שלו |
 | `VAD on\|off`, `VAD_SENSITIVITY <1-5>`, `VAD_HANGOVER <600-1500>` | Hands-free |
