@@ -7,12 +7,13 @@
 #include "parameters.h"
 #include "log_utils.h"
 #include "status_report_utils.h"
+#include "vad_utils.h"
 
 namespace esp32va_audio {
 
 namespace {
 constexpr i2s_port_t kI2sPort = I2S_NUM_0;
-constexpr uint32_t kSampleRateHz = 24000;
+constexpr uint32_t kSampleRateHz = esp32va_vad::kSampleRateHz;  // the mic's 24 kHz, defined once (vad_utils.h)
 constexpr uint32_t kI2sDmaBufLen = 300;
 constexpr uint32_t kI2sDmaBufCount = 12;  // 12*300 = 3600 samples of ring capacity
 

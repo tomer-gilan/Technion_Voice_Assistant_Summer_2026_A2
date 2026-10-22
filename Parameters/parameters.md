@@ -78,7 +78,7 @@
 
 | קבוע | קובץ | ערך | מה הוא קובע |
 |---|---|---|---|
-| `kSampleRateHz` | `ESP32.ino`, `i2s_audio_utils.cpp`, `vad_utils.h` | 24000 | קצב הדגימה של המיקרופון (המינימום של OpenAI ל-PCM) |
+| `kSampleRateHz` | `vad_utils.h` (ו-`ESP32.ino`, `i2s_audio_utils.cpp` משתמשים בו) | 24000 | קצב הדגימה של המיקרופון (המינימום של OpenAI ל-PCM) |
 | `kChunkSamples` | `ESP32.ino` | 2400 | גודל חתיכת אודיו שנשלחת ל-OpenAI: 100ms |
 | `kRingBufferBytes` | `i2s_audio_utils.cpp` | 32KB | מאגר הניגון (כ-4 שניות mu-law), משותף עם המיקרופון |
 | `kI2sDmaBufCount`, `kI2sDmaBufLen` | `i2s_audio_utils.cpp` | 12, 300 | מאגר ה-DMA של ה-I2S: 150ms |

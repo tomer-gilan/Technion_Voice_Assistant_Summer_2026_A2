@@ -78,7 +78,7 @@ const char kAppendMessagePrefix[] = R"JSON({"type":"input_audio_buffer.append","
 const char kAppendMessageSuffix[] = R"JSON("})JSON";
 
 constexpr uint32_t kSerialBaudRate = esp32va_params::kSerialBaudRate;
-constexpr uint32_t kSampleRateHz = 24000;   // must match kSessionUpdateMessage's input rate and i2s_audio_utils's I2S rate
+constexpr uint32_t kSampleRateHz = esp32va_vad::kSampleRateHz;  // 24 kHz, defined once (vad_utils.h); kSessionUpdateMessage's input rate must match
 constexpr uint32_t kManualRecordDurationSec = esp32va_params::kManualRecordDurationSec;  // LISTEN / Talk / the BOOT button
 constexpr uint32_t kChunkSamples = 2400;    // ~100ms per input_audio_buffer.append - same chunk duration step 12 confirmed working
 constexpr uint32_t kChunkMs = kChunkSamples * 1000 / kSampleRateHz;
