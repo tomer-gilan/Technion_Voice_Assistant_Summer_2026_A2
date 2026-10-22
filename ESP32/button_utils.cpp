@@ -20,15 +20,17 @@ unsigned long last_sample_ms = 0;
 int debounce_count = 0;  // 0 = surely released ... kButtonDebounceSamples = surely pressed
 bool is_pressed = false;
 
-/** Sets the pin up the first time the button is switched on. */
+/** Sets the pin up the first time the button is switched on, and starts
+    the debounce over every time - a press already held then (or one left
+    over from before it was switched off) doesn't count. */
 void preparePin() {
-  if (pin_ready) {
-    return;
+  if (!pin_ready) {
+    pinMode(TALK_BUTTON_PIN, INPUT_PULLUP);
+    pin_ready = true;
   }
-  pinMode(TALK_BUTTON_PIN, INPUT_PULLUP);
-  pin_ready = true;
-  debounce_count = 0;
-  is_pressed = false;
+  bool held_now = digitalRead(TALK_BUTTON_PIN) == kPressedLevel;
+  debounce_count = held_now ? esp32va_params::kButtonDebounceSamples : 0;
+  is_pressed = held_now;
 }
 }  // namespace
 

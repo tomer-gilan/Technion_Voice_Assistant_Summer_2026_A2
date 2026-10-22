@@ -61,7 +61,8 @@ enum class StatusSound : uint8_t { kNone, kOffline, kOnline, kFailed };
 
 /** Asks for a status sound - played by playPendingStatusSound() once the
     board is quiet. Ignored while status sounds are off. A newer request
-    replaces one that hasn't played yet. */
+    replaces one that hasn't played yet - except that a failed question
+    never replaces a waiting offline / back-online sound. */
 void requestStatusSound(StatusSound sound);
 
 /** True when a requested status sound is waiting to play. */

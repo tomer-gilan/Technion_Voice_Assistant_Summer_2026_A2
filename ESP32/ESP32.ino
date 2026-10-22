@@ -157,12 +157,14 @@ uint32_t hands_free_turns_passed = 0;    // in a row, toward this step's PASS
 unsigned long session_not_ready_since_ms = 0;  // when the session was last lost (or boot) - see isAssistantOffline()
 bool setup_finished = false;  // setup() returned - "offline" means something only after that
 bool openai_connection_started = false;  // see startOpenAiConnectionWhenNetworkReady()
-bool offline_sound_requested = false;  // the "offline" status sound went out, so "back online" is due once ready
+bool offline_announced = false;  // went offline (sound asked for, retries slowed) - "back online" is due once ready
+bool wifi_was_up = false;  // see dropDeadSocketOnWifiLoss()
 
 // Everything below, up to setup(), stays in this file's anonymous namespace
 // too - only setup() and loop() must be global (the Arduino core calls them).
 bool isAssistantOffline();
 void startOpenAiConnectionWhenNetworkReady();
+void dropDeadSocketOnWifiLoss();
 
 /** Milliseconds of audio in a number of 24 kHz samples. */
 uint32_t samplesToMs(uint32_t samples) {
@@ -1259,8 +1261,25 @@ bool isAssistantOffline() {
   if (session_ready || !setup_finished) {
     return false;
   }
-  return esp32va_openai::isOffline() ||
-         millis() - session_not_ready_since_ms > esp32va_openai::offlineRetryIntervalMs();
+  bool down_too_long = millis() - session_not_ready_since_ms > esp32va_openai::offlineRetryIntervalMs();
+  if (!openai_connection_started) {
+    return down_too_long && !esp32va_wifi::isTimeSynced();  // Wi-Fi is up but the clock never came
+  }
+  return esp32va_openai::isOffline() || down_too_long;
+}
+
+/** When Wi-Fi goes down (or the network is switched), the open socket to
+    OpenAI is dead, but the library only notices on its next failed send.
+    Closing it right away runs the usual disconnect path: a LISTEN in
+    progress fails, the state shows reconnecting / offline, and the
+    connection is retried once Wi-Fi is back. */
+void dropDeadSocketOnWifiLoss() {
+  bool wifi_up = esp32va_wifi::isWifiConnected();
+  if (wifi_was_up && !wifi_up && webSocket.isConnected()) {
+    LOG_INFO("Wi-Fi is down - closing the OpenAI connection, it can't be alive.\n");
+    webSocket.disconnect();
+  }
+  wifi_was_up = wifi_up;
 }
 
 /** Works out what the assistant is doing from this sketch's flags and
@@ -1273,11 +1292,18 @@ void updatePipelineState() {
   }
   bool offline_now = !session_ready && setup_finished &&
                      (!esp32va_wifi::isWifiConnected() || isAssistantOffline());
-  if (offline_now && !offline_sound_requested) {
-    offline_sound_requested = true;
+  if (offline_now && !offline_announced) {
+    offline_announced = true;
     esp32va_controls::requestStatusSound(esp32va_controls::StatusSound::kOffline);
-  } else if (session_ready && offline_sound_requested) {
-    offline_sound_requested = false;
+    if (openai_connection_started) {
+      // A failed connect raises no disconnect event, so the backoff in
+      // registerDisconnect() may never have reached the offline pace - set
+      // it here, so a dead network isn't retried (and loop() held up by a
+      // connect attempt) every second.
+      webSocket.setReconnectInterval(esp32va_openai::addJitter(esp32va_openai::offlineRetryIntervalMs()));
+    }
+  } else if (session_ready && offline_announced) {
+    offline_announced = false;
     esp32va_controls::requestStatusSound(esp32va_controls::StatusSound::kOnline);
   }
   if (!session_ready) {
@@ -1286,7 +1312,9 @@ void updatePipelineState() {
       return;
     }
     if (isAssistantOffline()) {
-      esp32va_status::reportPipelineState(PipelineState::kOffline, "OpenAI unreachable");
+      esp32va_status::reportPipelineState(PipelineState::kOffline, esp32va_wifi::isTimeSynced()
+                                                                       ? "OpenAI unreachable"
+                                                                       : "no clock - the network may block NTP");
       return;
     }
     if (!session_ever_ready) {
@@ -1520,6 +1548,7 @@ void loop() {
     esp32va_hands_free::holdOff();  // and the cooldown counts from after it
   }
   esp32va_wifi::monitorWifiConnection();
+  dropDeadSocketOnWifiLoss();
   startOpenAiConnectionWhenNetworkReady();
   updatePipelineState();
 }

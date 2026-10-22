@@ -16,10 +16,12 @@ namespace esp32va_wifi {
 namespace {
 constexpr unsigned long kStillWaitingReportMs = 15000;
 constexpr unsigned long kSignalReportIntervalMs = 10000;
-// Down this long: start over on the network (WiFi.begin again). The ESP32
-// reconnects by itself after most drops, but not after e.g. a wrong
-// password or a network that was off when it tried.
-constexpr unsigned long kRestartConnectAfterMs = 20000;
+// Down this long since the last attempt started: start over on the network
+// (WiFi.begin again). The ESP32 core retries by itself after most failures
+// (network not found, beacon or handshake timeouts) but not after a failed
+// authentication - so this is only a slow backstop, well apart from the
+// core's own retries.
+constexpr unsigned long kRestartConnectAfterMs = 60000;
 constexpr size_t kStageDetailBufferSize = 64;
 constexpr size_t kMaxSsidLength = 32;      // 802.11 limit
 constexpr size_t kMaxPasswordLength = 64;  // WPA2 limit
@@ -305,7 +307,7 @@ void monitorWifiConnection() {
     }
   }
   if (!connected && millis() - last_connect_start_ms >= kRestartConnectAfterMs) {
-    LOG_INFO("Wi-Fi still down after %lu s - starting over on \"%s\".\n", kRestartConnectAfterMs / 1000,
+    LOG_INFO("Wi-Fi still down %lu s after the last attempt - starting over on \"%s\".\n", kRestartConnectAfterMs / 1000,
              active_ssid);
     startConnecting(true);
     esp32va_status::reportStage(esp32va_status::Stage::kWifi, esp32va_status::StageState::kFail,

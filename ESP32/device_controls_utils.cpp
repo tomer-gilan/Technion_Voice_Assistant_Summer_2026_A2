@@ -261,9 +261,14 @@ void announceControlStates() {
 }
 
 void requestStatusSound(StatusSound sound) {
-  if (status_sounds_on) {
-    pending_sound = sound;
+  if (!status_sounds_on) {
+    return;
   }
+  bool pending_is_connection = pending_sound == StatusSound::kOffline || pending_sound == StatusSound::kOnline;
+  if (sound == StatusSound::kFailed && pending_is_connection) {
+    return;  // the connection news matters more than the question it cost
+  }
+  pending_sound = sound;
 }
 
 bool hasPendingStatusSound() {

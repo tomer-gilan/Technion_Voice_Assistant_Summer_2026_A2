@@ -27,7 +27,7 @@
 | 10 | hotspot בלי אינטרנט (או מפתח API שגוי) | אחרי 5 ניסיונות: נורית OpenAI אדומה `offline - retrying every 30 s`, Offline. **לא** HALTED |
 | 11 | כרטיס Wi-Fi network: hotspot אחר | `@@WIFI_NET saved <name>`, הלוח מתחבר לרשת החדשה, ונשאר בה אחרי Reset. בלוג הסיסמה מופיעה ככוכביות |
 | 12 | Back to default | חוזר לרשת מ-`SECRETS.h` (`@@WIFI_NET default ...`) |
-| 13 | סיסמה שגויה ברשת שמורה | נורית Wi-Fi אדומה `check the password`, Offline, ניסיון חוזר כל 20 שניות. Back to default מתקן |
+| 13 | סיסמה שגויה ברשת שמורה | נורית Wi-Fi אדומה `check the password`, Offline, ניסיון חוזר כל דקה. Back to default מתקן |
 | 14 | `Unit Tests/08_boot_button`, כמו שהוא | 0 שינויים גולמיים כשלא נוגעים, ו-PASSED אחרי 5 לחיצות |
 | 15 | אותה בדיקה עם `kStartI2sWithMclkOnGpio0 = true` | אם החשד נכון: הרבה שינויים גולמיים בלי לגעת. **לרשום את התוצאה ב-decisions.md** |
 | 16 | בקושחה: On the board itself ← BOOT button, ואז לוחצים BOOT | מתחילה הקלטה של 3 שניות. לחיצה נוספת באמצע מבטלת. בלי לגעת: אף הקלטה לא מתחילה לבד במשך 5 דקות |
