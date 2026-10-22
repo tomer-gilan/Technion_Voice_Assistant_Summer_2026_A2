@@ -621,9 +621,9 @@
 <header>
   <h1>Voice Assistant <span>· ESP32 control center</span></h1>
   <div class="header-controls">
+    <!-- One option: the firmware's Serial runs at a fixed 115200 (kSerialBaudRate). -->
     <select id="baud" aria-label="Baud rate">
       <option value="115200" selected>115200 baud</option>
-      <option value="921600">921600 baud</option>
     </select>
     <button id="tour-open" type="button" title="A short walk through this page, for first-time users">? Tour</button>
     <button id="stage-open" type="button" title="A big view of the assistant for people watching from a distance (key F)">⛶ Stage view</button>
