@@ -140,7 +140,7 @@
 | מהדר C++11, לכלי `tools/vad_replay.cpp` | `g++` מכל גרסה שתומכת ב-C++11 (ב-Windows: MSYS2/MinGW) |
 | PowerShell, ללוגר `tools/serial_logger.ps1` | Windows PowerShell 5.1 (נבדק) |
 
-כל השאר מגיע עם ה-ESP32 core: `WiFi.h`, `SD.h`, `driver/i2s.h`, `Preferences` (NVS), mbedTLS ו-FreeRTOS. מעבר ל-wrapper של Arduino השתמשנו ישירות ביכולות של ESP-IDF: משימת FreeRTOS מוצמדת לליבה עם עדיפות משלה (המיקרופון), מנהל ה-I2S במצב full duplex, NVS, ו-mbedTLS ל-base64.
+כל השאר מגיע עם ה-ESP32 core: `WiFi.h`, `SD.h`, `driver/i2s.h`, `Preferences` (NVS), mbedTLS ו-FreeRTOS. ישירות מ-ESP-IDF ו-FreeRTOS, ולא דרך wrapper של Arduino, השתמשנו ב: מנהל ה-I2S הישן `driver/i2s.h` במצב full duplex, `xTaskCreatePinnedToCore` (משימת המיקרופון, מוצמדת לליבה 1 בעדיפות 3), `esp_timer` (דגימת כפתור BOOT), `heap_caps_*` (אבחון זיכרון והקצאות שנכשלו), `esp_random`, ו-mbedTLS ל-base64. דרך ה-wrappers של Arduino: NVS (`Preferences`, לא ישירות), PWM (`ledc`), SNTP (`configTime`), SD ו-Wi-Fi.
 
 ## התקנה והרצה
 
