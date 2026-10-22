@@ -795,7 +795,7 @@
           <button id="wifi-save" type="button" disabled>Save &amp; connect</button>
           <button id="wifi-forget" type="button" disabled>Back to default</button>
         </div>
-        <p class="control-note" id="wifi-note" aria-live="polite">Saved in the board's flash - no compile needed. 2.4 GHz networks only; leave the password empty for an open network.</p>
+        <p class="control-note" id="wifi-note" aria-live="polite">Saved in the board's flash - no compile needed. 2.4 GHz networks only; leave the password empty for an open network. Spaces at either end of a password are kept.</p>
       </div>
     </section>
 
@@ -989,7 +989,7 @@ const STATUS_TAGS = new Set(["@@STAGE", "@@STATE", "@@RESULT", "@@MIC_LEVEL", "@
 const STATUS_REQUEST_DELAY_MS = 400;   // after connecting, ask for the full picture
 const NO_STATUS_HINT_MS = 4000;        // no @@STATE by then: the board runs older firmware
 const TALK_START_TIMEOUT_MS = 2500;
-const MAX_ASK_BYTES = 200;             // mirrors ESP32.ino's kMaxTypedQuestionLength - the board cuts a longer question
+const MAX_ASK_BYTES = 200;             // mirrors parameters.h's kMaxTypedQuestionBytes - the board cuts a longer question
 const MAX_SSID_BYTES = 32;             // mirrors wifi_utils.cpp's kMaxSsidLength
 const MIN_PASSWORD_BYTES = 8;          // WPA2 - wifi_utils.cpp checks the same
 const MAX_PASSWORD_BYTES = 64;         // mirrors wifi_utils.cpp's kMaxPasswordLength
@@ -2968,11 +2968,9 @@ async function saveWifiNetwork() {
     elements.wifiNote.textContent = `The network name is too long - ${MAX_SSID_BYTES} bytes at most (a Hebrew letter takes 2).`;
     return;
   }
-  if (password !== password.trim()) {
-    elements.wifiNote.textContent = "The board drops spaces at the start or end of a password - remove them, or the saved password would differ.";
-    return;
-  }
-  const passwordBytes = utf8Length(password);
+  // Spaces at either end are part of the password and are sent as typed; a
+  // password of only spaces is "no password" to the board (an open network).
+  const passwordBytes = password.trim() === "" ? 0 : utf8Length(password);
   if (passwordBytes > 0 && (passwordBytes < MIN_PASSWORD_BYTES || passwordBytes > MAX_PASSWORD_BYTES)) {
     elements.wifiNote.textContent = `A Wi-Fi password is ${MIN_PASSWORD_BYTES} to ${MAX_PASSWORD_BYTES} bytes (or none for an open network).`;
     return;
@@ -2985,8 +2983,9 @@ async function saveWifiNetwork() {
   try {
     await link.send(`WIFI_SSID ${ssid}`);
     appendLog(`>> WIFI_SSID ${ssid}`);
-    await link.send(password ? `WIFI_PASSWORD ${password}` : "WIFI_PASSWORD");
-    appendLog(password ? ">> WIFI_PASSWORD ********" : ">> WIFI_PASSWORD");
+    // One separator space, then the password untouched (the board keeps its edge spaces).
+    await link.send(passwordBytes > 0 ? `WIFI_PASSWORD ${password}` : "WIFI_PASSWORD");
+    appendLog(passwordBytes > 0 ? ">> WIFI_PASSWORD ********" : ">> WIFI_PASSWORD");
     elements.wifiPassword.value = "";
     if (state.board.wifiSavePending === pending) {  // not answered while sending
       pending.timer = setTimeout(() => {
