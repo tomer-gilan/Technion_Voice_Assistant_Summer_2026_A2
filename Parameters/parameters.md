@@ -67,6 +67,8 @@
 | `kMaxKeptRecordings` | 5 | כמה פקודות וכמה תשובות נשמרות ב-SD |
 | `kSdSpiFrequencyHz` | 4MHz | מהירות ה-SPI של כרטיס ה-SD |
 | `kButtonSampleMs`, `kButtonDebounceSamples` | 5, 6 | ה-debounce של כפתור BOOT: נדגם כל 5ms בטיימר, ולחיצה נספרת אחרי 6 דגימות (‏30ms) |
+| `kStartToneHz`, `kStartToneMs` | 1320, 60 | "טיק" גבוה וקצר רגע לפני שהקלטה ידנית מתחילה (BOOT, Talk, LISTEN; לא ב-Hands-free). תמיד פועל, לא תלוי בצלילי המצב; שקט רק בהשתקה |
+| `kRefusedToneHz`, `kRefusedToneMs` | 220, 120 | צליל נמוך וקצר כשלחיצה על BOOT לא יכולה להתחיל שאלה (offline, עוד לא מוכן, עסוק). תמיד פועל, כמו ה"טיק" |
 
 ### קבועים פנימיים בקוד
 
@@ -79,6 +81,7 @@
 | `kRingBufferBytes` | `i2s_audio_utils.cpp` | 32KB | מאגר הניגון (כ-4 שניות mu-law), משותף עם המיקרופון |
 | `kI2sDmaBufCount`, `kI2sDmaBufLen` | `i2s_audio_utils.cpp` | 12, 300 | מאגר ה-DMA של ה-I2S: 150ms |
 | `kBeepFrequencyHz`, `kBeepDurationMs` | `i2s_audio_utils.cpp` | 880, 300 | צפצוף הבדיקה (BEEP) וצפצופי הטיימר |
+| `kPlayedOutMarginMs` | `i2s_audio_utils.cpp` | 40 | אחרי "טיק" ההתחלה ההקלטה מחכה שהצליל ייצא מהרמקול: אורך מאגר ה-DMA (‏150ms) ועוד המרווח הזה, כדי שה"טיק" לא ייכנס להקלטה |
 | `kLowToneHz`, `kHighToneHz`, `kStatusToneMs`, `kStatusToneGapMs` | `device_controls_utils.cpp` | 440, 660, 120, 60 | צלילי המצב offline / online |
 | `kFailedToneHz`, `kFailedToneMs` | `device_controls_utils.cpp` | 330, 250 | צליל "שאלה נכשלה" |
 | `kLedPwmFrequencyHz`, `kLedPwmResolutionBits` | `board_state_utils.cpp` | 5000, 8 | ה-PWM שמעמעם את ה-LED |

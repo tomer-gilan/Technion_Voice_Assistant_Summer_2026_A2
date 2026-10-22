@@ -1096,32 +1096,83 @@ void reprintFullStatus() {
   esp32va_info::announceLimits();
 }
 
-/** Starts a manual LISTEN (the command, or the app's Talk button) if the
-    board can take one now; otherwise says why not. Works with hands-free
-    on too - a fixed kManualRecordDurationSec, as before. */
-void startManualListen() {
+/** The short high tick right before a manual recording starts. Blocks
+    ~0.25 s: the tone, then until it has left the speaker, so the recording
+    that starts next doesn't hear it. Hands-free is held off around it, as
+    for BEEP, so the mic doesn't take it for speech. loop() only (i2s_write). */
+void playStartTick() {
+  esp32va_hands_free::holdOff();
+  esp32va_audio::playTone(esp32va_params::kStartToneHz, esp32va_params::kStartToneMs);
+  esp32va_audio::waitUntilPlayedOut();
+  esp32va_hands_free::holdOff();
+}
+
+/** The short low tone for a BOOT press that couldn't start a LISTEN.
+    Skipped while the mic is recording (a hands-free utterance loop() hasn't
+    taken yet), where the recording would pick it up. While a reply or the
+    greeting plays it is spliced into the speech: both write the I2S port
+    from loop(), one after the other. loop() only (i2s_write). */
+void playRefusedTone() {
+  if (esp32va_mic_capture::isCaptureInProgress()) {
+    LOG_DEBUG("Refused tone skipped - the mic is recording.\n");
+    return;
+  }
+  esp32va_hands_free::holdOff();
+  esp32va_audio::playTone(esp32va_params::kRefusedToneHz, esp32va_params::kRefusedToneMs);
+  esp32va_hands_free::holdOff();
+  LOG_DEBUG("Refused tone played.\n");
+}
+
+/** Starts a manual LISTEN (the command, the app's Talk button or the BOOT
+    button) if the board can take one now, with the start tick just before
+    the recording; otherwise says why not. Works with hands-free on too - a
+    fixed kManualRecordDurationSec, as before. Returns true if it started,
+    false if it was refused. */
+bool startManualListen() {
   if (!should_keep_running) {
     Serial.printf("LISTEN ignored - the sketch has halted (see the HALTED line above).\n");
-  } else if (!session_ready && isAssistantOffline()) {
+    return false;
+  }
+  if (!session_ready && isAssistantOffline()) {
     Serial.printf("LISTEN ignored - offline (no Wi-Fi or no OpenAI). The timer and the controls still work.\n");
-  } else if (!session_ready) {
+    return false;
+  }
+  if (!session_ready) {
     Serial.printf("LISTEN ignored - not ready yet (still connecting/setting up).\n");
-  } else if (is_capturing) {
+    return false;
+  }
+  if (is_capturing) {
     Serial.printf("LISTEN ignored - already recording.\n");
-  } else if (awaiting_reply) {
+    return false;
+  }
+  if (awaiting_reply) {
     Serial.printf("LISTEN ignored - still waiting for or playing back a reply.\n");
-  } else if (response_in_flight || speech_in_progress) {
+    return false;
+  }
+  if (response_in_flight || speech_in_progress) {
     // The greeting, a timer announcement or a typed question's answer is on
     // its way: its audio would arrive while the mic holds the ring (and be
     // dropped), and a second response.create would be rejected.
     LOG_INFO("LISTEN ignored - the assistant is still answering, try again when it is Ready.\n");
-  } else if (!esp32va_reply_recorder::isRecorderIdle()) {
-    Serial.printf("LISTEN ignored - still saving the last reply to the SD card, try again in a moment.\n");
-  } else if (!esp32va_mic_capture::startManualCapture(kSampleRateHz * kManualRecordDurationSec)) {
-    Serial.printf("LISTEN ignored - the mic is busy (speech is being recorded, or audio still playing).\n");
-  } else {
-    beginListenTurn(esp32va_measure::ListenMode::kManual);
+    return false;
   }
+  if (!esp32va_reply_recorder::isRecorderIdle()) {
+    Serial.printf("LISTEN ignored - still saving the last reply to the SD card, try again in a moment.\n");
+    return false;
+  }
+  // What startManualCapture() would refuse, checked before the tick too, so
+  // a LISTEN is never ticked and then refused.
+  if (esp32va_mic_capture::isCaptureInProgress() || esp32va_audio::ringUsedBytes() > 0) {
+    Serial.printf("LISTEN ignored - the mic is busy (speech is being recorded, or audio still playing).\n");
+    return false;
+  }
+  playStartTick();
+  if (!esp32va_mic_capture::startManualCapture(kSampleRateHz * kManualRecordDurationSec)) {
+    Serial.printf("LISTEN ignored - the mic is busy (speech is being recorded, or audio still playing).\n");
+    return false;
+  }
+  beginListenTurn(esp32va_measure::ListenMode::kManual);
+  return true;
 }
 
 /** ASK <text>: a question typed in the laptop app instead of spoken - for a
@@ -1168,7 +1219,8 @@ void askTypedQuestion(const String& text) {
 }
 
 /** The BOOT button (when switched on - button_utils.h): starts a LISTEN like
-    the Talk button, or cancels the one being recorded or answered. */
+    the Talk button, or cancels the one being recorded or answered. A press
+    that can't start one plays the refused tone. */
 void handleTalkButtonPress() {
   if (!should_keep_running) {
     return;
@@ -1179,7 +1231,9 @@ void handleTalkButtonPress() {
     return;
   }
   Serial.printf("Talk button pressed.\n");
-  startManualListen();
+  if (!startManualListen()) {
+    playRefusedTone();
+  }
 }
 
 /** Checks Serial for a typed command. LIST / GET / DELETE <name> / DELETE_ALL answer the laptop

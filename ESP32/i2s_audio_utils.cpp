@@ -211,6 +211,13 @@ void playTone(uint32_t frequency_hz, uint32_t duration_ms) {
   }
 }
 
+void waitUntilPlayedOut() {
+  // At most the DMA buffers' worth of audio is queued after playTone()
+  // returns. The margin: the mic task reads 20 ms frames, a DMA buffer behind.
+  constexpr uint32_t kPlayedOutMarginMs = 40;
+  delay(kI2sDmaBufCount * kI2sDmaBufLen * 1000 / kSampleRateHz + kPlayedOutMarginMs);
+}
+
 uint32_t micBufferCapacityMs() {
   return kI2sDmaBufCount * kI2sDmaBufLen * 1000 / kSampleRateHz;
 }

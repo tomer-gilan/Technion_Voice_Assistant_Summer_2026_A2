@@ -159,4 +159,14 @@ constexpr uint32_t kSdSpiFrequencyHz = 4000000;
 constexpr uint32_t kButtonSampleMs = 5;
 constexpr int kButtonDebounceSamples = 6;  // 30 ms
 
+// ----- Button sounds -----
+// Always on (not the SOUNDS setting); silent only while muted. A short high
+// tick just before a manual recording starts (BOOT, Talk, LISTEN - not
+// hands-free, where speech has already begun), and a short low tone when a
+// BOOT press can't start a LISTEN (offline, not ready, busy...).
+constexpr uint32_t kStartToneHz = 1320;
+constexpr uint32_t kStartToneMs = 60;
+constexpr uint32_t kRefusedToneHz = 220;
+constexpr uint32_t kRefusedToneMs = 120;
+
 }  // namespace esp32va_params

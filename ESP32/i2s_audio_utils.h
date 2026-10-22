@@ -61,8 +61,16 @@ void playTestBeep();
 
 /** Plays a tone of frequency_hz for duration_ms at the current volume, the
     same way as playTestBeep() (which is playTone(880, 300)) - for the status
-    sounds. Blocking; only call while nothing else is playing. */
+    sounds. Blocking; meant for while nothing else is playing - called from
+    loop() while a reply plays, it is spliced in between two of
+    drainRingBufferToSpeaker()'s chunks, delaying the rest of the reply. */
 void playTone(uint32_t frequency_hz, uint32_t duration_ms);
+
+/** Blocks until a tone just played (playTone() returns once it's queued,
+    not heard) has left the speaker: the I2S DMA buffers' length plus a
+    small margin for the mic's own read lag - so a recording that starts
+    right after doesn't pick up its end. ~190 ms. */
+void waitUntilPlayedOut();
 
 /** How much mic audio the I2S driver can hold, in milliseconds, before it
     starts dropping it. If handling one chunk takes longer than this (or
