@@ -249,10 +249,6 @@
 | Solomon Mekhiln | *(להשלים)* לפי הגיט: חיישן האור, ההקלטות ב-SD, ומרכז הבקרה הראשון (שלבים 23-27) |
 | Itamar Cohen | *(להשלים)* לפי הגיט: מרכז הבקרה (שלב 28), המדידות (29), גלאי הקול ו-Hands-free (30) |
 
-## הפוסטר
-
-*(צילום הפוסטר יתווסף כאן אחרי שיוגש.)*
-
 ---
 
 This project is part of ICST - The Interdisciplinary Center for Smart Technologies, Taub Faculty of Computer Science, Technion. https://icst.cs.technion.ac.il/
