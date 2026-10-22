@@ -1,6 +1,6 @@
 """Turns the measurement lines (step 29 on) in saved ESP32 logs into CSV tables and a summary.
 
-Reads every @@BOOT_TIMING, @@TIMING and @@HEAP line (see test/measurement_utils.h)
+Reads every @@BOOT_TIMING, @@TIMING and @@HEAP line (see ESP32/measurement_utils.h)
 from one or more log files - the serial_logger.ps1 output or a log saved from the
 laptop app, timestamps and all - and writes:
   boot_timing.csv  one row per boot

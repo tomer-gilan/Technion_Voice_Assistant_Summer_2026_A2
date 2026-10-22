@@ -1,5 +1,5 @@
 // Replays recordings through the board's voice activity detector
-// (test/vad_utils.cpp, the exact same code) to see where hands-free
+// (ESP32/vad_utils.cpp, the exact same code) to see where hands-free
 // listening would start and stop recording - and to tune it - without
 // flashing anything. Simulates the board's armed loop: waiting for speech,
 // recording from kPreRollMs before the start was confirmed, ending after the
@@ -7,7 +7,7 @@
 // waiting again.
 //
 // Build (any C++11 compiler; on Windows e.g. MSYS2/MinGW g++):
-//   g++ -std=c++11 -O2 -I test tools/vad_replay.cpp test/vad_utils.cpp -o vad_replay
+//   g++ -std=c++11 -O2 -I ESP32 tools/vad_replay.cpp ESP32/vad_utils.cpp -o vad_replay
 // Run:
 //   vad_replay [--sensitivity 1-5] [--hangover <ms>] [--frames] [--captures <folder>] <file>...
 //

@@ -1,5 +1,25 @@
-test/config.h
+# Secrets - only the template (ESP32/SECRETS.example.h) is committed
+ESP32/SECRETS.h
+**/SECRETS.h
+!ESP32/SECRETS.example.h
+config.h
+config.h.old
 OpenAI_Key.txt
-.obsidian/
+
+# Serial logs saved by tools/serial_logger.ps1 and the control center
 tools/esp32_log_*.txt
+esp32_log_*.txt
+
+# Build output
+build/
+*.bin
+*.elf
+*.map
+vad_replay
+vad_replay.exe
+
+# Personal working notes, kept locally only
+CLAUDE.md
+PROGRESS.md
 PROJECT_OVERVIEW.md
+.obsidian/

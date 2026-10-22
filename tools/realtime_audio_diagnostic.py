@@ -2,7 +2,7 @@
 """Diagnostic for the step 13 mid-response disconnect (see PROJECT_OVERVIEW.md).
 
 Reproduces the exact same session.update -> conversation.item.create ->
-response.create flow the ESP32 sketch (test/test.ino) sends, but from a
+response.create flow the ESP32 sketch (ESP32/ESP32.ino) sends, but from a
 plain desktop Python client - completely bypassing the ESP32 and the
 WebSocketsClient (Links2004) Arduino library. On the device, every attempt
 disconnects a few hundred ms to ~1.7s after response.create, always before
@@ -33,7 +33,7 @@ API_KEY = os.environ.get("OPENAI_API_KEY")
 MODEL = os.environ.get("OPENAI_MODEL", "gpt-realtime-2.1-mini")
 URL = f"wss://api.openai.com/v1/realtime?model={MODEL}"
 
-# Mirrors test/test.ino's kSessionUpdateMessage exactly.
+# Mirrors ESP32/ESP32.ino's kSessionUpdateMessage exactly.
 SESSION_UPDATE = {
     "type": "session.update",
     "session": {
