@@ -210,7 +210,7 @@ void finishVoiceCommandRecording() {
     FAILED banner - or nullptr if they all did. */
 const char* firstFailedStartupCheck() {
   using esp32va_status::Stage;
-  if (!esp32va_status::isStageOk(Stage::kSdCard)) return "the SD card check didn't pass";
+  // The SD card isn't one of them: without it the board runs on, by design.
   if (!esp32va_status::isStageOk(Stage::kMicrophone)) return "the mic check didn't pass - see the ERROR above";
   if (!esp32va_status::isStageOk(Stage::kSpeaker)) return "the speaker setup didn't pass";
   if (!esp32va_status::isStageOk(Stage::kWifi)) return "Wi-Fi wasn't connected";
