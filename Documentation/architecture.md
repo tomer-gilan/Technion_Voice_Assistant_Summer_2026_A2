@@ -17,7 +17,7 @@ flowchart LR
   ESP <-- "USB serial, 115200<br/>@@ status lines + commands" --> GUI["Control center<br/>control_center/control_center.html"]
   ESP --> LED["Onboard LED"]
   BTN["BOOT button<br/>(optional Talk)"] --> ESP
-  LDR["LDR light sensor<br/>(or simulated)"] -- "ADC1" --> ESP
+  LDR["LDR light sensor<br/>(not wired: simulated<br/>from the control center)"] -- "ADC1" --> ESP
 ```
 
 </div>
@@ -41,7 +41,7 @@ flowchart LR
 | `vad_utils` | גלאי הקול: מחליט מתי מישהו התחיל ומתי סיים לדבר |
 | `hands_free_utils` | מצב Hands-free: מקשיב לבד כשהלוח פנוי ושולח רק דיבור אמיתי |
 | `board_state_utils` | ה-LED (כולל בהירות) והכלי `set_board_state` |
-| `light_sensor_utils` | חיישן האור (מדומה, או LDR אמיתי כשמגדירים `LIGHT_SENSOR_PIN`) והכלי `get_time_of_day` |
+| `light_sensor_utils` | חיישן האור (בגרסת ההגשה הערך מדומה ממרכז הבקרה, כי ה-LDR לא מחובר; LDR אמיתי נקרא כשמגדירים `LIGHT_SENSOR_PIN`) והכלי `get_time_of_day` |
 | `device_controls_utils` | פקודות עוצמה, השתקה, צפצוף ו-LED מהמחשב, צלילי המצב (`SOUNDS`), והכלי `set_volume` |
 | `button_utils` | כפתור BOOT ככפתור Talk פיזי (כבוי כברירת מחדל, `BUTTON on`), עם debounce |
 | `clock_timer_utils` | הכלים `get_current_time` ו-`set_timer`, הצלצול של הטיימר, וההודעה בקול כשהוא נגמר |
