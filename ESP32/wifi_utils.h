@@ -6,7 +6,10 @@
 //
 // The network: the one saved in flash from the control center (WIFI_SSID +
 // WIFI_PASSWORD commands), or else SECRETS.h's WIFI_SSID / WIFI_PASSWORD -
-// so a new network needs no compile. Status line:
+// so a new network needs no compile. If the saved network fails
+// kWifiAttemptsBeforeFallback attempts in a row (parameters.h), the board
+// tries SECRETS.h's instead, and back again the same way - in RAM only, the
+// saved one stays in flash. Status line:
 //   @@WIFI_NET <saved|default> <ssid>   - which network the board uses
 // (never the password).
 //
@@ -44,8 +47,11 @@ void reportWifiSignal();
 void announceWifiNetwork();
 
 /** Handles WIFI / WIFI_SSID / WIFI_PASSWORD / WIFI_FORGET (see above).
-    Returns false if command isn't one of them. Never prints the password. */
-bool handleWifiCommand(const char* command);
+    command is the trimmed line; raw_line the same line untrimmed (only its
+    line ending removed), from which WIFI_PASSWORD takes the password, so
+    spaces at its ends are kept. Returns false if command isn't one of
+    them. Never prints the password. */
+bool handleWifiCommand(const char* command, const char* raw_line);
 
 /** Call every loop() pass: reports the signal strength every 10 s and a
     lost / regained connection as a @@STAGE wifi line, starts over on the

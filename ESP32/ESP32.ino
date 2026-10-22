@@ -1174,6 +1174,10 @@ void checkForSerialCommand() {
     return;
   }
   String command = Serial.readStringUntil('\n');
+  if (command.endsWith("\r")) {
+    command.remove(command.length() - 1);
+  }
+  const String raw_line = command;  // untrimmed - a Wi-Fi password keeps its spaces (wifi_utils.h)
   command.trim();
   if (command.length() == 0) {
     return;
@@ -1195,7 +1199,7 @@ void checkForSerialCommand() {
     handled = esp32va_controls::handleControlCommand(command.c_str(), isIdleForFileTransfer()) ||
               esp32va_light_sensor::handleLightCommand(command.c_str()) ||
               esp32va_hands_free::handleHandsFreeCommand(command.c_str()) ||
-              esp32va_wifi::handleWifiCommand(command.c_str()) ||
+              esp32va_wifi::handleWifiCommand(command.c_str(), raw_line.c_str()) ||
               esp32va_button::handleButtonCommand(command.c_str());
   }
   if (pauses_hands_free) {

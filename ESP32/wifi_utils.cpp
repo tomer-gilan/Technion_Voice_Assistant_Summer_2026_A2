@@ -40,16 +40,33 @@ unsigned long last_connect_start_ms = 0;
 bool wifi_was_connected = false;
 bool time_sync_started = false;
 bool time_synced = false;
+uint32_t failed_attempts_in_a_row = 0;  // on the active network, since it last connected or was chosen
+
+/** Makes SECRETS.h's network the active one. */
+void useDefaultNetwork() {
+  using_saved_network = false;
+  snprintf(active_ssid, sizeof(active_ssid), "%s", WIFI_SSID);
+  snprintf(active_password, sizeof(active_password), "%s", WIFI_PASSWORD);
+}
+
+/** Makes the network saved in flash the active one. Returns false, changing
+    nothing, if no network was saved. */
+bool useSavedNetwork() {
+  char saved_ssid[kMaxSsidLength + 1];
+  if (!esp32va_settings::loadTextSetting(kSsidSettingKey, saved_ssid, sizeof(saved_ssid))) {
+    return false;
+  }
+  using_saved_network = true;
+  snprintf(active_ssid, sizeof(active_ssid), "%s", saved_ssid);
+  esp32va_settings::loadTextSetting(kPasswordSettingKey, active_password, sizeof(active_password));
+  return true;
+}
 
 /** Loads the network to use: the one saved in flash, or SECRETS.h's. */
 void loadActiveNetwork() {
-  using_saved_network = esp32va_settings::loadTextSetting(kSsidSettingKey, active_ssid, sizeof(active_ssid));
-  if (using_saved_network) {
-    esp32va_settings::loadTextSetting(kPasswordSettingKey, active_password, sizeof(active_password));
-    return;
+  if (!useSavedNetwork()) {
+    useDefaultNetwork();
   }
-  snprintf(active_ssid, sizeof(active_ssid), "%s", WIFI_SSID);
-  snprintf(active_password, sizeof(active_password), "%s", WIFI_PASSWORD);
 }
 
 /** Starts connecting to the active network - dropping the current attempt
@@ -87,6 +104,7 @@ const char* notConnectedReason(wl_status_t status) {
 /** Reports the connection as up: the stage, the IP and the signal. */
 void reportConnected() {
   wifi_was_connected = true;
+  failed_attempts_in_a_row = 0;
   esp32va_status::reportStage(esp32va_status::Stage::kWifi, esp32va_status::StageState::kOk,
                               WiFi.localIP().toString().c_str());
   reportWifiSignal();
@@ -145,13 +163,55 @@ const char* commandArgument(const char* command, const char* word) {
   return rest;
 }
 
+/** WIFI_PASSWORD's password as typed: everything after the word and exactly
+    one space on the untrimmed line, so spaces at either end of the password
+    are kept. "" if there is none. */
+const char* rawPasswordArgument(const char* raw_line) {
+  const char kWord[] = "WIFI_PASSWORD";
+  const size_t word_length = sizeof(kWord) - 1;
+  while (*raw_line == ' ' || *raw_line == '\t') {
+    raw_line++;
+  }
+  if (strncasecmp(raw_line, kWord, word_length) != 0 || raw_line[word_length] != ' ') {
+    return "";
+  }
+  return raw_line + word_length + 1;
+}
+
 /** Switches to the active network now, telling the user and the app. */
 void switchNetwork() {
   announceWifiNetwork();
   Serial.printf("Connecting to Wi-Fi \"%s\"...\n", active_ssid);
   wifi_was_connected = false;
+  failed_attempts_in_a_row = 0;
   reportConnecting();
   startConnecting(true);
+}
+
+/** Counts a connection attempt on the active network that ran out of time.
+    After kWifiAttemptsBeforeFallback of them in a row, if a network was
+    saved from the control center, switches to the other network: from the
+    saved one (a mistyped password, a hotspot that's gone) to SECRETS.h's,
+    and back the same way. In RAM only - the saved network stays in flash
+    for the next boot. Returns true if it switched (and started connecting). */
+bool noteFailedAttempt() {
+  failed_attempts_in_a_row++;
+  if (failed_attempts_in_a_row < esp32va_params::kWifiAttemptsBeforeFallback) {
+    return false;
+  }
+  if (using_saved_network) {
+    LOG_ERROR("Saved Wi-Fi \"%s\" failed %u times in a row - trying the default network instead (the saved one is "
+              "kept).\n",
+              active_ssid, (unsigned)failed_attempts_in_a_row);
+    useDefaultNetwork();
+  } else if (useSavedNetwork()) {
+    LOG_ERROR("Default Wi-Fi failed %u times in a row - trying the saved network \"%s\" again.\n",
+              (unsigned)failed_attempts_in_a_row, active_ssid);
+  } else {
+    return false;  // only the default network exists - keep trying it
+  }
+  switchNetwork();
+  return true;
 }
 
 }  // namespace
@@ -179,6 +239,7 @@ bool connectToWifi(unsigned long wait_ms) {
       char stage_detail[kStageDetailBufferSize];
       snprintf(stage_detail, sizeof(stage_detail), "%s - still trying", notConnectedReason(status));
       esp32va_status::reportStage(esp32va_status::Stage::kWifi, esp32va_status::StageState::kFail, stage_detail);
+      noteFailedAttempt();
       return false;
     }
     delay(300);
@@ -238,7 +299,7 @@ void announceWifiNetwork() {
   esp32va_status::printProtocolLine("@@WIFI_NET %s %s", using_saved_network ? "saved" : "default", active_ssid);
 }
 
-bool handleWifiCommand(const char* command) {
+bool handleWifiCommand(const char* command, const char* raw_line) {
   const char* argument = nullptr;
   if ((argument = commandArgument(command, "WIFI_SSID")) != nullptr) {
     if (*argument == '\0' || strlen(argument) > kMaxSsidLength) {
@@ -257,6 +318,10 @@ bool handleWifiCommand(const char* command) {
     if (!pending_ssid_set) {
       Serial.printf("WIFI_PASSWORD ignored - send WIFI_SSID <name> first.\n");
       return true;
+    }
+    const char* raw_password = rawPasswordArgument(raw_line);  // a password may start or end with a space
+    if (*argument != '\0' && *raw_password != '\0') {
+      argument = raw_password;
     }
     size_t password_length = strlen(argument);
     if (password_length > kMaxPasswordLength || (password_length > 0 && password_length < 8)) {
@@ -306,7 +371,7 @@ void monitorWifiConnection() {
                                   "connection lost - reconnecting");
     }
   }
-  if (!connected && millis() - last_connect_start_ms >= kRestartConnectAfterMs) {
+  if (!connected && millis() - last_connect_start_ms >= kRestartConnectAfterMs && !noteFailedAttempt()) {
     LOG_INFO("Wi-Fi still down %lu s after the last attempt - starting over on \"%s\".\n", kRestartConnectAfterMs / 1000,
              active_ssid);
     startConnecting(true);

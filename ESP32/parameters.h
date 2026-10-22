@@ -73,6 +73,11 @@ constexpr unsigned long kReplyTimeoutMs = 15000;
 // ----- Connection -----
 constexpr unsigned long kWifiBootWaitMs = 20000;  // setup() waits this long for Wi-Fi, then goes on without it
 constexpr unsigned long kTimeSyncBootWaitMs = 15000;  // and this long for the clock (NTP)
+// Failed attempts in a row (the boot wait, then one a minute) on a Wi-Fi
+// network saved from the control center before the board tries SECRETS.h's
+// network instead - and back the same way. In RAM only: the saved network
+// stays in flash for the next boot.
+constexpr uint32_t kWifiAttemptsBeforeFallback = 2;
 // Failed OpenAI connections in a row (backing off 1, 2, 4, 8... s) before
 // the board reports itself offline. It keeps retrying after that, every
 // kOfflineRetryIntervalMs, for as long as it takes.
