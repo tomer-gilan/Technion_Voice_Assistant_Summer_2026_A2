@@ -369,6 +369,9 @@
   .orb .eq i:nth-child(4) { animation-delay: -0.3s; }  .orb .eq i:nth-child(5) { animation-delay: -0.6s; }
   .orb[data-state="speaking"] > svg { display: none; }
   .orb[data-state="speaking"] .eq { display: flex; }
+  /* The board went quiet (no line for 15 s): what it last reported may be out of date. */
+  .orb.stale, .health.stale { filter: grayscale(1); opacity: 0.45; }
+  .orb.stale::after { animation: none; }
   @keyframes eq { 0%, 100% { transform: scaleY(0.25); } 50% { transform: scaleY(1); } }
   @keyframes pulse { from { transform: scale(1); opacity: 0.5; } to { transform: scale(1.22); opacity: 0; } }
   @keyframes breathe { 0%, 100% { transform: scale(1); opacity: 0.2; } 50% { transform: scale(1.1); opacity: 0.55; } }
@@ -985,9 +988,12 @@ const SAFE_FILE_NAME = /^[A-Za-z0-9_-][A-Za-z0-9_.-]{0,30}$/;  // a plain name, 
 const STATUS_TAGS = new Set(["@@STAGE", "@@STATE", "@@RESULT", "@@MIC_LEVEL", "@@HEARD", "@@SAID", "@@WIFI",
                              "@@LED", "@@VOLUME", "@@LIGHT", "@@BEEP", "@@VAD", "@@VAD_LEVEL", "@@VAD_EVENT",
                              "@@TIMING", "@@BOOT_TIMING", "@@TIMER", "@@CLOCK", "@@WIFI_NET", "@@BUTTON",
-                             "@@SOUNDS"]);
+                             "@@SOUNDS", "@@ALIVE"]);
 const STATUS_REQUEST_DELAY_MS = 400;   // after connecting, ask for the full picture
 const NO_STATUS_HINT_MS = 4000;        // no @@STATE by then: the board runs older firmware
+const BOARD_SILENT_MS = 15000;         // no line from the board for this long (it sends @@ALIVE every 5 s): "not responding"
+const ALIVE_CHECK_MS = 1000;
+const BOARD_SILENT_TITLE = `Board not responding - no report for ${BOARD_SILENT_MS / 1000} s.`;
 const TALK_START_TIMEOUT_MS = 2500;
 const MAX_ASK_BYTES = 200;             // mirrors parameters.h's kMaxTypedQuestionBytes - the board cuts a longer question
 const MAX_SSID_BYTES = 32;             // mirrors wifi_utils.cpp's kMaxSsidLength
@@ -1264,8 +1270,10 @@ class Transaction {
     list()/get() run one at a time. */
 class BoardLink {
   constructor({ onLine, onNote, onConnectionChange, onListAnnounced, onRecordingSaved, onRecordingDeleted,
-                onTransferProgress, onStatus }) {
+                onTransferProgress, onStatus, onActivity }) {
     this.onStatus = onStatus;  // (tag without "@@", rest of the line) for the status lines (STATUS_TAGS)
+    this.onActivity = onActivity;  // () whenever anything arrives from the board
+    this.lastReceivedAt = 0;       // performance.now() of the last bytes from the board
     this.onTransferProgress = onTransferProgress;  // (bytes received, total) while a GET's bytes arrive
     this.onLine = onLine;
     this.onNote = onNote;
@@ -1347,6 +1355,8 @@ class BoardLink {
   }
 
   consume(chunk) {
+    this.lastReceivedAt = performance.now();
+    if (this.onActivity) this.onActivity();
     let data = chunk;
     if (this.pending.length) {
       data = new Uint8Array(this.pending.length + chunk.length);
@@ -1726,6 +1736,10 @@ function freshBoardStatus() {
     timerTicker: null,
     askPending: null,  // a typed question sent with ASK, until the board echoes it as @@HEARD
     wifiSavePending: null,  // { ssid, timer } from Save & connect until @@WIFI_NET saved or an "ignored" line
+    aliveSeen: false,  // an @@ALIVE came since connecting or the last restart - only then is silence flagged (older firmware sends none)
+    aliveTicker: null, // checkBoardAlive() once a second while connected
+    quietFrom: 0,      // silence isn't counted before this (performance.now()) - moved on while it isn't watched
+    silent: false,     // shown as "not responding" (setBoardSilent)
   };
 }
 
@@ -1741,6 +1755,7 @@ const link = new BoardLink({
   onRecordingDeleted: removeRecording,
   onTransferProgress: showDownloadProgress,
   onStatus: handleStatusLine,
+  onActivity: () => { if (state.board.silent) setBoardSilent(false); },
 });
 
 function pad(number, width = 2) { return String(number).padStart(width, "0"); }
@@ -1820,6 +1835,7 @@ function handleConnectionChange(connected, closedOnPurpose) {
     state.reconnectWanted = true;
     scheduleListRefresh(500);
     resetBoardStatus("unknown");
+    state.board.aliveTicker = setInterval(checkBoardAlive, ALIVE_CHECK_MS);
     setTimeout(() => sendQuietly("STATUS"), STATUS_REQUEST_DELAY_MS);
     state.board.noStatusTimer = setTimeout(() => {
       if (!state.board.pipeline) {
@@ -2367,7 +2383,10 @@ function handleStatusLine(tag, rest) {
       // app's own "offline" already means "no board connected".
       const boardState = words[0] === "offline" ? "netdown" : words[0];
       board.pipeline = { state: boardState, detail: words.slice(1).join(" ") };
-      if (words[0] === "booting") onUsageBoardBooting();
+      if (words[0] === "booting") {
+        onUsageBoardBooting();
+        board.aliveSeen = false;  // setup()'s waits send no @@ALIVE - watched again from its next one
+      }
       if (wasRunning && words[0] === "booting") {
         elements.result.className = "result";
         elements.result.textContent = "The board restarted.";
@@ -2475,6 +2494,9 @@ function handleStatusLine(tag, rest) {
       break;
     case "CLOCK":
       break;  // only the self-test reads it (waitForStatus, above)
+    case "ALIVE":
+      board.aliveSeen = true;  // the heartbeat: from now on, silence counts (checkBoardAlive)
+      break;
     default:
       appendLog(`(app) Unhandled status line @@${tag} - this page doesn't know it yet.`);
       break;
@@ -2507,6 +2529,8 @@ function resetBoardStatus(shownState) {
   if (old.wifiSavePending) clearTimeout(old.wifiSavePending.timer);
   clearInterval(old.timerTicker);
   clearInterval(old.listenTimer);
+  clearInterval(old.aliveTicker);
+  if (old.silent) paintBoardSilent(false);  // quietly - a connect or disconnect says enough
   state.board = freshBoardStatus();
   elements.healthSummary.textContent = shownState === "offline"
     ? "Connect the board to see its startup checks." : "Waiting for the board's report…";
@@ -2521,6 +2545,42 @@ function resetBoardStatus(shownState) {
   renderBoardOptions();
   elements.vadNote.textContent = VAD_NOTE_DEFAULT;
   updateControlsEnabled();
+}
+
+/** Once a second while connected: the board counts as not responding when
+    nothing came from it for BOARD_SILENT_MS. Only once it has sent an
+    @@ALIVE since connecting or restarting (older firmware never does), and
+    not while a recording downloads (the transfer holds its loop() on
+    purpose) or a log is replayed - silence is counted afresh after those.
+    A halted board already has its own banner. */
+function checkBoardAlive() {
+  const board = state.board;
+  const now = performance.now();
+  const halted = Boolean(board.pipeline) && board.pipeline.state === "halted";
+  if (!link.connected || !board.aliveSeen || state.downloadsRunning > 0 || state.replayActive || halted) {
+    board.quietFrom = now;
+    return;
+  }
+  if (!board.silent && now - Math.max(link.lastReceivedAt, board.quietFrom) > BOARD_SILENT_MS) setBoardSilent(true);
+}
+
+/** Shows (silent) or clears the "board not responding" warning: the state
+    and the health lights greyed out, and the red banner. Cleared by the next
+    line from the board. */
+function setBoardSilent(silent) {
+  state.board.silent = silent;
+  paintBoardSilent(silent);
+  appendLog(silent
+    ? `(app) Nothing from the board for ${BOARD_SILENT_MS / 1000} s - it may be stuck. If it stays like this, press Reset (EN) on the board.`
+    : "(app) The board is reporting again.");
+}
+
+/** The page side of setBoardSilent(), without the log line. */
+function paintBoardSilent(silent) {
+  elements.orb.classList.toggle("stale", silent);
+  document.querySelector(".health").classList.toggle("stale", silent);
+  if (silent) showAlert(BOARD_SILENT_TITLE, "If it stays like this, press Reset (EN) on the board.");
+  else if (document.getElementById("connection-alert-title").textContent === BOARD_SILENT_TITLE) hideAlert();
 }
 
 const STAGE_TEXT = {
@@ -3738,6 +3798,7 @@ let stageTicker = null;
 function syncStage() {
   const orb = document.getElementById("stage-orb");
   orb.dataset.state = elements.orb.dataset.state;
+  orb.classList.toggle("stale", elements.orb.classList.contains("stale"));
   orb.style.setProperty("--level", elements.orb.style.getPropertyValue("--level") || 0);
   document.getElementById("stage-label").textContent = elements.stateLabel.textContent;
   document.getElementById("stage-detail").textContent = elements.stateDetail.textContent;
