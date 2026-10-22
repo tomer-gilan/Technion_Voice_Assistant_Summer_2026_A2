@@ -37,6 +37,21 @@ if ($available -notcontains $Port) {
 
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
 
+# .NET resolves a relative path against the process's directory, not
+# PowerShell's current location - so resolve it here, once.
+$LogFile = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($LogFile)
+# UTF-8 without a BOM (Add-Content -Encoding utf8 in PowerShell 5.1 starts the
+# file with one, which the control center's log replay used to trip over).
+$logEncoding = New-Object System.Text.UTF8Encoding $false
+
+<#
+.SYNOPSIS
+  Appends one line to the log file, ending it in a single LF.
+#>
+function Write-LogLine([string]$Text) {
+  [System.IO.File]::AppendAllText($LogFile, "$Text`n", $logEncoding)
+}
+
 $serialPort = New-Object System.IO.Ports.SerialPort $Port, $BaudRate, "None", 8, "One"
 $serialPort.ReadTimeout = 200  # short timeout so the loop below returns quickly to also check for typed input
 $serialPort.NewLine = "`n"
@@ -64,11 +79,13 @@ try {
     # Read anything the board has sent (bounded by ReadTimeout, so this
     # doesn't block the keyboard-check below for more than ~200ms).
     try {
-      $line = $serialPort.ReadLine()
+      # The firmware ends lines with println's CRLF; NewLine is LF, so drop the CR
+      # (else every logged line ends in CR CR LF).
+      $line = $serialPort.ReadLine().TrimEnd("`r")
       $timestamp = Get-Date -Format "HH:mm:ss.fff"
       $output = "[$timestamp] $line"
       Write-Host $output
-      Add-Content -Path $LogFile -Value $output -Encoding utf8
+      Write-LogLine $output
     } catch [System.TimeoutException] {
       # No data right now - fall through to check for typed input.
     }
@@ -79,7 +96,7 @@ try {
       $key = [Console]::ReadKey($true)
       if ($key.Key -eq "Enter") {
         Write-Host ">> $inputBuffer" -ForegroundColor Cyan
-        Add-Content -Path $LogFile -Value ">> $inputBuffer" -Encoding utf8
+        Write-LogLine ">> $inputBuffer"
         $serialPort.WriteLine($inputBuffer)
         $inputBuffer = ""
       } elseif ($key.Key -eq "Backspace") {
