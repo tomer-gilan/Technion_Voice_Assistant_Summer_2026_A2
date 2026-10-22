@@ -140,6 +140,7 @@ bool response_fully_received = false;  // the final (post-tool-call, if any) res
 bool function_call_turn_pending = false;  // true from a finalized tool call until its function-call-only response.done is consumed
 bool dropping_reply_audio = false;  // CANCEL stopped a response that's still coming - its audio, text and tool calls are skipped
 bool response_in_flight = false;   // a response.create (greeting or LISTEN) hasn't had its final response.done yet
+bool server_response_running = false;  // between the server's response.created and its response.done
 uint32_t listen_cycle = 0;         // deliberately never reset - keeps counting across reconnects for a soak test
 uint32_t connection_count = 0;     // how many times WStype_CONNECTED has fired this run (1 = first connect, 2+ = reconnect)
 unsigned long last_reply_activity_ms = 0;  // last time ANY server message arrived while a response was due - see checkReplyTimeout()
@@ -617,9 +618,20 @@ void handleServerMessage(uint8_t* payload, size_t length) {
     return;
   }
 
+  if (strcmp(type, "response.created") == 0) {
+    // Also after an error that cleared response_in_flight (see "error"
+    // below) but didn't stop this response: it is still on its way.
+    server_response_running = true;
+    response_in_flight = true;
+    last_reply_activity_ms = millis();
+    LOG_DEBUG("response.created - a response is running.\n");
+    return;
+  }
+
   if (strcmp(type, "response.done") == 0) {
     const char* status = doc["response"]["status"] | "(unknown)";
     LOG_DEBUG("response.done -> status: %s\n", status);
+    server_response_running = false;
     // Whatever the status, no more audio is coming for this response. A
     // function-call-only response.done has no recording open - a no-op.
     esp32va_reply_recorder::noteReplyFinished();
@@ -670,6 +682,13 @@ void handleServerMessage(uint8_t* payload, size_t length) {
       return;
     }
     LOG_ERROR("Error: %s\n", message);
+    if (!server_response_running) {
+      // No response is running (e.g. the response.create was rejected), so
+      // no response.done will clear it - else hands-free waits for the
+      // reply timeout.
+      response_in_flight = false;
+      dropping_reply_audio = false;
+    }
     markReplyFailed(message);
     return;
   }
@@ -717,6 +736,7 @@ void onWebSocketEvent(WStype_t type, uint8_t* payload, size_t length) {
       }
       session_ready = false;
       response_in_flight = false;
+      server_response_running = false;
       function_call_turn_pending = false;
       dropping_reply_audio = false;
       if (is_capturing) {
@@ -1256,6 +1276,7 @@ void checkReplyTimeout() {
     return;
   }
   response_in_flight = false;  // a response that silent isn't coming any more
+  server_response_running = false;
   function_call_turn_pending = false;
   dropping_reply_audio = false;
   if (!awaiting_reply) {
