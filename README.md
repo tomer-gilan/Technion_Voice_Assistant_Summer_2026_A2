@@ -56,7 +56,6 @@
 | [מקרי קצה - מורחב](Documentation/edge-cases-extended.md) ([PDF](Documentation/edge-cases-extended.pdf)) | בפורמט של הקורס (חיווי והתאוששות), עם המקרים של גרסת ההגשה. **להדפסה: `edge-cases-extended.pdf` (2 עותקים)** |
 | [תוכנית ההדגמה](Documentation/demo-plan.md) ו[שאלות צפויות](Documentation/questions.md) | הכנה להגשה |
 | [גרסאות הפרויקט](Documentation/versions.md) | כל השלבים, מהצליל הראשון ועד הגרסה הנוכחית |
-| [מבחן משתמש](Documentation/user-test.md) | מבחן עם משתמשים מבחוץ ומה תיקנו בעקבותיו |
 
 ## חומרה
 
