@@ -51,8 +51,9 @@
 | [הוראות כיול](Documentation/calibration.md) | חיישן האור, הרגישות של Hands-free, עוצמת המיקרופון |
 | [איך הקוד בנוי](Documentation/architecture.md) | המודולים, מכונת המצבים, זרימת השימוש, והפרוטוקול בין הלוח למרכז הבקרה |
 | [החלטות משמעותיות](Documentation/decisions.md) | מה החלטנו, למה, ועל מה זה נשען (מדידה, ניסוי או תיעוד) |
-| [סיפורי משתמש](Documentation/user-stories.md) ו[מקרי קצה](Documentation/edge-cases.md) | לפי סדר ההדגמה. מקרי הקצה המקוריים שבדקנו (גם `edge-cases-v3.pdf` להדפסה) |
-| [מקרי קצה - מורחב](Documentation/edge-cases-extended.md) | בפורמט של הקורס (חיווי והתאוששות), עם המקרים של גרסת ההגשה (גם PDF) |
+| [סיפורי משתמש](Documentation/user-stories.md) ([PDF](Documentation/user-stories.pdf)) | לפי סדר ההדגמה |
+| [מקרי קצה](Documentation/edge-cases.md) ([PDF](Documentation/edge-cases.pdf)) | הרשימה המקורית של מקרי הקצה שבדקנו |
+| [מקרי קצה - מורחב](Documentation/edge-cases-extended.md) ([PDF](Documentation/edge-cases-extended.pdf)) | בפורמט של הקורס (חיווי והתאוששות), עם המקרים של גרסת ההגשה. **להדפסה: `edge-cases-extended.pdf` (2 עותקים)** |
 | [תוכנית ההדגמה](Documentation/demo-plan.md) ו[שאלות צפויות](Documentation/questions.md) | הכנה להגשה |
 | [גרסאות הפרויקט](Documentation/versions.md) | כל השלבים, מהצליל הראשון ועד הגרסה הנוכחית |
 | [מבחן משתמש](Documentation/user-test.md) | מבחן עם משתמשים מבחוץ ומה תיקנו בעקבותיו |
