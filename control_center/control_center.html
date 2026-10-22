@@ -773,6 +773,14 @@
           <span class="needle" id="light-needle"></span>
         </div>
         <input id="light-value" type="range" min="0" max="6142" step="1" value="4000" disabled style="accent-color:var(--accent)">
+        <div class="control-line">
+          <label for="light-mode" style="font-size:13px;color:var(--muted)">Simulate</label>
+          <select id="light-mode" disabled title="Manual: the slider sets the light level. Auto day-cycle: one simulated day (night, sunrise, day, sunset) every 2 minutes, with a real sensor's small jitter - touching the slider goes back to Manual.">
+            <option value="manual" selected>Manual (slider)</option>
+            <option value="auto">Auto day-cycle</option>
+          </select>
+          <span id="light-clock" style="font-size:12.5px;color:var(--muted);font-variant-numeric:tabular-nums"></span>
+        </div>
         <div class="thresholds">
           <label>Evening from<input id="evening-min" type="number" min="0" max="6142" value="1000" disabled></label>
           <label>Day from<input id="day-min" type="number" min="0" max="6142" value="3000" disabled></label>
@@ -1009,6 +1017,14 @@ const ERROR_SHOWN_MS = 3000;           // how long a failed LISTEN shows as an e
 const CONTROL_SEND_DELAY_MS = 250;     // slider changes are sent once dragging pauses
 const MAX_BUBBLES = 60;               // conversation items kept on screen (bubbles and action notes)
 const LIGHT_SENSOR_MAX = 6142;         // mirrors light_sensor_utils.h's kMaxLightSensorValue
+// The light sensor's auto day-cycle (a mock of a real LDR - see stepDayCycle()).
+const DAY_CYCLE_PERIOD_MS = 120000;    // one simulated 24 h day takes 2 minutes (the Simulate menu's title says so)
+const DAY_CYCLE_SEND_MS = 1500;        // a LIGHT command this often - 18 simulated minutes apart
+const DAY_CYCLE_START_HOUR = 4;        // just before dawn, so a sunrise shows within the first half minute
+const DAY_CYCLE_NIGHT_LEVEL = 0.03;    // darkest and brightest level, as parts of the scale (limits.light_max)
+const DAY_CYCLE_NOON_LEVEL = 0.92;
+const DAY_CYCLE_STEEPNESS = 4;         // how sharp sunrise and sunset are: "evening" ~4:15-6:00 and 18:00-19:45 at the default thresholds
+const DAY_CYCLE_NOISE_COUNTS = 5;      // a real ADC reading jitters by a few counts, x1.5 on the board's scale (light_sensor_utils.cpp)
 const MIC_METER_FLOOR_DBFS = -60;
 // Hands-free (step 30) - the board's side is ESP32/hands_free_utils.h.
 const VAD_METER_MIN_DBFS = -90;        // the voice-band level is the mic's own, before the gain: quieter than @@MIC_LEVEL
@@ -1693,6 +1709,8 @@ const elements = {
   ledBrightness: document.getElementById("led-brightness"),
   ledBrightnessValue: document.getElementById("led-brightness-value"),
   lightValue: document.getElementById("light-value"),
+  lightMode: document.getElementById("light-mode"),
+  lightClock: document.getElementById("light-clock"),
   lightReading: document.getElementById("light-reading"),
   lightBand: document.getElementById("light-band"),
   lightNeedle: document.getElementById("light-needle"),
@@ -3045,6 +3063,7 @@ function updateControlsEnabled() {
   elements.led.disabled = !connected || !board.led;
   elements.ledBrightness.disabled = !connected || !board.led;
   elements.lightValue.disabled = !connected || !board.light;
+  elements.lightMode.disabled = !connected || !board.light;
   elements.eveningMin.disabled = !connected || !board.light;
   elements.dayMin.disabled = !connected || !board.light;
   elements.applyBands.disabled = !connected || !board.light;
@@ -3245,6 +3264,53 @@ function onApplyBandsClick() {
   }
   elements.lightNote.textContent = "Saved on the board - kept after a restart.";
   sendCommand(`LIGHT_BANDS ${eveningMin} ${dayMin}`);
+}
+
+/** The auto day-cycle's simulated clock (hours, 0-24) and its ticker. */
+const dayCycle = { hour: DAY_CYCLE_START_HOUR, ticker: null };
+
+/** Switches the simulated light sensor between "manual" (the slider) and
+    "auto" (the day-cycle, stepDayCycle() every DAY_CYCLE_SEND_MS). */
+function setLightMode(mode) {
+  elements.lightMode.value = mode;
+  clearInterval(dayCycle.ticker);
+  dayCycle.ticker = null;
+  if (mode === "auto") {
+    dayCycle.ticker = setInterval(stepDayCycle, DAY_CYCLE_SEND_MS);
+    stepDayCycle();
+  } else {
+    elements.lightClock.textContent = "";
+  }
+}
+
+/** One step of the auto day-cycle: moves the simulated clock on, sends the
+    light level for that time (LIGHT <v>) and moves the slider with it.
+    Paused - the clock stands still - while no board is connected or it
+    hasn't reported its light sensor yet, while a recording downloads, and
+    during a log replay. */
+function stepDayCycle() {
+  const light = state.board.light;
+  const paused = !link.connected || !light || state.downloadsRunning > 0 || state.replayActive;
+  if (!paused) {
+    dayCycle.hour = (dayCycle.hour + (DAY_CYCLE_SEND_MS / DAY_CYCLE_PERIOD_MS) * 24) % 24;
+    const value = dayCycleLight(dayCycle.hour);
+    elements.lightValue.value = value;
+    drawLightBands(value, light.eveningMin, light.dayMin);
+    sendQuietly(`LIGHT ${value}`);
+  }
+  const minutes = Math.floor(dayCycle.hour * 60);
+  elements.lightClock.textContent = `🕒 ${pad(Math.floor(minutes / 60))}:${pad(minutes % 60)}${paused ? " (paused)" : ""}`;
+}
+
+/** The light level at a time of day (hours): dark at night, a smooth ramp
+    at sunrise and sunset (around 6:00 and 18:00) through the evening and
+    day bands, bright at noon - plus a real ADC reading's jitter. */
+function dayCycleLight(hour) {
+  const sunHeight = -Math.cos((hour / 24) * 2 * Math.PI);  // -1 at midnight, 0 at 6:00 and 18:00, 1 at noon
+  const daylight = 1 / (1 + Math.exp(-DAY_CYCLE_STEEPNESS * sunHeight));
+  const level = (DAY_CYCLE_NIGHT_LEVEL + (DAY_CYCLE_NOON_LEVEL - DAY_CYCLE_NIGHT_LEVEL) * daylight) * limits.light_max;
+  const jitter = (Math.random() + Math.random() - 1) * DAY_CYCLE_NOISE_COUNTS * 1.5;  // most often near 0, like averaged ADC noise
+  return Math.round(Math.min(limits.light_max, Math.max(0, level + jitter)));
 }
 
 function onTerminalToggle() {
@@ -4324,7 +4390,9 @@ elements.ledBrightness.addEventListener("input", () => {
   elements.ledBrightnessValue.textContent = `${elements.ledBrightness.value}%`;
   sendSoon("brightness", `LED_BRIGHTNESS ${elements.ledBrightness.value}`);
 });
+elements.lightMode.addEventListener("change", () => setLightMode(elements.lightMode.value));
 elements.lightValue.addEventListener("input", () => {
+  if (dayCycle.ticker) setLightMode("manual");  // touching the slider takes over from the day-cycle
   const light = state.board.light || { eveningMin: Number(elements.eveningMin.value), dayMin: Number(elements.dayMin.value) };
   drawLightBands(Number(elements.lightValue.value), light.eveningMin, light.dayMin);
   sendSoon("light", `LIGHT ${elements.lightValue.value}`);
