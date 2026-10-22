@@ -9,6 +9,8 @@ OpenAI_Key.txt
 # Serial logs saved by tools/serial_logger.ps1 and the control center
 tools/esp32_log_*.txt
 esp32_log_*.txt
+# ...except the measurement log, which is tracked on purpose
+!Documentation/measurements/esp32_log_*.txt
 
 # Build output
 build/
@@ -23,3 +25,6 @@ CLAUDE.md
 PROGRESS.md
 PROJECT_OVERVIEW.md
 .obsidian/
+
+# Submission guidelines and audit notes, kept locally only
+submission_prep/
