@@ -28,6 +28,19 @@ flowchart LR
 
 כל מודול הוא זוג קבצים `xxx_utils.h/.cpp` בתיקייה `ESP32/`, עם namespace משלו (`esp32va_...`). הקובץ `ESP32.ino` מחבר את כולם: הוא מחזיק את מצב השיחה ומחליט מה לעשות בכל רגע. הגישה לכל רכיב חומרה מרוכזת במודול אחד: I2S רק ב-`i2s_audio_utils`, ה-LED רק ב-`board_state_utils`, ה-SD רק במודולי ה-SD, הכפתור רק ב-`button_utils`.
 
+כל מודול הוא אובייקט יחיד: המצב הפנימי שלו בקובץ ה-`.cpp` (פרטי), וקובץ ה-`.h` הוא הממשק. למה namespace ולא class מוסבר ב-[decisions.md](decisions.md). איזה רכיב חומרה שייך לאיזה מודול:
+
+| חומרה | המודול | ה-namespace |
+|---|---|---|
+| ה-LED שעל הלוח (GPIO 2, בהירות ב-PWM) | `board_state_utils` | `esp32va_board` |
+| רמקול + מגבר MAX98357A ומיקרופון INMP441 (פורט I2S אחד) | `i2s_audio_utils`. קריאת המיקרופון במשימה נפרדת: `mic_capture_utils`. גלאי הקול: `vad_utils` | `esp32va_audio`, `esp32va_mic_capture`, `esp32va_vad` |
+| עוצמה, השתקה וצפצוף | `device_controls_utils` | `esp32va_controls` |
+| כפתור BOOT (GPIO 0) | `button_utils` | `esp32va_button` |
+| חיישן אור LDR (מדומה ממרכז הבקרה; קריאת ה-ADC מוכנה) | `light_sensor_utils` | `esp32va_light_sensor` |
+| כרטיס SD (SPI) | `sd_card_utils`. שמירת ההקלטות והעברתן: `reply_recorder_utils`, `voice_command_recorder_utils`, `sd_file_transfer_utils` | `esp32va_sd_card`, `esp32va_reply_recorder`, `esp32va_command_recorder`, `esp32va_sd_transfer` |
+| Wi-Fi והשעון | `wifi_utils` | `esp32va_wifi` |
+| זיכרון קבוע (NVS) | `settings_store_utils` | `esp32va_settings` |
+
 שני קבצים בלי קוד: `parameters.h` (כל הפרמטרים הקבועים - ראו [Parameters/parameters.md](../Parameters/parameters.md)) ו-`SECRETS.h` (סיסמת ה-Wi-Fi ומפתח ה-API, לא בגיט; התבנית היא `SECRETS.example.h`).
 
 | מודול | מה הוא עושה |

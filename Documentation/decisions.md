@@ -176,6 +176,34 @@
 
 **נשען על:** נוסה (שלב 17, bisection מלא).
 
+### כל מודול הוא אובייקט יחיד (namespace), ולא class
+
+**ההחלטה:** כל רכיב חומרה ותחום בקוד הוא מודול `esp32va_*` שהוא אובייקט יחיד: המצב הפנימי שלו (משתנים, מאגרים, הדגלים) נמצא ב-`namespace` אנונימי בקובץ ה-`.cpp`, כלומר "חברים פרטיים", וקובץ ה-`.h` הוא הממשק הציבורי, כלומר ה"class". אין בקוד של הלוח אף `class` (יש רק `enum class`).
+
+**למה לא class של C++:**
+- לכל רכיב יש בלוח מופע אחד (LED אחד, פורט I2S אחד, כרטיס SD אחד, כפתור אחד). class שאפשר ליצור ממנו הרבה מופעים לא היה נותן כלום.
+- בלי הקצאה דינמית: מודול הוא סטטי, ואין אובייקטים שנוצרים ונהרסים על ה-heap. על לוח בלי PSRAM אנחנו מונעים הקצאות כאלה (ראו "האודיו פוצץ את ה-heap, שוב").
+- callbacks של timer, משימה או interrupt צריכים פונקציה רגילה: ה-callback של `esp_timer` ב-`button_utils` ומשימת ה-FreeRTOS של `mic_capture_utils` מקבלים מצביע לפונקציה, ומתודה של class הייתה צריכה עטיפה סטטית בכל מקרה.
+- ה-API של ESP-IDF ושל Arduino (`i2s_*`, `ledc*`, `analogRead`, FreeRTOS) הוא C, ופונקציות חופשיות משתלבות בו בלי שכבה נוספת.
+- ה-namespace הוא מה שפתר את הבאג האמיתי שפגשנו, ההתנגשות של `g_log_level` ברמת ה-linker (ראו "רמות לוג, ו-namespace לכל דבר").
+
+הכלל לא מושלם: מעט משתנים מוצהרים בכותרת במכוון (`g_light_sensor_value` ב-`light_sensor_utils.h`, ו-`g_log_level` ב-`log_utils.h`). האחרים פנימיים.
+
+**איזו חומרה שייכת לאיזה מודול:**
+
+| חומרה | המודול | ה-namespace |
+|---|---|---|
+| ה-LED שעל הלוח (GPIO 2, בהירות ב-PWM) | `board_state_utils` | `esp32va_board` |
+| רמקול + מגבר MAX98357A ומיקרופון INMP441 (פורט I2S אחד) | `i2s_audio_utils`. קריאת המיקרופון במשימה נפרדת: `mic_capture_utils`. גלאי הקול: `vad_utils` | `esp32va_audio`, `esp32va_mic_capture`, `esp32va_vad` |
+| עוצמה, השתקה וצפצוף | `device_controls_utils` | `esp32va_controls` |
+| כפתור BOOT (GPIO 0) | `button_utils` | `esp32va_button` |
+| חיישן אור LDR (מדומה ממרכז הבקרה; קריאת ה-ADC מוכנה) | `light_sensor_utils` | `esp32va_light_sensor` |
+| כרטיס SD (SPI) | `sd_card_utils`. שמירת ההקלטות והעברתן: `reply_recorder_utils`, `voice_command_recorder_utils`, `sd_file_transfer_utils` | `esp32va_sd_card`, `esp32va_reply_recorder`, `esp32va_command_recorder`, `esp32va_sd_transfer` |
+| Wi-Fi והשעון | `wifi_utils` | `esp32va_wifi` |
+| זיכרון קבוע (NVS) | `settings_store_utils` | `esp32va_settings` |
+
+**נשען על:** נוסה (ההתנגשות ב-linker, שלב 17), והערכה (שאר הנימוקים הם שיקולי תכנון ולא נמדדו).
+
 ### מכונת המצבים: דגלים, ומצב אחד מחושב
 
 **ההחלטה:** הלוגיקה של השיחה מחזיקה כמה דגלים (`is_capturing`, `awaiting_reply`, `response_in_flight`, `speech_in_progress` ועוד), ו-`updatePipelineState()` מחשבת מהם, בכל סיבוב, מצב אחד מוגדר (`@@STATE`). המעברים מתוארים ב-[architecture.md](architecture.md).
