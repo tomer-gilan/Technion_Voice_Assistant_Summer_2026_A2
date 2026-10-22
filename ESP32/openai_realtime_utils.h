@@ -56,11 +56,11 @@ unsigned long offlineRetryIntervalMs();
 
 /** Answers a tool call: sends one conversation.item.create holding a
     function_call_output with call_id and output inserted as they are (so
-    output must already be JSON-safe). The follow-up response.create is the
-    sketch's (handleServerMessage()), once the tool-call response is done.
-    Called from the tool handlers, inside the WebSocket TEXT event - a known
-    exception to "no sends from the callback", see Documentation/decisions.md.
-    One static buffer, shared by every tool. */
+    output must already be JSON-safe). The follow-up response.create is
+    server_events.ino's (handleServerMessage()), once the tool-call response
+    is done. Called from the tool handlers, inside the WebSocket TEXT event -
+    a known exception to "no sends from the callback", see
+    Documentation/decisions.md. One static buffer, shared by every tool. */
 void sendFunctionCallOutput(WebSocketsClient& webSocket, const char* call_id, const char* output);
 
 }  // namespace esp32va_openai

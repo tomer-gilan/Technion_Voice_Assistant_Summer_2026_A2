@@ -61,7 +61,7 @@ uint32_t secondsLeft() {
   return elapsed_ms >= timer_length_ms ? 0 : (timer_length_ms - elapsed_ms + 999) / 1000;
 }
 
-/** Sends a tool's output text (ESP32.ino asks the model to say it once the call's response is done). */
+/** Sends a tool's output text (server_events.ino asks the model to say it once the call's response is done). */
 void sendToolOutput(WebSocketsClient& webSocket, const char* call_id, const char* output) {
   esp32va_openai::sendFunctionCallOutput(webSocket, call_id, output);
   LOG_DEBUG("Sent function_call_output (\"%s\").\n", output);

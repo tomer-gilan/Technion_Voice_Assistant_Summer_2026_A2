@@ -82,7 +82,7 @@ const char* matchingTimeOfDayPrefix(int hour) {
 /** Composes the chosen opening line (with its possible time-of-day prefix)
     into `out`. The system clock is assumed already synced - guaranteed by
     call order (the OpenAI connection only starts once the clock is set -
-    see startOpenAiConnectionWhenNetworkReady() in ESP32.ino), so this
+    see startOpenAiConnectionWhenNetworkReady() in state_machine.ino), so this
     doesn't re-check that. */
 void composeOpeningGreeting(char* out, size_t out_size) {
   const char* opener = kOpeners[esp_random() % kNumOpeners];

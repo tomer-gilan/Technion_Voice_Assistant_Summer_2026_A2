@@ -4,7 +4,7 @@
 // Talk button, so the board can be used without the laptop: a press starts
 // a LISTEN like the Talk button, and a press while it records or answers
 // cancels it. Held for kTechnicianHoldMs it also plays the technician beep
-// check (one beep per startup check - see ESP32.ino). Off until switched on
+// check (one beep per startup check - see serial_commands.ino). Off until switched on
 // (BUTTON on), and the choice is kept in flash - a board that hasn't been
 // tested with it behaves as before.
 //

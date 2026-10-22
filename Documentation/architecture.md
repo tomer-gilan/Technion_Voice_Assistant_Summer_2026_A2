@@ -26,7 +26,7 @@ flowchart LR
 
 ## המודולים
 
-כל מודול הוא זוג קבצים `xxx_utils.h/.cpp` בתיקייה `ESP32/`, עם namespace משלו (`esp32va_...`). הקובץ `ESP32.ino` מחבר את כולם: הוא מחזיק את מצב השיחה ומחליט מה לעשות בכל רגע. הגישה לכל רכיב חומרה מרוכזת במודול אחד: I2S רק ב-`i2s_audio_utils`, ה-LED רק ב-`board_state_utils`, ה-SD רק במודולי ה-SD, הכפתור רק ב-`button_utils`.
+כל מודול הוא זוג קבצים `xxx_utils.h/.cpp` בתיקייה `ESP32/`, עם namespace משלו (`esp32va_...`). ה-sketch `ESP32.ino` מחבר את כולם: הוא מחזיק את מצב השיחה ומחליט מה לעשות בכל רגע. הוא מחולק ללשוניות (tabs) של Arduino, ש-Arduino IDE מחבר לקובץ אחד בקימפול. הגישה לכל רכיב חומרה מרוכזת במודול אחד: I2S רק ב-`i2s_audio_utils`, ה-LED רק ב-`board_state_utils`, ה-SD רק במודולי ה-SD, הכפתור רק ב-`button_utils`.
 
 כל מודול הוא אובייקט יחיד: המצב הפנימי שלו בקובץ ה-`.cpp` (פרטי), וקובץ ה-`.h` הוא הממשק. למה namespace ולא class מוסבר ב-[decisions.md](decisions.md). איזה רכיב חומרה שייך לאיזה מודול:
 
@@ -45,7 +45,12 @@ flowchart LR
 
 | מודול | מה הוא עושה |
 |---|---|
-| `ESP32.ino` | הלולאה הראשית, מצב השיחה, הטיפול באירועים של OpenAI והפעלת הכלים |
+| `ESP32.ino` | ה-includes, הדגלים המשותפים של מצב השיחה, הצהרות של כל הפונקציות שבלשוניות, ו-`setup()`/`loop()` |
+| `listen_turn.ino` | שאלה (LISTEN): התחלה ידנית או בקול, שליחת המיקרופון ל-OpenAI, סיום, ביטול, ושאלה בכתב (`ASK`) |
+| `server_events.ino` | אירועי ה-WebSocket וכל הודעות השרת: הסשן, אודיו וטקסט של התשובה, קריאות לכלים (dispatch), סוף תשובה ושגיאות |
+| `serial_commands.ino` | הפקודות מה-Serial (ממרכז הבקרה) וכפתור BOOT: Talk, הצליל של סירוב ובדיקת הטכנאי |
+| `state_machine.ino` | מכונת המצבים: המעברים (פונקציות בשם לכל מעבר), `updatePipelineState()` שגוזרת את המצב (`@@STATE`), ובדיקות ה-timeout, ה-offline והחיבור |
+| `verdicts.ino` | PASSED/FAILED של כל שאלה ושל השלב, עצירה (halt), מדידות ההקלטה וההקלטות ב-SD |
 | `wifi_utils` | Wi-Fi ושעון: התחברות בלי להיתקע, הרשת השמורה ב-flash (או זו של `SECRETS.h`; אם הרשת השמורה נכשלת פעמיים ברצף עוברים לזו של `SECRETS.h`, ובחזרה באותו אופן), פקודות `WIFI_*`, וסנכרון השעה לפי שעון ישראל כולל שעון קיץ |
 | `openai_realtime_utils` | החיבור המאובטח ל-OpenAI, אימות, פעימת לב (ping כל 15 שניות; שני pong ברצף שלא חזרו תוך 10 שניות סוגרים את החיבור) שמגלה חיבור מת, התחברות מחדש עם המתנה שגדלה, ומצב offline (אף פעם לא מוותר). גם שליחת התוצאה של כלי (`sendFunctionCallOutput`) |
 | `realtime_json_utils` | סריקה מהירה של הודעות גדולות מהשרת בלי לפענח את כל ה-JSON |
@@ -138,7 +143,7 @@ stateDiagram-v2
 
 ### איך המצב מחושב (מכונת המצבים)
 
-הלוגיקה של השיחה מחזיקה דגלים, אחד לכל מקור של אירועים: ההקלטה (`is_capturing`), השאלה שמחכה לתשובה (`awaiting_reply`), תשובה שעוד לא הסתיימה בשרת (`response_in_flight`), ניגון (`speech_in_progress`), וכלי (`function_call_turn_pending`). הפונקציה `updatePipelineState()` ב-`ESP32.ino` היא המקום היחיד שמחליט מה המצב, בסדר עדיפויות קבוע:
+הלוגיקה של השיחה מחזיקה דגלים, אחד לכל מקור של אירועים: ההקלטה (`is_capturing`), השאלה שמחכה לתשובה (`awaiting_reply`), תשובה שעוד לא הסתיימה בשרת (`response_in_flight`), ניגון (`speech_in_progress`), וכלי (`function_call_turn_pending`). הפונקציה `updatePipelineState()` ב-`state_machine.ino` היא המקום היחיד שמחליט מה המצב, בסדר עדיפויות קבוע:
 
 | עדיפות | תנאי | מצב |
 |---|---|---|
@@ -269,8 +274,8 @@ flowchart TD
 ככה הוספנו את `set_volume`, `get_current_time`, `set_timer` ו-`get_board_status`:
 
 1. מוסיפים את הכלי לרשימת הכלים בהודעת ההגדרות של הסשן (`kSessionUpdateMessage` ב-`realtime_session_config.h`): שם, תיאור באנגלית למודל, וסכמת JSON של הפרמטרים.
-2. כותבים פונקציה במודול המתאים שקוראת את הפרמטרים, מבצעת, מדפיסה שורת `@@` ושולחת ל-OpenAI את התוצאה (`function_call_output`) עם `esp32va_openai::sendFunctionCallOutput()`. את הבקשה לענות (`response.create`) שולח `ESP32.ino` פעם אחת, כשהתשובה עם הכלים נגמרת.
-3. מוסיפים את שם הכלי ל-dispatch ב-`ESP32.ino`. אם צריך, מלמדים את מרכז הבקרה את שורת ה-`@@` החדשה.
+2. כותבים פונקציה במודול המתאים שקוראת את הפרמטרים, מבצעת, מדפיסה שורת `@@` ושולחת ל-OpenAI את התוצאה (`function_call_output`) עם `esp32va_openai::sendFunctionCallOutput()`. את הבקשה לענות (`response.create`) שולח `server_events.ino` פעם אחת, כשהתשובה עם הכלים נגמרת.
+3. מוסיפים את שם הכלי ל-dispatch ב-`server_events.ino`. אם צריך, מלמדים את מרכז הבקרה את שורת ה-`@@` החדשה.
 
 ## זיכרון
 
