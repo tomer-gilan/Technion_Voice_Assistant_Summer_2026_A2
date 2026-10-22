@@ -50,6 +50,10 @@ namespace esp32va_openai {
 void beginOpenAiRealtimeConnection(WebSocketsClient& webSocket) {
   webSocket.setExtraHeaders(kOpenAiAuthHeader);
   webSocket.beginSslWithCA(kOpenAiHost, kOpenAiPort, kOpenAiPath, kOpenAiRootCaCert);
+  if (esp32va_params::kHeartbeatIntervalMs > 0) {
+    webSocket.enableHeartbeat(esp32va_params::kHeartbeatIntervalMs, esp32va_params::kHeartbeatPongTimeoutMs,
+                              esp32va_params::kHeartbeatMissedPongs);
+  }
 }
 
 unsigned long addJitter(unsigned long base_ms) {

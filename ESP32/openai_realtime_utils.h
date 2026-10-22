@@ -17,7 +17,8 @@ namespace esp32va_openai {
 
 /** Opens a WSS connection to the OpenAI Realtime API ("/v1/realtime?model=..."
     per parameters.h's OPENAI_MODEL), with the Authorization header and root CA
-    (GTS Root R4 - see step 9 for how this was verified) already applied.
+    (GTS Root R4 - see step 9 for how this was verified) already applied,
+    and the ping/pong heartbeat (parameters.h's kHeartbeatIntervalMs) on.
     Caller must set webSocket.onEvent(...) before calling this. */
 void beginOpenAiRealtimeConnection(WebSocketsClient& webSocket);
 

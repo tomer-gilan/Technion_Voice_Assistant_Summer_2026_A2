@@ -45,6 +45,7 @@
 | `kWifiBootWaitMs` / `kTimeSyncBootWaitMs` | 20000 / 15000 | כמה זמן ההדלקה מחכה ל-Wi-Fi ולשעון לפני שממשיכה בלעדיהם |
 | `kOpenAiAttemptsBeforeOffline` | 5 | ניסיונות חיבור ברצף עד מצב offline |
 | `kOfflineRetryIntervalMs` | 30000 | כל כמה זמן מנסים שוב במצב offline |
+| `kHeartbeatIntervalMs`, `kHeartbeatPongTimeoutMs`, `kHeartbeatMissedPongs` | 15000, 10000, 2 | ping ל-OpenAI כל 15 שניות; אם 2 תשובות (pong) ברצף לא חוזרות תוך 10 שניות, החיבור נסגר ומתחבר מחדש (מזהה חיבור "תקוע" כשיש Wi-Fi בלי אינטרנט). 0 מכבה |
 | `kDefaultVolumePercent`, `kDefaultLedBrightnessPercent` | 100, 100 | ברירות מחדל עד שמשנים ושומרים |
 | `kDefaultEveningLightMin`, `kDefaultDayLightMin` | 1000, 3000 | ספי האור ההתחלתיים |
 | `kMinVoiceVolumePercent`, `kVoiceVolumeStepPercent` | 10, 20 | העוצמה הנמוכה ביותר בקול, וכמה "louder" מגביר |

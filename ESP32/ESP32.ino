@@ -1226,7 +1226,11 @@ void serviceReplyRecording() {
     while transcript/audio was still actively arriving in a real run - see
     Documentation/decisions.md step 16's "reply timeout fired mid-reply" discovery.)
     The same silence ends a response nobody waits on (the greeting), so
-    hands-free listening isn't held off forever by one that never finished. */
+    hands-free listening isn't held off forever by one that never finished.
+    Either way the connection is closed too: a server that silent may be
+    behind a half-open socket (Wi-Fi up, internet gone), and the usual
+    disconnect path reconnects - or shows offline - instead of failing every
+    LISTEN on a dead session. */
 void checkReplyTimeout() {
   if (!awaiting_reply && !response_in_flight) {
     return;
@@ -1240,14 +1244,18 @@ void checkReplyTimeout() {
   if (!awaiting_reply) {
     LOG_ERROR("No word from the server for %lu ms about the last response - not waiting for it any more.\n",
               kReplyTimeoutMs);
-    return;
+  } else {
+    LOG_ERROR("Reply timeout: connected %d, session ready %d, free heap %u, largest block %u.\n",
+              (int)webSocket.isConnected(), (int)session_ready, (unsigned)ESP.getFreeHeap(),
+              (unsigned)ESP.getMaxAllocHeap());
+    char reason[64];
+    snprintf(reason, sizeof(reason), "no server activity for %lu ms", kReplyTimeoutMs);
+    markReplyFailed(reason);
   }
-  LOG_ERROR("Reply timeout: connected %d, session ready %d, free heap %u, largest block %u.\n",
-            (int)webSocket.isConnected(), (int)session_ready, (unsigned)ESP.getFreeHeap(),
-            (unsigned)ESP.getMaxAllocHeap());
-  char reason[64];
-  snprintf(reason, sizeof(reason), "no server activity for %lu ms", kReplyTimeoutMs);
-  markReplyFailed(reason);
+  if (webSocket.isConnected()) {
+    LOG_INFO("Closing the silent OpenAI connection - a fresh session will be set up.\n");
+    webSocket.disconnect();
+  }
 }
 
 /** Once the server has said the (post-tool-call, if any) response is fully done

@@ -79,6 +79,12 @@ constexpr unsigned long kTimeSyncBootWaitMs = 15000;  // and this long for the c
 constexpr uint32_t kOpenAiAttemptsBeforeOffline = 5;
 constexpr unsigned long kInitialReconnectBackoffMs = 1000;
 constexpr unsigned long kOfflineRetryIntervalMs = 30000;
+// A WebSocket ping to OpenAI every kHeartbeatIntervalMs; kHeartbeatMissedPongs
+// pongs in a row not back within kHeartbeatPongTimeoutMs close the connection,
+// so a half-open one (Wi-Fi up, internet gone) is noticed. 0 switches it off.
+constexpr uint32_t kHeartbeatIntervalMs = 15000;
+constexpr uint32_t kHeartbeatPongTimeoutMs = 10000;  // generous: a pong can wait behind a reply's audio
+constexpr uint8_t kHeartbeatMissedPongs = 2;
 
 // ----- Defaults for the run-time settings (until changed and saved) -----
 constexpr int kDefaultVolumePercent = 100;
