@@ -88,7 +88,9 @@ constexpr uint32_t kChunkMs = kChunkSamples * 1000 / kSampleRateHz;
 // spoken "1, 2, 3" hit full scale (min -32768 / max 32767) - clipped before
 // OpenAI heard it. Must match control_center/control_center.html's BOARD_MIC_GAIN.
 constexpr int32_t kSoftwareGain = esp32va_params::kMicSoftwareGain;
-constexpr unsigned int kMaxTypedQuestionLength = 200;  // ASK <text> - longer is cut
+// ASK <text>: longer is cut. Bytes, not characters - UTF-8, so a Hebrew
+// letter takes 2 (about 100 of them fit).
+constexpr unsigned int kMaxTypedQuestionBytes = 200;
 constexpr unsigned long kReplyTimeoutMs = esp32va_params::kReplyTimeoutMs;  // max silence (no server message) while awaiting_reply, not a total-reply-duration cap - see checkReplyTimeout()
 // The gain and the base64 encoding run kGainBlockSamples at a time, straight
 // into the JSON message: 192 bytes = 64 whole base64 groups, so only a
@@ -1126,7 +1128,8 @@ void startManualListen() {
     noisy room, or a mic that won't cooperate. It goes into the same
     conversation as a text message, and the reply is spoken like the
     greeting: no LISTEN, so no recording and no @@TIMING. The text comes
-    back as @@HEARD for the app's chat bubble. */
+    back as @@HEARD for the app's chat bubble. A question longer than
+    kMaxTypedQuestionBytes bytes (UTF-8) is cut there, never mid-character. */
 void askTypedQuestion(const String& text) {
   if (!session_ready) {
     Serial.printf("ASK ignored - not connected to OpenAI yet.\n");
@@ -1136,9 +1139,13 @@ void askTypedQuestion(const String& text) {
     Serial.printf("ASK ignored - the assistant is busy, try again when it is Ready.\n");
     return;
   }
-  unsigned int cut = min(text.length(), kMaxTypedQuestionLength);
+  unsigned int cut = min(text.length(), kMaxTypedQuestionBytes);
   while (cut > 0 && cut < text.length() && (static_cast<uint8_t>(text[cut]) & 0xC0) == 0x80) {
     cut--;  // don't split a multi-byte (e.g. Hebrew) character - the server rejects broken UTF-8
+  }
+  if (cut < text.length()) {
+    LOG_INFO("Typed question is %u bytes - only the first %u bytes are sent (the limit is %u bytes).\n",
+             text.length(), cut, kMaxTypedQuestionBytes);
   }
   String question = text.substring(0, cut);
   JsonDocument doc;
