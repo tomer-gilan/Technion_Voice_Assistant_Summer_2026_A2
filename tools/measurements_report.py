@@ -20,6 +20,7 @@ Usage:
 
 import argparse
 import csv
+import math
 import re
 import statistics
 import sys
@@ -108,9 +109,11 @@ def numeric_values(rows, key):
 
 
 def percentile(values, fraction):
-    """Nearest-rank percentile of a non-empty list."""
+    """Nearest-rank percentile of a non-empty list: the value at rank ceil(fraction * n)."""
     ordered = sorted(values)
-    index = max(0, min(len(ordered) - 1, round(fraction * len(ordered) + 0.5) - 1))
+    # Not round(x + 0.5): Python rounds .5 to even, one rank too high whenever fraction * n is odd.
+    # The inner round() keeps a float product like 63.00000000000001 from ceiling to 64.
+    index = max(0, min(len(ordered) - 1, math.ceil(round(fraction * len(ordered), 9)) - 1))
     return ordered[index]
 
 
