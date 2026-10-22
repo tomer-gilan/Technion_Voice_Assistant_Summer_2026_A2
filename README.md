@@ -172,7 +172,7 @@
 | `set_board_state` | מדליק או מכבה את ה-LED, ואפשר גם לקבוע בהירות | `Turn on the light`, `Dim the light to 30 percent` |
 | `get_time_of_day` | קורא את חיישן האור (מדומה ממרכז הבקרה) ומחזיר יום, ערב או לילה | `Is it day or night?` |
 | `set_volume` | קובע עוצמה באחוזים (‏10-100), או מגביר / מנמיך ב-20% | `Set the volume to 30 percent`, `Louder` |
-| `get_current_time` | התאריך והשעה מהשעון של הלוח (מסונכרן מהאינטרנט), וכמה נשאר לטיימר | `What time is it?` |
+| `get_current_time` | התאריך והשעה מהשעון של הלוח (מסונכרן מהאינטרנט, לפי שעון ישראל כולל שעון קיץ), וכמה נשאר לטיימר | `What time is it?` |
 | `get_board_status` | עוצמת ה-Wi-Fi, כמה דקות הלוח דלוק וכמה זיכרון פנוי | `How are you doing?` |
 | `set_timer` | טיימר של 1 עד 3600 שניות (בהדגמה 20 עד 60 שניות), או ביטול. בסוף העוזר אומר את זה בקול (גם על מה התזכורת), ואפשר להדליק או לכבות את האור | `Remind me in 30 seconds to check the oven`, `Turn off the light in 20 seconds` |
 
