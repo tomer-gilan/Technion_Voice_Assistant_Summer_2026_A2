@@ -36,7 +36,7 @@
 | תיקייה | מה יש בה |
 |---|---|
 | `ESP32/` | הקושחה: `ESP32.ino` (השיחה ומכונת המצבים), המודולים `*_utils.cpp/.h`, `parameters.h` (כל הפרמטרים הקבועים), ו-`SECRETS.example.h` (תבנית לסודות) |
-| `control_center/` | מרכז הבקרה: `control_center.html`, דף אחד שרץ ב-Chrome או Edge |
+| `control_center/` | מרכז הבקרה: `control_center.html` ו-`control_center.js` (שני הקבצים חייבים להישאר באותה תיקייה), שרץ ב-Chrome או Edge |
 | `Unit Tests/` | בדיקות יחידה לכל רכיב חומרה (רמקול, מיקרופון, Wi-Fi, SD, LED, כפתור, ו-LDR לכשיחובר) ו[הדוח שלהן](Unit%20Tests/README.md) |
 | `Parameters/` | [רשימת כל הפרמטרים](Parameters/parameters.md): מה משנים ממרכז הבקרה, מה ב-`parameters.h`, ומה ב-`SECRETS.h` |
 | `Documentation/` | כל התיעוד (רשימה למטה), תמונות, הלוג של המדידות, ו-`development_steps/` עם כל השלבים שבנינו בדרך |
