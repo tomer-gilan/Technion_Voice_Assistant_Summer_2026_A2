@@ -815,7 +815,7 @@
         <button id="usage-reset" type="button">Reset</button>
       </div>
     </div>
-    <p class="hint">Since the app connected (or since Reset). Response time: from the end of the recording to the first sound of the reply.</p>
+    <p class="hint">Since this page was opened (or since Reset); a replayed log shows its own numbers until it ends. Response time: from the end of the recording to the first sound of the reply.</p>
     <dl id="usage-stats" class="stats"></dl>
     <div class="chart-head">
       <h3>Response time per command</h3>
@@ -1614,6 +1614,8 @@ const state = {
   selectedSource: "",       // "Downloaded from the board ..." / "Playing the copy already on the laptop ..."
   sessionStamp: fileStamp(new Date()),
   board: freshBoardStatus(),
+  replayActive: false,  // a saved log is being replayed - its lines stay out of the live log and statistics
+  liveUsage: null,      // the live statistics, set aside while a replay fills its own
 };
 
 /** What the page knows about the board's status - reset on every connect. */
@@ -1757,11 +1759,14 @@ function handleConnectionChange(connected, closedOnPurpose) {
 
 /** Adds a line to the terminal and the log buffers. protocol: true for the
     @@ status lines and the app's own STATUS requests - hidden on screen
-    unless "Show @@ lines" is ticked, always kept in a saved log. */
+    unless "Show @@ lines" is ticked, always kept in a saved log. A replayed
+    line is only shown: in the saved log it would pass for a new live one. */
 function appendLog(text, { protocol = false } = {}) {
   const stamped = `[${clockStamp(new Date())}] ${text}`;
-  state.logLines.push(stamped);
-  if (state.logFile) state.logFile.queued.push(stamped);
+  if (!state.replayActive) {
+    state.logLines.push(stamped);
+    if (state.logFile) state.logFile.queued.push(stamped);
+  }
 
   const line = document.createElement("div");
   if (protocol) line.className = "protocol";
@@ -3870,9 +3875,13 @@ async function startReplay(file) {
   }
   stopReplay();
   Object.assign(replay, { lines: items, index: 0, startMs: items[0].atMs });
+  appendLog(`(app) Replaying ${file.name} (${items.length} lines).`);
+  state.replayActive = true;
+  state.liveUsage = usage;
+  usage = newUsage();
+  renderUsage();
   resetBoardStatus("unknown");
   addConversationNote(`▶ Replaying ${file.name}`, "replay");
-  appendLog(`(app) Replaying ${file.name} (${items.length} lines).`);
   document.getElementById("replay-name").textContent = file.name;
   document.getElementById("replay-bar").hidden = false;
   replayStep();
@@ -3899,12 +3908,19 @@ function replayStep() {
   replay.timer = setTimeout(replayStep, gap / speed);
 }
 
-/** Ends a replay (finished, stopped, or a board connected - reason says which). */
+/** Ends a replay (finished, stopped, or a board connected - reason says
+    which) and brings back the live statistics. */
 function stopReplay(reason = "") {
   if (document.getElementById("replay-bar").hidden) return;
   clearTimeout(replay.timer);
   replay.timer = null;
   document.getElementById("replay-bar").hidden = true;
+  state.replayActive = false;
+  if (state.liveUsage) {
+    usage = state.liveUsage;
+    state.liveUsage = null;
+    renderUsage();
+  }
   const finished = replay.index >= replay.lines.length;
   addConversationNote(finished ? "■ Replay finished" : `■ Replay stopped${reason ? ` - ${reason}` : ""}`, "replay");
   appendLog(`(app) Replay ${finished ? "finished" : "stopped"}.`);
