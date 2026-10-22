@@ -13,7 +13,11 @@
 //
 // Files: a voice command from the SD card (command_NNNN.pcm - raw 24 kHz
 // 16-bit mono, the mic's own samples) or any 16-bit PCM .wav (mono or
-// stereo, any sample rate - mixed to mono and resampled to 24 kHz). The
+// stereo, any sample rate - mixed to mono and resampled to 24 kHz; a higher
+// rate such as 44.1 or 48 kHz is low-pass filtered at ~11 kHz first, so
+// sound above the 24 kHz output's 12 kHz limit doesn't fold down into the
+// band the detector analyses, the way the mic's own filter keeps it out on
+// the board). The
 // laptop app's "Download WAV" of a voice command is 24 kHz already; pick
 // its plain variant (not gained) so the levels match what the board's
 // detector sees. (Step 30's recordings went through mu-law in the mic
@@ -22,6 +26,19 @@
 //   --frames      also prints every 20 ms frame's analysis as CSV
 //   --captures    writes each recording that would be sent (or discarded)
 //                 as a WAV file into that folder, to listen to the result
+//
+// What this harness does NOT model - its results are the detector's
+// decisions on each clip, not exactly what the board would do while
+// listening to the same sound for real:
+//   - The pause: after kMaxDiscardsInARow (3) discards in a row the board
+//     stops listening for kDiscardPauseMs (5 s, hands_free_utils.h); here
+//     the next utterance in the file is judged right away.
+//   - The re-arm delay: after a sent utterance the board listens again only
+//     once the reply has played and kCooldownMs has passed; here the
+//     detector restarts on the very next frame.
+//   - The room-adapted noise floor: each file starts a fresh detector at
+//     its initial floor, while the board's detector keeps the floor it has
+//     learned in the room from one arming to the next.
 
 #include <math.h>
 #include <stdint.h>
@@ -67,7 +84,45 @@ uint32_t readU32(const uint8_t* at) {
   return static_cast<uint32_t>(at[0] | (at[1] << 8) | (at[2] << 16) | (static_cast<uint32_t>(at[3]) << 24));
 }
 
-/** Linear-interpolation resample of mono samples to kSampleRateHz. */
+// The anti-aliasing low-pass before downsampling: a windowed-sinc (Blackman)
+// FIR. At 48 kHz it passes up to 10 kHz flat, is -6 dB at 11 kHz and
+// -67 dB at 12 kHz, the output's Nyquist frequency (-77 dB at 44.1 kHz).
+constexpr int kAntiAliasTaps = 127;  // odd, so the filter has a center tap and adds no delay
+constexpr double kAntiAliasCutoffHz = 11000.0;
+constexpr double kPi = 3.14159265358979323846;
+
+/** Low-pass filters mono samples at source_rate below kSampleRateHz / 2,
+    so resampling them to kSampleRateHz doesn't alias. */
+std::vector<float> lowPassBeforeDownsampling(const std::vector<float>& mono, uint32_t source_rate) {
+  const double cutoff = kAntiAliasCutoffHz / source_rate;  // in cycles per sample
+  const int half_taps = kAntiAliasTaps / 2;
+  std::vector<double> taps(kAntiAliasTaps);
+  double taps_sum = 0.0;
+  for (int tap = 0; tap < kAntiAliasTaps; tap++) {
+    int offset = tap - half_taps;
+    double sinc = offset == 0 ? 2.0 * cutoff : sin(2.0 * kPi * cutoff * offset) / (kPi * offset);
+    double window = 0.42 - 0.5 * cos(2.0 * kPi * tap / (kAntiAliasTaps - 1)) +
+                    0.08 * cos(4.0 * kPi * tap / (kAntiAliasTaps - 1));
+    taps[tap] = sinc * window;
+    taps_sum += taps[tap];
+  }
+  for (double& value : taps) value /= taps_sum;  // unity gain at 0 Hz, so levels don't change
+  const long sample_count = static_cast<long>(mono.size());
+  std::vector<float> filtered(mono.size());
+  for (long index = 0; index < sample_count; index++) {
+    double sum = 0.0;
+    for (int tap = 0; tap < kAntiAliasTaps; tap++) {
+      long source = index + tap - half_taps;
+      if (source >= 0 && source < sample_count) sum += taps[tap] * mono[source];  // silence past either end
+    }
+    filtered[index] = static_cast<float>(sum);
+  }
+  return filtered;
+}
+
+/** Linear-interpolation resample of mono samples to kSampleRateHz. Expects
+    audio already band-limited below kSampleRateHz / 2 when source_rate is
+    higher (lowPassBeforeDownsampling). */
 std::vector<int16_t> resampleTo24k(const std::vector<float>& mono, uint32_t source_rate) {
   std::vector<int16_t> out;
   if (mono.empty()) return out;
@@ -138,8 +193,10 @@ bool loadAudio(const std::string& path, std::vector<int16_t>* samples) {
   if (rate == kSampleRateHz) {
     samples->resize(frames);
     for (size_t frame = 0; frame < frames; frame++) (*samples)[frame] = static_cast<int16_t>(mono[frame]);
+  } else if (rate > kSampleRateHz) {
+    *samples = resampleTo24k(lowPassBeforeDownsampling(mono, rate), rate);
   } else {
-    *samples = resampleTo24k(mono, rate);
+    *samples = resampleTo24k(mono, rate);  // upsampling adds nothing above the source's own limit
   }
   return true;
 }
