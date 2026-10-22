@@ -2429,9 +2429,11 @@ const STAGE_TEXT = {
 
 /** Redraws the five health lights from the board's @@STAGE lines. The time
     sync has no light of its own: until it's done it shows on OpenAI's, since
-    there's no secure connection without it. */
+    there's no secure connection without it. Shown while a board is
+    connected or a log is being replayed. */
 function renderHealth() {
   const stages = state.board.stages;
+  const live = link.connected || state.replayActive;
   const shown = { ...stages };
   const time = stages.time;
   if (time && time.state !== "ok" && (!stages.openai || stages.openai.state === "pending")) {
@@ -2439,20 +2441,20 @@ function renderHealth() {
   }
   for (const [name, element] of Object.entries(elements.checks)) {
     const stage = shown[name];
-    const stageState = link.connected && stage ? stage.state : "unknown";
+    const stageState = live && stage ? stage.state : "unknown";
     element.dataset.state = stageState;
     let detail = stage && stage.detail ? stage.detail : (STAGE_TEXT[name][stageState] || "-");
     if (name === "wifi" && stageState === "ok" && state.board.wifiRssi !== null) {
       detail += ` · ${state.board.wifiRssi} dBm`;
     }
-    element.querySelector(".check-detail").textContent = link.connected ? detail : "-";
+    element.querySelector(".check-detail").textContent = live ? detail : "-";
   }
   const rssi = state.board.wifiRssi;
-  const bars = !link.connected || rssi === null || !stages.wifi || stages.wifi.state !== "ok" ? 0
+  const bars = !live || rssi === null || !stages.wifi || stages.wifi.state !== "ok" ? 0
     : rssi >= -55 ? 4 : rssi >= -67 ? 3 : rssi >= -75 ? 2 : 1;
   [...elements.wifiBars.children].forEach((bar, index) => bar.classList.toggle("on", index < bars));
 
-  if (!link.connected) return;
+  if (!live) return;
   const all = ["sd", "mic", "speaker", "wifi", "time", "openai"].map((name) => stages[name]);
   if (!all.some(Boolean)) return;
   const failed = all.filter((stage) => stage && stage.state === "fail").length;
