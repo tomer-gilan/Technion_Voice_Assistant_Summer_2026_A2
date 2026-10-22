@@ -6,9 +6,10 @@
 // cancels it. Off until switched on (BUTTON on), and the choice is kept in
 // flash - a board that hasn't been tested with it behaves as before.
 //
-// Debounced with a saturating counter sampled every kButtonSampleMs: a
-// press counts once kButtonDebounceSamples samples in a row agree, so a
-// glitch only nudges the counter instead of restarting a timer.
+// Debounced with a saturating counter sampled every kButtonSampleMs by a
+// periodic esp_timer (so a slow loop() pass doesn't stretch it): a press
+// counts once kButtonDebounceSamples samples in a row agree, so a glitch
+// only nudges the counter instead of restarting a timer.
 //
 // Status line: @@BUTTON <on|off>. Command: BUTTON on|off.
 
