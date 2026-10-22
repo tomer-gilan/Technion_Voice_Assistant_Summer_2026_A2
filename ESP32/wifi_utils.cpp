@@ -21,7 +21,7 @@ constexpr unsigned long kSignalReportIntervalMs = 10000;
 // (network not found, beacon or handshake timeouts) but not after a failed
 // authentication - so this is only a slow backstop, well apart from the
 // core's own retries.
-constexpr unsigned long kRestartConnectAfterMs = 60000;
+constexpr unsigned long kRestartConnectAfterMs = esp32va_params::kWifiRestartConnectAfterMs;
 constexpr size_t kStageDetailBufferSize = 64;
 constexpr size_t kMaxSsidLength = 32;      // 802.11 limit
 constexpr size_t kMaxPasswordLength = 64;  // WPA2 limit
@@ -123,9 +123,9 @@ void startTimeSync() {
   // wins when defined: configTzTime() sets TZ and calls tzset(), so summer
   // time follows; otherwise the fixed TIMEZONE_UTC_OFFSET_SEC.
 #ifdef TIMEZONE_POSIX
-  configTzTime(TIMEZONE_POSIX, "pool.ntp.org", "time.nist.gov");
+  configTzTime(TIMEZONE_POSIX, esp32va_params::kNtpServer1, esp32va_params::kNtpServer2);
 #else
-  configTime(TIMEZONE_UTC_OFFSET_SEC, 0, "pool.ntp.org", "time.nist.gov");
+  configTime(TIMEZONE_UTC_OFFSET_SEC, 0, esp32va_params::kNtpServer1, esp32va_params::kNtpServer2);
 #endif
 }
 

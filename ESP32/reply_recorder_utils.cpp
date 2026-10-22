@@ -11,6 +11,7 @@
 #include <unistd.h>
 #include "i2s_audio_utils.h"
 #include "log_utils.h"
+#include "parameters.h"
 #include "sd_card_utils.h"
 
 namespace esp32va_reply_recorder {
@@ -26,7 +27,7 @@ constexpr size_t kMaxPathLen = 64;
 // If a reply's audio stops and its response.done never comes (e.g. the
 // turn timed out), close the file anyway rather than holding off LISTEN
 // forever. Far longer than any backpressure pause between deltas.
-constexpr unsigned long kStalledReplyTimeoutMs = 20000;
+constexpr unsigned long kStalledReplyTimeoutMs = esp32va_params::kStalledReplyRecordingTimeoutMs;
 
 enum class RecorderState {
   kIdle,

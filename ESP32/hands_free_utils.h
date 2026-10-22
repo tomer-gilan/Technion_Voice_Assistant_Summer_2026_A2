@@ -39,8 +39,8 @@
 namespace esp32va_hands_free {
 
 constexpr uint32_t kCooldownMs = esp32va_params::kHandsFreeCooldownMs;  // idle this long before listening: the speaker's last 150 ms + echo
-constexpr uint32_t kMaxDiscardsInARow = 3;
-constexpr uint32_t kDiscardPauseMs = 5000;
+constexpr uint32_t kMaxDiscardsInARow = esp32va_params::kHandsFreeMaxDiscardsInARow;
+constexpr uint32_t kDiscardPauseMs = esp32va_params::kHandsFreeDiscardPauseMs;
 
 /** Loads the saved settings (off, sensitivity 3, 1000 ms by default) and
     applies them. Call once from setup(). */

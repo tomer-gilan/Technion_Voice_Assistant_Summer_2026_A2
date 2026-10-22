@@ -17,8 +17,8 @@ namespace esp32va_clock {
 namespace {
 
 constexpr long kMaxTimerSeconds = esp32va_params::kMaxTimerSeconds;
-constexpr int kAlarmBeeps = 3;
-constexpr uint32_t kAlarmGapMs = 150;       // LED off, silence, between two beeps
+constexpr int kAlarmBeeps = esp32va_params::kTimerAlarmBeeps;
+constexpr uint32_t kAlarmGapMs = esp32va_params::kTimerAlarmGapMs;  // LED off, silence, between two beeps
 constexpr int kEarliestPlausibleYear = 2024;  // before this the clock was never synced
 constexpr size_t kToolResponseBufferSize = 384;  // the JSON around it, a ~40-char call_id and the longest output (~140 chars), with room to spare
 char tool_response_message[kToolResponseBufferSize];

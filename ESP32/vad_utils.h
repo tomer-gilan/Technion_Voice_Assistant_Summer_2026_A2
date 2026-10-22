@@ -2,6 +2,7 @@
 
 #include <stddef.h>
 #include <stdint.h>
+#include "parameters.h"
 
 // Voice activity detection for hands-free listening (step 30): looks at the
 // mic 20 ms at a time and decides when someone starts talking to the board
@@ -47,12 +48,12 @@ constexpr uint32_t kFrameSamples = kSampleRateHz * kFrameMs / 1000;  // 480
 // quieter speech, and to more noise).
 constexpr uint8_t kMinSensitivity = 1;
 constexpr uint8_t kMaxSensitivity = 5;
-constexpr uint8_t kDefaultSensitivity = 3;
+constexpr uint8_t kDefaultSensitivity = esp32va_params::kDefaultVadSensitivity;
 
 // How long a silence ends an utterance.
-constexpr uint32_t kMinHangoverMs = 600;
-constexpr uint32_t kMaxHangoverMs = 1500;
-constexpr uint32_t kDefaultHangoverMs = 1000;
+constexpr uint32_t kMinHangoverMs = esp32va_params::kMinVadHangoverMs;
+constexpr uint32_t kMaxHangoverMs = esp32va_params::kMaxVadHangoverMs;
+constexpr uint32_t kDefaultHangoverMs = esp32va_params::kDefaultVadHangoverMs;
 
 // The longest utterance, lead-in included - a safety cap, so a noise the
 // floor hasn't adapted to yet can't keep a recording open forever.

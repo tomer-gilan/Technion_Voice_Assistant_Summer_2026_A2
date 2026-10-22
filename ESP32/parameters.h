@@ -1,9 +1,12 @@
 #pragma once
 
-// Every hard-coded parameter of the firmware - changing one of these needs a
-// compile and an upload. Settings the user can change at run time (volume,
-// LED brightness, light thresholds, hands-free, Wi-Fi network...) are set from
-// the control center instead and kept in flash; see Parameters/parameters.md.
+// The firmware's hard-coded parameters - everything a user might want to
+// tune; changing one of these needs a compile and an upload. Algorithm
+// internals (the voice detector's thresholds, buffer sizes, tones...) stay
+// next to their code; Parameters/parameters.md lists them too. Settings the
+// user can change at run time (volume, LED brightness, light thresholds,
+// hands-free, Wi-Fi network...) are set from the control center instead and
+// kept in flash; see Parameters/parameters.md.
 // Secrets (Wi-Fi password, API key) are in SECRETS.h, not here.
 //
 // Pure C++ on purpose (no Arduino headers): tools/vad_replay.cpp compiles
@@ -46,6 +49,10 @@
 // gpt-realtime-2.1-mini is the cheaper line ($10/1M input, $20/1M output
 // audio tokens). gpt-realtime-2.1 is the bigger model.
 #define OPENAI_MODEL "gpt-realtime-2.1-mini"
+#define OPENAI_VOICE "alloy"  // the assistant's voice
+// Writes down what the user said (the "You said" / chat bubble text) - a
+// separate model from the one that answers; it doesn't change the answer.
+#define OPENAI_TRANSCRIPTION_MODEL "gpt-4o-mini-transcribe"
 
 // ----- Clock -----
 // The board's local time zone, as a POSIX TZ string: Israel, with summer
@@ -68,19 +75,47 @@ constexpr uint32_t kManualRecordDurationSec = 3;  // Talk / LISTEN / the BOOT bu
 // at full scale; x2 doesn't. Must match control_center.html's BOARD_MIC_GAIN.
 constexpr int32_t kMicSoftwareGain = 2;
 constexpr uint32_t kHandsFreeCooldownMs = 600;  // after the board speaks, the mic waits this long (its own echo)
+// Hands-free: this many sounds in a row that turned out not to be speech
+// pause listening for kHandsFreeDiscardPauseMs, instead of streaming more
+// noise to OpenAI.
+constexpr uint32_t kHandsFreeMaxDiscardsInARow = 3;
+constexpr uint32_t kHandsFreeDiscardPauseMs = 5000;
+// Hands-free sensitivity (VAD_SENSITIVITY, 1-5) until changed and saved:
+// 1 needs the clearest, loudest speech, 5 also reacts to quieter speech
+// (and to more noise).
+constexpr uint8_t kDefaultVadSensitivity = 3;
+// How long a silence ends a hands-free sentence (VAD_HANGOVER): the range
+// the control center allows, and the default until changed and saved.
+constexpr uint32_t kMinVadHangoverMs = 600;
+constexpr uint32_t kMaxVadHangoverMs = 1500;
+constexpr uint32_t kDefaultVadHangoverMs = 1000;
+// ASK <text>: a longer typed question is cut. Bytes, not characters - UTF-8,
+// so a Hebrew letter takes 2 (about 100 of them fit).
+constexpr unsigned int kMaxTypedQuestionBytes = 200;
 
 // ----- Replies -----
 // No word from the server for this long while a reply is due fails the
 // LISTEN (an inactivity timeout, not a cap on the reply's length).
 constexpr unsigned long kReplyTimeoutMs = 15000;
+// A reply recording whose audio stopped and whose end never came (e.g. the
+// question timed out) is closed after this long anyway, so it doesn't hold
+// off the next LISTEN.
+constexpr unsigned long kStalledReplyRecordingTimeoutMs = 20000;
 
 // ----- Connection -----
 constexpr unsigned long kWifiBootWaitMs = 20000;  // setup() waits this long for Wi-Fi, then goes on without it
 constexpr unsigned long kTimeSyncBootWaitMs = 15000;  // and this long for the clock (NTP)
-// Failed attempts in a row (the boot wait, then one a minute) on a Wi-Fi
-// network saved from the control center before the board tries SECRETS.h's
-// network instead - and back the same way. In RAM only: the saved network
-// stays in flash for the next boot.
+// Wi-Fi down this long since the last attempt started: start over on the
+// network (the ESP32 core retries by itself after most failures, but not a
+// failed password) - a slow backstop, well apart from the core's retries.
+constexpr unsigned long kWifiRestartConnectAfterMs = 60000;
+// The time servers (SNTP) - the clock TLS needs, and the board's local time.
+constexpr char kNtpServer1[] = "pool.ntp.org";
+constexpr char kNtpServer2[] = "time.nist.gov";
+// Failed attempts in a row (the boot wait, then one every
+// kWifiRestartConnectAfterMs) on a Wi-Fi network saved from the control
+// center before the board tries SECRETS.h's network instead - and back the
+// same way. In RAM only: the saved network stays in flash for the next boot.
 constexpr uint32_t kWifiAttemptsBeforeFallback = 2;
 // Failed OpenAI connections in a row (backing off 1, 2, 4, 8... s) before
 // the board reports itself offline. It keeps retrying after that, every
@@ -107,6 +142,8 @@ constexpr int kVoiceVolumeStepPercent = 20;  // "louder" / "quieter"
 
 // ----- Timer -----
 constexpr long kMaxTimerSeconds = 3600;
+constexpr int kTimerAlarmBeeps = 3;          // when the timer rings: this many beeps, with the LED blinking
+constexpr uint32_t kTimerAlarmGapMs = 150;   // LED off, silence, between two beeps
 
 // ----- SD card -----
 constexpr uint32_t kMaxKeptRecordings = 5;  // newest replies and voice commands kept, each
