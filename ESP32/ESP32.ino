@@ -159,6 +159,11 @@ bool setup_finished = false;  // setup() returned - "offline" means something on
 bool openai_connection_started = false;  // see startOpenAiConnectionWhenNetworkReady()
 bool offline_announced = false;  // went offline (sound asked for, retries slowed) - "back online" is due once ready
 bool wifi_was_up = false;  // see dropDeadSocketOnWifiLoss()
+// Wi-Fi just came back: OpenAI is retried every second for a short while,
+// then at the offline pace again - see dropDeadSocketOnWifiLoss().
+constexpr unsigned long kWifiReturnFastRetryMs = 10000;
+bool wifi_return_fast_retry = false;
+unsigned long wifi_returned_ms = 0;
 
 // Everything below, up to setup(), stays in this file's anonymous namespace
 // too - only setup() and loop() must be global (the Arduino core calls them).
@@ -1276,12 +1281,20 @@ bool isAssistantOffline() {
     OpenAI is dead, but the library only notices on its next failed send.
     Closing it right away runs the usual disconnect path: a LISTEN in
     progress fails, the state shows reconnecting / offline, and the
-    connection is retried once Wi-Fi is back. */
+    connection is retried once Wi-Fi is back. When Wi-Fi comes back (or a
+    new network connects), the reconnect backoff starts over, so OpenAI is
+    retried at once instead of after the offline pace's ~30 s. */
 void dropDeadSocketOnWifiLoss() {
   bool wifi_up = esp32va_wifi::isWifiConnected();
   if (wifi_was_up && !wifi_up && webSocket.isConnected()) {
     LOG_INFO("Wi-Fi is down - closing the OpenAI connection, it can't be alive.\n");
     webSocket.disconnect();
+  }
+  if (!wifi_was_up && wifi_up && openai_connection_started && !webSocket.isConnected()) {
+    LOG_INFO("Wi-Fi is back - reconnecting to OpenAI now.\n");
+    esp32va_openai::resetReconnectBackoff(webSocket);
+    wifi_return_fast_retry = true;
+    wifi_returned_ms = millis();
   }
   wifi_was_up = wifi_up;
 }
@@ -1306,9 +1319,20 @@ void updatePipelineState() {
       // connect attempt) every second.
       webSocket.setReconnectInterval(esp32va_openai::addJitter(esp32va_openai::offlineRetryIntervalMs()));
     }
+  } else if (offline_now && wifi_return_fast_retry && esp32va_wifi::isWifiConnected() &&
+             millis() - wifi_returned_ms >= kWifiReturnFastRetryMs) {
+    // Wi-Fi is back but OpenAI still isn't (e.g. no internet): back to the
+    // offline pace, for the same reason as above.
+    wifi_return_fast_retry = false;
+    LOG_DEBUG("OpenAI still unreachable %lu s after Wi-Fi came back - retrying every %lu s again.\n",
+              kWifiReturnFastRetryMs / 1000, esp32va_openai::offlineRetryIntervalMs() / 1000);
+    webSocket.setReconnectInterval(esp32va_openai::addJitter(esp32va_openai::offlineRetryIntervalMs()));
   } else if (session_ready && offline_announced) {
     offline_announced = false;
     esp32va_controls::requestStatusSound(esp32va_controls::StatusSound::kOnline);
+  }
+  if (session_ready) {
+    wifi_return_fast_retry = false;
   }
   if (!session_ready) {
     if (setup_finished && !esp32va_wifi::isWifiConnected()) {
@@ -1450,6 +1474,7 @@ void setup() {
                   "and the controls work.\n");
   }
   session_not_ready_since_ms = millis();
+  wifi_was_up = esp32va_wifi::isWifiConnected();  // so loop() doesn't take boot for "Wi-Fi is back"
   setup_finished = true;
 }
 
