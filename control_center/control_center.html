@@ -353,6 +353,7 @@
   .orb[data-state="processing"]::after, .orb[data-state="tool"]::after, .orb[data-state="reconnecting"]::after,
   .orb[data-state="booting"]::after { border-style: dashed; animation: spin 2.4s linear infinite; }
   .orb[data-state="speaking"], .orb[data-state="saving"] { background: var(--accent-soft); color: var(--accent); }
+  .orb[data-state="netdown"] { background: var(--error-soft); color: var(--error); }
   .orb[data-state="speaking"]::after { animation: pulse 1.6s ease-out infinite; }
   .orb[data-state="error"], .orb[data-state="halted"] { background: var(--error-soft); color: var(--error); }
   /* A second ring that follows the voice level (--level, 0..1) while listening or waiting for speech */
@@ -487,6 +488,8 @@
   .band-day { background: color-mix(in srgb, var(--ok) 22%, var(--panel)); }
   .needle { position: absolute; top: 0; bottom: 0; width: 3px; border-radius: 2px; background: var(--text); transition: left 0.3s; }
   .thresholds { display: flex; gap: 10px; flex-wrap: wrap; align-items: end; }
+  .thresholds input.wide { width: 150px; font-family: inherit; }
+  .board-options { display: flex; flex-direction: column; gap: 6px; }
   .thresholds label { display: flex; flex-direction: column; gap: 2px; font-size: 12px; color: var(--muted); }
   .thresholds input {
     width: 92px; font: 13px var(--mono); padding: 5px 7px; border-radius: 6px;
@@ -773,6 +776,26 @@
         </div>
         <p class="control-note" id="light-note" aria-live="polite"></p>
       </div>
+      <div class="control" id="board-options-control" hidden>
+        <div class="control-title"><span>On the board itself <span style="font-weight:400;color:var(--muted)">(without the laptop)</span></span></div>
+        <div class="board-options">
+          <label class="toggle" id="talk-button-option" hidden><input id="talk-button" type="checkbox" disabled> BOOT button is a Talk button (press again to cancel)</label>
+          <label class="toggle" id="status-sounds-option" hidden><input id="status-sounds" type="checkbox" disabled> Status sounds: offline, back online, a failed question</label>
+        </div>
+      </div>
+      <div class="control" id="wifi-control" hidden>
+        <div class="control-title">
+          <span>Wi-Fi network</span>
+          <span style="font-weight:400;font-size:13px;color:var(--muted)">using <b id="wifi-net">-</b></span>
+        </div>
+        <div class="thresholds">
+          <label>Network name<input id="wifi-ssid" class="wide" type="text" maxlength="32" autocomplete="off" spellcheck="false" disabled></label>
+          <label>Password<input id="wifi-password" class="wide" type="password" maxlength="64" autocomplete="new-password" disabled></label>
+          <button id="wifi-save" type="button" disabled>Save &amp; connect</button>
+          <button id="wifi-forget" type="button" disabled>Back to default</button>
+        </div>
+        <p class="control-note" id="wifi-note" aria-live="polite">Saved in the board's flash - no compile needed. 2.4 GHz networks only; leave the password empty for an open network.</p>
+      </div>
     </section>
 
     <section class="panel" aria-labelledby="try-heading">
@@ -955,7 +978,8 @@ const SAFE_FILE_NAME = /^[A-Za-z0-9_-][A-Za-z0-9_.-]{0,30}$/;  // a plain name, 
 // Status and controls (step 28) - the board's side is ESP32/status_report_utils.h.
 const STATUS_TAGS = new Set(["@@STAGE", "@@STATE", "@@RESULT", "@@MIC_LEVEL", "@@HEARD", "@@SAID", "@@WIFI",
                              "@@LED", "@@VOLUME", "@@LIGHT", "@@BEEP", "@@VAD", "@@VAD_LEVEL", "@@VAD_EVENT",
-                             "@@TIMING", "@@BOOT_TIMING", "@@TIMER", "@@CLOCK"]);
+                             "@@TIMING", "@@BOOT_TIMING", "@@TIMER", "@@CLOCK", "@@WIFI_NET", "@@BUTTON",
+                             "@@SOUNDS"]);
 const STATUS_REQUEST_DELAY_MS = 400;   // after connecting, ask for the full picture
 const NO_STATUS_HINT_MS = 4000;        // no @@STATE by then: the board runs older firmware
 const TALK_START_TIMEOUT_MS = 2500;
@@ -992,6 +1016,7 @@ const STATE_TEXT = {
   speaking: ["Speaking", "Playing the reply on the speaker."],
   saving: ["Speaking", "Saving the reply to the SD card."],
   reconnecting: ["Reconnecting", "Lost the connection to OpenAI."],
+  netdown: ["Offline", "No connection - the board keeps retrying. The timer and the controls still work."],
   halted: ["Stopped", "The board stopped - see the log."],
   error: ["Error", ""],
 };
@@ -1542,6 +1567,18 @@ const elements = {
   volumeValue: document.getElementById("volume-value"),
   volumeNote: document.getElementById("volume-note"),
   mute: document.getElementById("mute"),
+  boardOptionsControl: document.getElementById("board-options-control"),
+  talkButtonOption: document.getElementById("talk-button-option"),
+  talkButton: document.getElementById("talk-button"),
+  statusSoundsOption: document.getElementById("status-sounds-option"),
+  statusSounds: document.getElementById("status-sounds"),
+  wifiControl: document.getElementById("wifi-control"),
+  wifiNet: document.getElementById("wifi-net"),
+  wifiSsid: document.getElementById("wifi-ssid"),
+  wifiPassword: document.getElementById("wifi-password"),
+  wifiSave: document.getElementById("wifi-save"),
+  wifiForget: document.getElementById("wifi-forget"),
+  wifiNote: document.getElementById("wifi-note"),
   beep: document.getElementById("beep"),
   ledControl: document.getElementById("led-control"),
   led: document.getElementById("led"),
@@ -2233,7 +2270,10 @@ function handleStatusLine(tag, rest) {
     case "STATE": {
       clearTimeout(board.noStatusTimer);
       const wasRunning = Boolean(board.pipeline) && board.pipeline.state !== "booting";
-      board.pipeline = { state: words[0], detail: words.slice(1).join(" ") };
+      // The board's "offline" (no Wi-Fi / no OpenAI) is shown as "netdown": the
+      // app's own "offline" already means "no board connected".
+      const boardState = words[0] === "offline" ? "netdown" : words[0];
+      board.pipeline = { state: boardState, detail: words.slice(1).join(" ") };
       if (wasRunning && words[0] === "booting") {
         elements.result.className = "result";
         elements.result.textContent = "The board restarted.";
@@ -2318,6 +2358,18 @@ function handleStatusLine(tag, rest) {
       usage.bootMs = Number(parseKeyValues(rest).total_ms);
       renderUsage();
       break;
+    case "WIFI_NET":
+      board.wifiNet = { source: words[0], ssid: words.slice(1).join(" ") };
+      renderBoardOptions();
+      break;
+    case "BUTTON":
+      board.talkButton = words[0] === "on";
+      renderBoardOptions();
+      break;
+    case "SOUNDS":
+      board.statusSounds = words[0] === "on";
+      renderBoardOptions();
+      break;
     default:
       break;
   }
@@ -2357,6 +2409,7 @@ function resetBoardStatus(shownState) {
   renderLight();
   renderVad();
   renderTimer();
+  renderBoardOptions();
   elements.vadNote.textContent = VAD_NOTE_DEFAULT;
   updateControlsEnabled();
 }
@@ -2452,6 +2505,7 @@ function showPipelineState(shownState, detail) {
   let detailText = defaultDetail;
   if (shownState === "tool" && detail) detailText = `${TOOL_LABELS[detail] || detail}…`;
   else if (shownState === "reconnecting" && detail) detailText = `Lost the connection to OpenAI - ${detail}.`;
+  else if (shownState === "netdown" && detail) detailText = `Offline - ${detail}. It keeps retrying; the timer and the controls still work.`;
   else if ((shownState === "halted" || shownState === "error") && detail) detailText = detail;
   else if (shownState === "speaking" && detail === "greeting") detailText = "Playing the opening greeting.";
   else if (shownState === "speaking" && detail === "timer") detailText = "Saying that the timer is done.";
@@ -2764,6 +2818,54 @@ function updateControlsEnabled() {
   elements.vad.disabled = !connected || !board.vad;
   elements.vadSensitivity.disabled = !connected || !board.vad;
   elements.vadHangover.disabled = !connected || !board.vad;
+  elements.talkButton.disabled = !connected || board.talkButton === undefined;
+  elements.statusSounds.disabled = !connected || board.statusSounds === undefined;
+  for (const input of [elements.wifiSsid, elements.wifiPassword, elements.wifiSave, elements.wifiForget]) {
+    input.disabled = !connected || !board.wifiNet;
+  }
+}
+
+/** The board-only options (BOOT button, status sounds) and the Wi-Fi card,
+    each shown once the board has reported it (older firmware doesn't). */
+function renderBoardOptions() {
+  const board = state.board;
+  const hasButton = board.talkButton !== undefined;
+  const hasSounds = board.statusSounds !== undefined;
+  elements.talkButtonOption.hidden = !hasButton;
+  elements.statusSoundsOption.hidden = !hasSounds;
+  elements.boardOptionsControl.hidden = !hasButton && !hasSounds;
+  elements.talkButton.checked = Boolean(board.talkButton);
+  elements.statusSounds.checked = Boolean(board.statusSounds);
+  elements.wifiControl.hidden = !board.wifiNet;
+  if (board.wifiNet) {
+    elements.wifiNet.textContent = `${board.wifiNet.ssid} (${board.wifiNet.source === "saved" ? "saved here" : "default"})`;
+  }
+  updateControlsEnabled();
+}
+
+/** Saves a Wi-Fi network on the board: WIFI_SSID, then WIFI_PASSWORD - which
+    saves both and connects. The password never reaches the log. */
+async function saveWifiNetwork() {
+  const ssid = elements.wifiSsid.value.trim();
+  const password = elements.wifiPassword.value;
+  if (!ssid) {
+    elements.wifiNote.textContent = "Type the network's name first.";
+    return;
+  }
+  if (password.length > 0 && password.length < 8) {
+    elements.wifiNote.textContent = "A Wi-Fi password is at least 8 characters (or none for an open network).";
+    return;
+  }
+  try {
+    await link.send(`WIFI_SSID ${ssid}`);
+    appendLog(`>> WIFI_SSID ${ssid}`);
+    await link.send(password ? `WIFI_PASSWORD ${password}` : "WIFI_PASSWORD");
+    appendLog(password ? ">> WIFI_PASSWORD ********" : ">> WIFI_PASSWORD");
+    elements.wifiPassword.value = "";
+    elements.wifiNote.textContent = `Saved - the board is connecting to ${ssid}. If it can't, it says so in Board health.`;
+  } catch (error) {
+    elements.wifiNote.textContent = `Not sent: ${error.message}`;
+  }
 }
 
 /** Sends a control command once the user pauses dragging a slider. */
@@ -3877,6 +3979,13 @@ elements.volume.addEventListener("input", () => {
   sendSoon("volume", `VOLUME ${elements.volume.value}`);
 });
 elements.mute.addEventListener("change", () => sendCommand(`MUTE ${elements.mute.checked ? "on" : "off"}`));
+elements.talkButton.addEventListener("change", () => sendCommand(`BUTTON ${elements.talkButton.checked ? "on" : "off"}`));
+elements.statusSounds.addEventListener("change", () => sendCommand(`SOUNDS ${elements.statusSounds.checked ? "on" : "off"}`));
+elements.wifiSave.addEventListener("click", saveWifiNetwork);
+elements.wifiForget.addEventListener("click", () => {
+  sendCommand("WIFI_FORGET");
+  elements.wifiNote.textContent = "Back to the default network (from SECRETS.h) - connecting.";
+});
 elements.beep.addEventListener("click", () => {
   elements.volumeNote.textContent = "Beeping…";
   sendCommand("BEEP");
