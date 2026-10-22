@@ -95,15 +95,23 @@ def write_csv(path, rows):
         writer.writerows(rows)
 
 
+def uses_missing_marker(key):
+    """False for the fields where -1 is a real reading, not 'never happened': a mic level
+    (mic_peak_dbfs = -1.0 is a loud, near-clipping turn) or a Wi-Fi strength in dBm."""
+    return not (key.endswith("_dbfs") or key == "rssi")
+
+
 def numeric_values(rows, key):
-    """The key's values that parse as numbers, without the firmware's -1 'never happened'."""
+    """The key's values that parse as numbers, without the firmware's -1 'never happened'
+    for the fields that use it (uses_missing_marker)."""
+    drop_missing = uses_missing_marker(key)
     values = []
     for row in rows:
         try:
             value = float(row.get(key, ""))
         except ValueError:
             continue
-        if value != MISSING:
+        if not (drop_missing and value == MISSING):
             values.append(value)
     return values
 
@@ -169,7 +177,8 @@ def main():
         f"Logs: {', '.join(path.name for path in arguments.logs)}",
         f"LISTEN cycles: {len(turns)} ({len(passed)} passed, {len(turns) - len(passed)} failed). "
         "Times in ms; *_after_rec_ms counts from the end of recording (for a hands-free LISTEN: the commit, "
-        "eos_to_commit_ms after the speaker stopped). -1 values are left out.",
+        "eos_to_commit_ms after the speaker stopped). -1 values (never happened) are left out, "
+        "except in the *_dbfs and rssi fields, where -1 is a real reading.",
         "",
         summary_table("Boot", boots, skip),
         summary_table(f"Passed {manual}LISTENs, no tool call", without_tool, skip),
