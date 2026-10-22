@@ -6,7 +6,11 @@
 #include <stdint.h>
 #include <math.h>
 #include <driver/i2s.h>
-#include "config.h"
+// Pins - the same as ESP32/parameters.h (each unit test stands alone, so it
+// carries its own copy).
+#define I2S_MIC_SERIAL_CLOCK     26  // INMP441 SCK
+#define I2S_MIC_LEFT_RIGHT_CLOCK 25  // INMP441 WS
+#define I2S_MIC_SERIAL_DATA      21  // INMP441 SD
 
 namespace {
 constexpr i2s_port_t kI2sPort = I2S_NUM_1;  // kept separate from the speaker's I2S_NUM_0 (see step 4)

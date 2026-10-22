@@ -1,9 +1,12 @@
 // Step 5 - Wi-Fi Connectivity
-// Connects to Wi-Fi using credentials from config.h, prints the assigned
+// Connects to Wi-Fi using the credentials below, prints the assigned
 // IP once connected, and reconnects automatically if the connection drops.
 
 #include <WiFi.h>
-#include "config.h"
+// Your network - fill in before uploading (2.4 GHz). Not committed with real
+// values; the firmware itself takes them from ESP32/SECRETS.h.
+#define WIFI_SSID     "your-network-name"
+#define WIFI_PASSWORD "your-network-password"
 
 namespace {
 constexpr uint32_t kReconnectRetryDelayMs = 2000;

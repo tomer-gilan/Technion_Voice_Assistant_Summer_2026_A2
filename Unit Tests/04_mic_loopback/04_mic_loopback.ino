@@ -3,18 +3,25 @@
 // (onboard LED on), then plays it back through the MAX98357A (LED off).
 // Confirms both peripherals work together over the single, physically
 // shared I2S clock bus (BCLK/LRC are wired to both modules - see
-// PROJECT_OVERVIEW.md "Pins & Connections"), using one I2S port rather
+// Documentation/decisions.md), using one I2S port rather
 // than two independent masters, which would otherwise fight over the same
 // clock pins.
 //
 // Note: buffering a whole clip in RAM is fine for this bring-up test (no
 // Wi-Fi/TLS loaded yet, so there's plenty of free heap), but the real
 // Gemini pipeline streams audio in small live chunks instead - see the
-// "Memory" gotcha in PROJECT_OVERVIEW.md.
+// memory notes in Documentation/decisions.md.
 
 #include <stdint.h>
 #include <driver/i2s.h>
-#include "config.h"
+// Pins - the same as ESP32/parameters.h (each unit test stands alone, so it
+// carries its own copy).
+#define I2S_BCLK 26             // shared: MAX98357A BCLK + INMP441 SCK
+#define I2S_LRC  25             // shared: MAX98357A LRC + INMP441 WS
+#define I2S_DOUT 22             // MAX98357A DIN
+#define I2S_MIC_SERIAL_DATA 21  // INMP441 SD
+#define LED_PIN 2               // onboard LED
+#define LED_ACTIVE_HIGH 1
 
 namespace {
 constexpr i2s_port_t kI2sPort = I2S_NUM_0;

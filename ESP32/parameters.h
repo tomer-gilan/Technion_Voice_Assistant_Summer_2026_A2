@@ -19,7 +19,7 @@
 #define I2S_DOUT    22  // to the MAX98357A DIN
 #define I2S_MIC_SERIAL_CLOCK     I2S_BCLK
 #define I2S_MIC_LEFT_RIGHT_CLOCK I2S_LRC
-#define I2S_MIC_SERIAL_DATA      21  // from the INMP441 SD (its L/R pin to GND: left channel)
+#define I2S_MIC_SERIAL_DATA      21  // from the INMP441 SD (read as I2S_CHANNEL_FMT_ONLY_RIGHT - step 3)
 
 #define SD_CS       5
 #define SD_SCLK     18

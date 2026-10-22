@@ -3,7 +3,11 @@
 
 #include <math.h>
 #include <driver/i2s.h>
-#include "config.h"
+// Pins - the same as ESP32/parameters.h (each unit test stands alone, so it
+// carries its own copy).
+#define I2S_BCLK 26  // MAX98357A BCLK
+#define I2S_LRC  25  // MAX98357A LRC
+#define I2S_DOUT 22  // MAX98357A DIN
 
 namespace {
 constexpr i2s_port_t kI2sPort = I2S_NUM_0;
