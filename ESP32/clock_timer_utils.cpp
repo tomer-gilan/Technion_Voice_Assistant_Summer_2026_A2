@@ -9,6 +9,7 @@
 #include "hands_free_utils.h"
 #include "i2s_audio_utils.h"
 #include "log_utils.h"
+#include "openai_realtime_utils.h"
 #include "parameters.h"
 #include "status_report_utils.h"
 
@@ -20,8 +21,6 @@ constexpr long kMaxTimerSeconds = esp32va_params::kMaxTimerSeconds;
 constexpr int kAlarmBeeps = esp32va_params::kTimerAlarmBeeps;
 constexpr uint32_t kAlarmGapMs = esp32va_params::kTimerAlarmGapMs;  // LED off, silence, between two beeps
 constexpr int kEarliestPlausibleYear = 2024;  // before this the clock was never synced
-constexpr size_t kToolResponseBufferSize = 384;  // the JSON around it, a ~40-char call_id and the longest output (~140 chars), with room to spare
-char tool_response_message[kToolResponseBufferSize];
 
 constexpr size_t kMaxLabelLength = 48;  // "check the oven" - a few words, said back out loud
 constexpr size_t kAnnouncementBufferSize = kMaxLabelLength + 200;  // the ~130-char template plus the spoken text (at most kMaxLabelLength + 32)
@@ -64,10 +63,7 @@ uint32_t secondsLeft() {
 
 /** Sends a tool's output text (ESP32.ino asks the model to say it once the call's response is done). */
 void sendToolOutput(WebSocketsClient& webSocket, const char* call_id, const char* output) {
-  snprintf(tool_response_message, kToolResponseBufferSize,
-           R"JSON({"type":"conversation.item.create","item":{"type":"function_call_output","call_id":"%s","output":"%s"}})JSON",
-           call_id, output);
-  webSocket.sendTXT(tool_response_message);
+  esp32va_openai::sendFunctionCallOutput(webSocket, call_id, output);
   LOG_DEBUG("Sent function_call_output (\"%s\").\n", output);
 }
 

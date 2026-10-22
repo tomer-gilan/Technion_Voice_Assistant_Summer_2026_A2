@@ -5,6 +5,7 @@
 #include <strings.h>
 #include "parameters.h"
 #include "log_utils.h"
+#include "openai_realtime_utils.h"
 #include "settings_store_utils.h"
 #include "status_report_utils.h"
 
@@ -49,9 +50,6 @@ int readLightSensor() {
   return static_cast<int>(sum / kSamplesPerReading) * 3 / 2;
 }
 #endif
-
-constexpr uint32_t kToolResponseBufferSize = 256;  // function_call_output messages are tiny - no audio involved
-char tool_response_message[kToolResponseBufferSize];
 
 /** Maps a light level to its part of the day ("day", "evening" or "night"). */
 const char* partOfDayForLightLevel(int light_value) {
@@ -202,10 +200,9 @@ bool handleGetTimeOfDayCall(JsonDocument& doc, WebSocketsClient& webSocket) {
   const char* part_of_day = partOfDayForLightLevel(g_light_sensor_value);
   LOG_INFO("Time of day asked - light sensor reads %d, so it's %s.\n", g_light_sensor_value, part_of_day);
 
-  snprintf(tool_response_message, kToolResponseBufferSize,
-           R"JSON({"type":"conversation.item.create","item":{"type":"function_call_output","call_id":"%s","output":"It is currently %s."}})JSON",
-           call_id, part_of_day);
-  webSocket.sendTXT(tool_response_message);
+  char output[32];
+  snprintf(output, sizeof(output), "It is currently %s.", part_of_day);
+  esp32va_openai::sendFunctionCallOutput(webSocket, call_id, output);
   LOG_DEBUG("Sent function_call_output (\"It is currently %s.\").\n",
             part_of_day);
   return true;

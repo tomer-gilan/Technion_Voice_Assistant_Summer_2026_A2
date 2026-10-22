@@ -42,6 +42,12 @@ constexpr unsigned long kOfflineRetryIntervalMs = esp32va_params::kOfflineRetryI
 
 uint32_t reconnect_attempts = 0;
 unsigned long reconnect_backoff_ms = kInitialBackoffMs;
+
+// One function_call_output message: the JSON around it, a ~40-char call_id
+// and the longest tool output (~140 chars, get_current_time / set_timer),
+// with room to spare. Static: no heap per tool call.
+constexpr size_t kToolResponseBufferSize = 384;
+char tool_response_message[kToolResponseBufferSize];
 }  // namespace
 
 namespace esp32va_openai {
@@ -105,6 +111,13 @@ bool isOffline() {
 
 unsigned long offlineRetryIntervalMs() {
   return kOfflineRetryIntervalMs;
+}
+
+void sendFunctionCallOutput(WebSocketsClient& webSocket, const char* call_id, const char* output) {
+  snprintf(tool_response_message, kToolResponseBufferSize,
+           R"JSON({"type":"conversation.item.create","item":{"type":"function_call_output","call_id":"%s","output":"%s"}})JSON",
+           call_id, output);
+  webSocket.sendTXT(tool_response_message);
 }
 
 void logGenericWsEvent(WStype_t type, uint8_t* payload, size_t length) {

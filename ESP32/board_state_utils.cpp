@@ -7,12 +7,10 @@
 #include "parameters.h"
 #include "device_controls_utils.h"
 #include "log_utils.h"
+#include "openai_realtime_utils.h"
 #include "status_report_utils.h"
 
 namespace {
-constexpr uint32_t kToolResponseBufferSize = 256;  // function_call_output messages are tiny - no audio involved
-char tool_response_message[kToolResponseBufferSize];
-
 // The LED is dimmed with PWM (the ESP32's LEDC peripheral). 5 kHz is far
 // above visible flicker; 8 bits gives 256 steps.
 constexpr uint32_t kLedPwmFrequencyHz = 5000;
@@ -99,10 +97,8 @@ bool handleSetBoardStateCall(JsonDocument& doc, WebSocketsClient& webSocket) {
     // Still answer the call, like the other tools - otherwise the model
     // waits on it and the user hears nothing.
     LOG_ERROR("set_board_state called without a valid led_on: %s\n", arguments_json);
-    snprintf(tool_response_message, kToolResponseBufferSize,
-             R"JSON({"type":"conversation.item.create","item":{"type":"function_call_output","call_id":"%s","output":"Error: led_on must be true or false - the LED was not changed."}})JSON",
-             call_id);
-    webSocket.sendTXT(tool_response_message);
+    esp32va_openai::sendFunctionCallOutput(webSocket, call_id,
+                                           "Error: led_on must be true or false - the LED was not changed.");
     return true;
   }
   bool led_on = led_on_value.as<bool>();
@@ -125,10 +121,7 @@ bool handleSetBoardStateCall(JsonDocument& doc, WebSocketsClient& webSocket) {
   } else {
     snprintf(output, sizeof(output), "LED turned %s", led_on ? "on" : "off");
   }
-  snprintf(tool_response_message, kToolResponseBufferSize,
-           R"JSON({"type":"conversation.item.create","item":{"type":"function_call_output","call_id":"%s","output":"%s"}})JSON",
-           call_id, output);
-  webSocket.sendTXT(tool_response_message);
+  esp32va_openai::sendFunctionCallOutput(webSocket, call_id, output);
   LOG_DEBUG("Sent function_call_output.\n");
   return true;
 }

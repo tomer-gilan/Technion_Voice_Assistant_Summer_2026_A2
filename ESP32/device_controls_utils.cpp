@@ -9,6 +9,7 @@
 #include "i2s_audio_utils.h"
 #include "command_parse_utils.h"
 #include "log_utils.h"
+#include "openai_realtime_utils.h"
 #include "parameters.h"
 #include "settings_store_utils.h"
 #include "status_report_utils.h"
@@ -34,8 +35,6 @@ constexpr uint32_t kFailedToneHz = 330;
 constexpr uint32_t kFailedToneMs = 250;
 
 constexpr int kVoiceVolumeStepPercent = esp32va_params::kVoiceVolumeStepPercent;  // "louder" / "quieter" by voice
-constexpr size_t kToolResponseBufferSize = 256;  // function_call_output messages are tiny - no audio involved
-char tool_response_message[kToolResponseBufferSize];
 
 uint8_t volume_percent = kDefaultVolumePercent;
 bool is_muted = false;
@@ -203,10 +202,7 @@ bool handleSetVolumeCall(JsonDocument& doc, WebSocketsClient& webSocket) {
   }
   if (!understood) {
     // Still answer the call, so the model says something instead of going quiet.
-    snprintf(tool_response_message, kToolResponseBufferSize,
-             R"JSON({"type":"conversation.item.create","item":{"type":"function_call_output","call_id":"%s","output":"Error: give percent (0-100) or step up or down"}})JSON",
-             call_id);
-    webSocket.sendTXT(tool_response_message);
+    esp32va_openai::sendFunctionCallOutput(webSocket, call_id, "Error: give percent (0-100) or step up or down");
     return true;
   }
   // Not below kMinVoiceVolumePercent by voice: at 0 the assistant couldn't
@@ -219,10 +215,9 @@ bool handleSetVolumeCall(JsonDocument& doc, WebSocketsClient& webSocket) {
   LOG_INFO("Speaker volume set to %u%% (voice command).\n", (unsigned)volume_percent);
   announceVolume();
 
-  snprintf(tool_response_message, kToolResponseBufferSize,
-           R"JSON({"type":"conversation.item.create","item":{"type":"function_call_output","call_id":"%s","output":"Volume set to %u percent"}})JSON",
-           call_id, (unsigned)volume_percent);
-  webSocket.sendTXT(tool_response_message);
+  char output[32];
+  snprintf(output, sizeof(output), "Volume set to %u percent", (unsigned)volume_percent);
+  esp32va_openai::sendFunctionCallOutput(webSocket, call_id, output);
   LOG_DEBUG("Sent function_call_output.\n");
   return true;
 }

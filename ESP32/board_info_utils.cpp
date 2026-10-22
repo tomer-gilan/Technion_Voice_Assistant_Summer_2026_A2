@@ -5,6 +5,7 @@
 #include "heap_diagnostics_utils.h"
 #include "light_sensor_utils.h"
 #include "log_utils.h"
+#include "openai_realtime_utils.h"
 #include "parameters.h"
 #include "recording_folder_utils.h"
 #include "status_report_utils.h"
@@ -14,9 +15,6 @@
 namespace esp32va_info {
 
 namespace {
-
-constexpr size_t kToolResponseBufferSize = 320;  // the JSON around it, a ~40-char call_id and the ~90-char output
-char tool_response_message[kToolResponseBufferSize];
 
 /** The same bands as the app's Wi-Fi bars. */
 const char* signalWord(long rssi) {
@@ -48,10 +46,7 @@ bool handleGetBoardStatusCall(JsonDocument& doc, WebSocketsClient& webSocket) {
              minutes == 1 ? "" : "s", (unsigned long)(esp32va_heap::freeHeapBytes() / 1024));
   }
   LOG_INFO("Board status asked - %s\n", output);
-  snprintf(tool_response_message, kToolResponseBufferSize,
-           R"JSON({"type":"conversation.item.create","item":{"type":"function_call_output","call_id":"%s","output":"%s"}})JSON",
-           call_id, output);
-  webSocket.sendTXT(tool_response_message);
+  esp32va_openai::sendFunctionCallOutput(webSocket, call_id, output);
   LOG_DEBUG("Sent function_call_output.\n");
   return true;
 }
