@@ -230,7 +230,8 @@ const char* firstFailedStartupCheck() {
     startup check fails it at once; otherwise kHandsFreeTurnsToPass
     hands-free LISTENs in a row that passed without losing mic audio pass
     it, if the heap never went below kMinLowestHeapBytes. A manual LISTEN
-    neither counts nor breaks the streak. */
+    neither counts nor breaks the streak, and a LISTEN lost to a dropped
+    connection never gets here (see markReplyFailed()). */
 void countTowardStepVerdict(bool turn_passed) {
   const char* failed_check = firstFailedStartupCheck();
   if (failed_check != nullptr) {
@@ -302,8 +303,14 @@ void markReplyFailed(const char* reason) {
   esp32va_measure::reportTurn(false);
   if (session_ready) {
     Serial.println(esp32va_hands_free::isHandsFreeOn() ? "Just talk to try again (or type LISTEN)." : "Type LISTEN to try again.");
+    countTowardStepVerdict(false);
+  } else {
+    // Cut off by a dropped connection (Wi-Fi or OpenAI) - a robustness case
+    // with its own recovery, not a hands-free failure: it neither counts nor
+    // breaks the streak (and the stages it checks aren't ok right now).
+    LOG_DEBUG("LISTEN #%u was lost to the connection drop - not counted toward the hands-free verdict.\n",
+              listen_cycle);
   }
-  countTowardStepVerdict(false);
 }
 
 /** Halts the sketch entirely - reserved for the one problem it can't run
