@@ -177,7 +177,7 @@ flowchart TD
 
 | שורה | דוגמה | מה היא אומרת |
 |---|---|---|
-| `@@STAGE` | `@@STAGE wifi ok 172.20.10.4` | תוצאה של בדיקת עלייה: sd, mic, speaker, wifi, time, openai |
+| `@@STAGE` | `@@STAGE wifi ok <board-ip>` | תוצאה של בדיקת עלייה: sd, mic, speaker, wifi, time, openai |
 | `@@STATE` | `@@STATE tool set_volume` | המצב של העוזר (הטבלה למעלה) |
 | `@@HEARD` | `@@HEARD Turn on the light.` | מה שהמשתמש אמר, בטקסט |
 | `@@SAID` | `@@SAID Done, the light is on.` | מה שהעוזר ענה, בטקסט |
@@ -196,7 +196,7 @@ flowchart TD
 | `@@TIMING` | `@@TIMING n=4 result=pass ...` | הזמנים של פקודה אחת, לגרף ולטבלת המדידות |
 | `@@BOOT_TIMING` | `@@BOOT_TIMING ... total_ms=6120` | כמה זמן לקח כל שלב בעלייה |
 | `@@HEAP` | `@@HEAP free=139900 largest=110580 ...` | הזיכרון הפנוי אחרי כל שלב |
-| `@@WIFI_NET` | `@@WIFI_NET saved iphone itamar` | איזו רשת הלוח משתמש בה: `saved` (נשמרה ממרכז הבקרה) או `default` (מ-`SECRETS.h`). אף פעם לא הסיסמה |
+| `@@WIFI_NET` | `@@WIFI_NET saved <hotspot>` | איזו רשת הלוח משתמש בה: `saved` (נשמרה ממרכז הבקרה) או `default` (מ-`SECRETS.h`). אף פעם לא הסיסמה |
 | `@@BUTTON` | `@@BUTTON off` | האם כפתור BOOT משמש ככפתור Talk |
 | `@@SOUNDS` | `@@SOUNDS on` | האם צלילי המצב מודלקים |
 

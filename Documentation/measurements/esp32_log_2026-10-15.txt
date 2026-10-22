@@ -29,11 +29,11 @@
 [11:46:26.888] @@STAGE sd active mounting
 [11:46:26.995] @@HEAP free=139900 largest=110580 lowest=134872 stage=after SD + recorder setup
 [11:46:27.000] @@STAGE sd ok SDHC/SDXC, 15262 MB, self-test passed
-[11:46:27.067] Connecting to Wi-Fi "iphone itamar"...
-[11:46:27.072] @@STAGE wifi active connecting to iphone itamar
+[11:46:27.067] Connecting to Wi-Fi "<hotspot>"...
+[11:46:27.072] @@STAGE wifi active connecting to <hotspot>
 [11:46:27.457] .
-[11:46:27.461] Wi-Fi connected. IP address: 172.20.10.4
-[11:46:27.464] @@STAGE wifi ok 172.20.10.4
+[11:46:27.461] Wi-Fi connected. IP address: <board-ip>
+[11:46:27.464] @@STAGE wifi ok <board-ip>
 [11:46:27.465] @@WIFI -45
 [11:46:27.467] Syncing time...
 [11:46:27.468] @@STAGE time active
@@ -46,7 +46,7 @@
 [11:46:32.232] @@STAGE sd ok SDHC/SDXC, 15262 MB, self-test passed
 [11:46:32.236] @@STAGE mic ok signal OK, room level -36 dBFS
 [11:46:32.241] @@STAGE speaker ok ready - check it by ear with Test beep
-[11:46:32.244] @@STAGE wifi ok 172.20.10.4
+[11:46:32.244] @@STAGE wifi ok <board-ip>
 [11:46:32.245] @@STAGE time ok
 [11:46:32.249] @@STAGE openai active connecting
 [11:46:32.249] @@STATE booting
@@ -657,11 +657,11 @@
 [12:00:03.930] @@STAGE sd active mounting
 [12:00:04.034] @@HEAP free=139900 largest=110580 lowest=134872 stage=after SD + recorder setup
 [12:00:04.040] @@STAGE sd ok SDHC/SDXC, 15262 MB, self-test passed
-[12:00:04.093] Connecting to Wi-Fi "iphone itamar"...
-[12:00:04.099] @@STAGE wifi active connecting to iphone itamar
+[12:00:04.093] Connecting to Wi-Fi "<hotspot>"...
+[12:00:04.099] @@STAGE wifi active connecting to <hotspot>
 [12:00:05.696] .....
-[12:00:05.699] Wi-Fi connected. IP address: 172.20.10.4
-[12:00:05.702] @@STAGE wifi ok 172.20.10.4
+[12:00:05.699] Wi-Fi connected. IP address: <board-ip>
+[12:00:05.702] @@STAGE wifi ok <board-ip>
 [12:00:05.703] @@WIFI -38
 [12:00:05.704] Syncing time...
 [12:00:05.708] @@STAGE time active
@@ -712,11 +712,11 @@
 [12:00:22.372] @@STAGE sd active mounting
 [12:00:22.473] @@HEAP free=139900 largest=110580 lowest=134872 stage=after SD + recorder setup
 [12:00:22.478] @@STAGE sd ok SDHC/SDXC, 15262 MB, self-test passed
-[12:00:22.532] Connecting to Wi-Fi "iphone itamar"...
-[12:00:22.539] @@STAGE wifi active connecting to iphone itamar
+[12:00:22.532] Connecting to Wi-Fi "<hotspot>"...
+[12:00:22.539] @@STAGE wifi active connecting to <hotspot>
 [12:00:23.534] ...
-[12:00:23.538] Wi-Fi connected. IP address: 172.20.10.4
-[12:00:23.540] @@STAGE wifi ok 172.20.10.4
+[12:00:23.538] Wi-Fi connected. IP address: <board-ip>
+[12:00:23.540] @@STAGE wifi ok <board-ip>
 [12:00:23.540] @@WIFI -38
 [12:00:23.546] Syncing time...
 [12:00:23.547] @@STAGE time active
