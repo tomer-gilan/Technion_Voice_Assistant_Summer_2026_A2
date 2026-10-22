@@ -963,8 +963,10 @@
 
 const COMMAND_TIMEOUT_MS = 5000;  // LIST and DELETE answers
 const DELETE_ALL_TIMEOUT_MS = 30000;
-const MAX_KEPT_RECORDINGS = 5;  // mirrors the board's kMaxKeptRecordings (recording_folder_utils.h) - display only
-const BOARD_MIC_GAIN = 2;       // mirrors ESP32.ino's kSoftwareGain (x4 until 2026-10-06) - for "what OpenAI hears"
+// The board's limits (MAX_KEPT_RECORDINGS ... VAD_HANGOVER_MAX_MS) are only
+// defaults: the page uses `limits` (below), which the board's @@LIMITS replaces.
+const MAX_KEPT_RECORDINGS = 5;  // mirrors parameters.h's kMaxKeptRecordings - display only
+const BOARD_MIC_GAIN = 2;       // mirrors parameters.h's kMicSoftwareGain (x4 until 2026-10-06) - for "what OpenAI hears"
 const GET_START_TIMEOUT_MS = 5000;
 const GET_STALL_MS = 2000;  // a GET's bytes stop arriving for this long: the transfer is given up
 // What a board restart prints first - the ESP32 ROM's "rst:0x.. (POWERON_RESET)"
@@ -988,20 +990,20 @@ const SAFE_FILE_NAME = /^[A-Za-z0-9_-][A-Za-z0-9_.-]{0,30}$/;  // a plain name, 
 const STATUS_TAGS = new Set(["@@STAGE", "@@STATE", "@@RESULT", "@@MIC_LEVEL", "@@HEARD", "@@SAID", "@@WIFI",
                              "@@LED", "@@VOLUME", "@@LIGHT", "@@BEEP", "@@VAD", "@@VAD_LEVEL", "@@VAD_EVENT",
                              "@@TIMING", "@@BOOT_TIMING", "@@TIMER", "@@CLOCK", "@@WIFI_NET", "@@BUTTON",
-                             "@@SOUNDS", "@@ALIVE"]);
+                             "@@SOUNDS", "@@ALIVE", "@@LIMITS"]);
 const STATUS_REQUEST_DELAY_MS = 400;   // after connecting, ask for the full picture
 const NO_STATUS_HINT_MS = 4000;        // no @@STATE by then: the board runs older firmware
 const BOARD_SILENT_MS = 15000;         // no line from the board for this long (it sends @@ALIVE every 5 s): "not responding"
 const ALIVE_CHECK_MS = 1000;
 const BOARD_SILENT_TITLE = `Board not responding - no report for ${BOARD_SILENT_MS / 1000} s.`;
-const TALK_START_TIMEOUT_MS = 2500;
+const TALK_START_TIMEOUT_MS = 2500;    // LISTEN sent but no "listening" yet: unlock Talk again
 const MAX_ASK_BYTES = 200;             // mirrors parameters.h's kMaxTypedQuestionBytes - the board cuts a longer question
 const MAX_SSID_BYTES = 32;             // mirrors wifi_utils.cpp's kMaxSsidLength
 const MIN_PASSWORD_BYTES = 8;          // WPA2 - wifi_utils.cpp checks the same
 const MAX_PASSWORD_BYTES = 64;         // mirrors wifi_utils.cpp's kMaxPasswordLength
 const WIFI_ACK_TIMEOUT_MS = 4000;      // WIFI_PASSWORD sent but no @@WIFI_NET saved / "ignored" by then
 const WIFI_ACK_BOOT_TIMEOUT_MS = 40000;  // the same while booting: setup() reads no commands in its Wi-Fi (20 s) and clock (15 s) waits
-const ASK_ECHO_TIMEOUT_MS = 20000;     // a typed question the board never echoed back stops counting as pending    // LISTEN sent but no "listening" yet: unlock Talk again
+const ASK_ECHO_TIMEOUT_MS = 20000;     // a typed question the board never echoed back stops counting as pending
 const TOOL_MIN_SHOWN_MS = 1200;        // a tool call is over in milliseconds - keep it readable
 const ERROR_SHOWN_MS = 3000;           // how long a failed LISTEN shows as an error
 const CONTROL_SEND_DELAY_MS = 250;     // slider changes are sent once dragging pauses
@@ -1012,7 +1014,23 @@ const MIC_METER_FLOOR_DBFS = -60;
 const VAD_METER_MIN_DBFS = -90;        // the voice-band level is the mic's own, before the gain: quieter than @@MIC_LEVEL
 const VAD_METER_MAX_DBFS = -10;
 const MAX_UTTERANCE_S = 10;            // mirrors vad_utils.h's kMaxUtteranceMs
+const VAD_SENSITIVITY_MIN = 1;         // mirrors vad_utils.h's kMinSensitivity
 const VAD_SENSITIVITY_MAX = 5;         // mirrors vad_utils.h's kMaxSensitivity
+const VAD_HANGOVER_MIN_MS = 600;       // mirrors parameters.h's kMinVadHangoverMs
+const VAD_HANGOVER_MAX_MS = 1500;      // mirrors parameters.h's kMaxVadHangoverMs
+/** The limits as built in, keyed as in the board's @@LIMITS line. */
+const DEFAULT_LIMITS = Object.freeze({
+  max_ask_bytes: MAX_ASK_BYTES, max_ssid_bytes: MAX_SSID_BYTES,
+  min_password_bytes: MIN_PASSWORD_BYTES, max_password_bytes: MAX_PASSWORD_BYTES,
+  max_kept_recordings: MAX_KEPT_RECORDINGS, mic_gain: BOARD_MIC_GAIN, light_max: LIGHT_SENSOR_MAX,
+  max_utterance_ms: MAX_UTTERANCE_S * 1000,
+  vad_sensitivity_min: VAD_SENSITIVITY_MIN, vad_sensitivity_max: VAD_SENSITIVITY_MAX,
+  vad_hangover_min_ms: VAD_HANGOVER_MIN_MS, vad_hangover_max_ms: VAD_HANGOVER_MAX_MS,
+});
+/** The limits in use: the board's own once it sent @@LIMITS (applyLimits()),
+    the defaults until then - and again after every connect, disconnect or
+    replay (resetBoardStatus()). */
+const limits = { ...DEFAULT_LIMITS };
 const VAD_NOTE_DEFAULT = "Higher sensitivity hears quieter voices - and more of the room's noise.";
 const DISCARD_TEXT = {                 // @@VAD_EVENT discarded <reason> - vad_utils.h's DiscardReason
   short: "too short to be speech (a click, a knock?)",
@@ -1090,7 +1108,7 @@ function decodePcm16(bytes) {
 /** The board's software gain: multiply and clamp to 16 bits, exactly as
     readMicChunkGained() does before sending audio to OpenAI. */
 function applyBoardGain(pcm) {
-  return pcm.map((sample) => Math.max(-32768, Math.min(32767, sample * BOARD_MIC_GAIN)));
+  return pcm.map((sample) => Math.max(-32768, Math.min(32767, sample * limits.mic_gain)));
 }
 
 /** 16-bit mono PCM -> a WAV file's bytes. */
@@ -2042,11 +2060,11 @@ function updateListStatus() {
   if (count && state.activeKind === "command") {
     const downloadSecondsPerAudioSecond = (format.sampleRateHz * format.bytesPerSample * 10) / Number(elements.baud.value);
     text = `${count} ${count === 1 ? format.noun : format.nounPlural} - newest first. The board keeps the newest ` +
-           `${MAX_KEPT_RECORDINGS}. Uncompressed, so each second of audio takes about ` +
+           `${limits.max_kept_recordings}. Uncompressed, so each second of audio takes about ` +
            `${downloadSecondsPerAudioSecond.toFixed(1)} s to download.`;
   } else if (count) {
     text = `${count} ${count === 1 ? format.noun : format.nounPlural} - newest first. The board keeps the newest ` +
-           `${MAX_KEPT_RECORDINGS}.`;
+           `${limits.max_kept_recordings}.`;
   } else if (state.activeKind === "command") {
     text = "No voice commands yet. Every LISTEN saves what the mic heard.";
   } else {
@@ -2205,14 +2223,14 @@ function showSelectedCopy(copy, { autoplay = false, keepPosition = false } = {})
   let levelNote = "";
   if (copy.kind === "command") {
     levelNote = withGain
-      ? ` · with the board's ×${BOARD_MIC_GAIN} gain, as OpenAI received it`
-      : ` · the mic's own level, before the ×${BOARD_MIC_GAIN} gain`;
+      ? ` · with the board's ×${limits.mic_gain} gain, as OpenAI received it`
+      : ` · the mic's own level, before the ×${limits.mic_gain} gain`;
   }
   elements.playerStatus.textContent = state.selectedSource + levelNote;
   elements.audio.src = version.wavUrl;
   elements.download.href = version.wavUrl;
   elements.download.download =
-    state.selectedName.replace(/\.(ulaw|pcm)$/i, "") + (withGain ? `_gain_x${BOARD_MIC_GAIN}` : "") + ".wav";
+    state.selectedName.replace(/\.(ulaw|pcm)$/i, "") + (withGain ? `_gain_x${limits.mic_gain}` : "") + ".wav";
   elements.download.setAttribute("aria-disabled", "false");
   renderStats(copy, version.analysis);
   drawWaveform();
@@ -2497,10 +2515,40 @@ function handleStatusLine(tag, rest) {
     case "ALIVE":
       board.aliveSeen = true;  // the heartbeat: from now on, silence counts (checkBoardAlive)
       break;
+    case "LIMITS":
+      applyLimits(rest);
+      break;
     default:
       appendLog(`(app) Unhandled status line @@${tag} - this page doesn't know it yet.`);
       break;
   }
+}
+
+/** @@LIMITS key=value ... - the board's own limits replace the ones in use.
+    Unknown keys and values that aren't whole numbers are ignored. */
+function applyLimits(rest) {
+  const keptBefore = limits.max_kept_recordings;
+  for (const [key, value] of Object.entries(parseKeyValues(rest))) {
+    if (Object.hasOwn(DEFAULT_LIMITS, key) && /^\d+$/.test(value)) limits[key] = Number(value);
+  }
+  applyLimitsToInputs();
+  renderVad();
+  renderLight();
+  if (limits.max_kept_recordings !== keptBefore && state.recordings.length) updateListStatus();
+}
+
+/** Puts the limits into the inputs that carry them: text lengths, slider
+    and number ranges, and the gain option's label. */
+function applyLimitsToInputs() {
+  elements.askText.maxLength = limits.max_ask_bytes;
+  elements.wifiSsid.maxLength = limits.max_ssid_bytes;
+  elements.wifiPassword.maxLength = limits.max_password_bytes;
+  elements.vadSensitivity.min = limits.vad_sensitivity_min;
+  elements.vadSensitivity.max = limits.vad_sensitivity_max;
+  elements.vadHangover.min = limits.vad_hangover_min_ms;
+  elements.vadHangover.max = limits.vad_hangover_max_ms;
+  for (const input of [elements.lightValue, elements.eveningMin, elements.dayMin]) input.max = limits.light_max;
+  document.getElementById("gain-factor").textContent = `×${limits.mic_gain}`;
 }
 
 /** A hands-free event: "started <pre-roll ms>", "sent <speech ms>
@@ -2510,7 +2558,7 @@ function onVadEvent([kind, first, second]) {
   if (kind === "started") {
     board.listenLeadS = (Number(first) || 0) / 1000;
   } else if (kind === "sent") {
-    const ending = second === "length" ? `stopped at the ${MAX_UTTERANCE_S} s limit` : "ended by your pause";
+    const ending = second === "length" ? `stopped at the ${limits.max_utterance_ms / 1000} s limit` : "ended by your pause";
     elements.vadNote.textContent = `Heard ${formatSeconds(Number(first) / 1000)} of speech - ${ending}.`;
   } else if (kind === "discarded") {
     elements.vadNote.textContent = `Ignored ${formatSeconds(Number(second) / 1000)} of sound - ${DISCARD_TEXT[first] || first}.`;
@@ -2532,6 +2580,8 @@ function resetBoardStatus(shownState) {
   clearInterval(old.aliveTicker);
   if (old.silent) paintBoardSilent(false);  // quietly - a connect or disconnect says enough
   state.board = freshBoardStatus();
+  Object.assign(limits, DEFAULT_LIMITS);  // until this board (or log) sends its own @@LIMITS
+  applyLimitsToInputs();
   elements.healthSummary.textContent = shownState === "offline"
     ? "Connect the board to see its startup checks." : "Waiting for the board's report…";
   renderHealth();
@@ -2688,10 +2738,10 @@ function showPipelineState(shownState, detail) {
   clearInterval(board.listenTimer);
   if (shownState === "listening") {
     // Manual (detail: its length in seconds) counts down; hands-free ("vad")
-    // counts up - it lasts until the speaker stops, MAX_UTTERANCE_S at most,
+    // counts up - it lasts until the speaker stops, limits.max_utterance_ms at most,
     // pre-roll included.
     const byVoice = detail === "vad";
-    const seconds = byVoice ? MAX_UTTERANCE_S : Number(detail) || 3;
+    const seconds = byVoice ? limits.max_utterance_ms / 1000 : Number(detail) || 3;
     const startedAt = performance.now();
     board.listenLeadS = 0;
     const tick = () => {
@@ -2760,9 +2810,9 @@ function onAskSubmit(event) {
   event.preventDefault();
   const text = elements.askText.value.replace(/\s+/g, " ").trim();
   if (!text || elements.askSend.disabled) return;
-  if (utf8Length(text) > MAX_ASK_BYTES) {  // the board would cut it mid-question without saying so
+  if (utf8Length(text) > limits.max_ask_bytes) {  // the board would cut it mid-question without saying so
     elements.result.className = "result fail";
-    elements.result.textContent = `Too long - the board takes ${MAX_ASK_BYTES} bytes (about ${MAX_ASK_BYTES} English or ${MAX_ASK_BYTES / 2} Hebrew letters).`;
+    elements.result.textContent = `Too long - the board takes ${limits.max_ask_bytes} bytes (about ${limits.max_ask_bytes} English or ${limits.max_ask_bytes / 2} Hebrew letters).`;
     return;
   }
   const board = state.board;
@@ -3037,15 +3087,15 @@ async function saveWifiNetwork() {
     elements.wifiNote.textContent = "Type the network's name first.";
     return;
   }
-  if (utf8Length(ssid) > MAX_SSID_BYTES) {
-    elements.wifiNote.textContent = `The network name is too long - ${MAX_SSID_BYTES} bytes at most (a Hebrew letter takes 2).`;
+  if (utf8Length(ssid) > limits.max_ssid_bytes) {
+    elements.wifiNote.textContent = `The network name is too long - ${limits.max_ssid_bytes} bytes at most (a Hebrew letter takes 2).`;
     return;
   }
   // Spaces at either end are part of the password and are sent as typed; a
   // password of only spaces is "no password" to the board (an open network).
   const passwordBytes = password.trim() === "" ? 0 : utf8Length(password);
-  if (passwordBytes > 0 && (passwordBytes < MIN_PASSWORD_BYTES || passwordBytes > MAX_PASSWORD_BYTES)) {
-    elements.wifiNote.textContent = `A Wi-Fi password is ${MIN_PASSWORD_BYTES} to ${MAX_PASSWORD_BYTES} bytes (or none for an open network).`;
+  if (passwordBytes > 0 && (passwordBytes < limits.min_password_bytes || passwordBytes > limits.max_password_bytes)) {
+    elements.wifiNote.textContent = `A Wi-Fi password is ${limits.min_password_bytes} to ${limits.max_password_bytes} bytes (or none for an open network).`;
     return;
   }
   const board = state.board;
@@ -3141,7 +3191,7 @@ function renderVad() {
   elements.vadSettings.classList.toggle("off", !(vad && vad.on));
   if (vad && !isBeingEdited(elements.vadSensitivity)) elements.vadSensitivity.value = vad.sensitivity;
   if (vad && !isBeingEdited(elements.vadHangover)) elements.vadHangover.value = vad.hangoverMs;
-  elements.vadSensitivityValue.textContent = vad ? `${vad.sensitivity} of ${VAD_SENSITIVITY_MAX}` : "-";
+  elements.vadSensitivityValue.textContent = vad ? `${vad.sensitivity} of ${limits.vad_sensitivity_max}` : "-";
   elements.vadHangoverValue.textContent = vad ? formatSeconds(vad.hangoverMs / 1000) : "-";
   updateControlsEnabled();
 }
@@ -3152,10 +3202,10 @@ function partOfDay(value, eveningMin, dayMin) {
 
 /** Draws the night/evening/day bar and the reading's needle. */
 function drawLightBands(value, eveningMin, dayMin) {
-  elements.bandNight.style.width = `${(eveningMin / LIGHT_SENSOR_MAX) * 100}%`;
-  elements.bandEvening.style.width = `${((dayMin - eveningMin) / LIGHT_SENSOR_MAX) * 100}%`;
-  elements.bandDay.style.width = `${((LIGHT_SENSOR_MAX - dayMin) / LIGHT_SENSOR_MAX) * 100}%`;
-  elements.lightNeedle.style.left = `calc(${(value / LIGHT_SENSOR_MAX) * 100}% - 1.5px)`;
+  elements.bandNight.style.width = `${(eveningMin / limits.light_max) * 100}%`;
+  elements.bandEvening.style.width = `${((dayMin - eveningMin) / limits.light_max) * 100}%`;
+  elements.bandDay.style.width = `${((limits.light_max - dayMin) / limits.light_max) * 100}%`;
+  elements.lightNeedle.style.left = `calc(${(value / limits.light_max) * 100}% - 1.5px)`;
   elements.lightReading.textContent = value;
   const band = partOfDay(value, eveningMin, dayMin);
   const icon = document.getElementById("light-icon");
@@ -3188,9 +3238,9 @@ function onApplyBandsClick() {
   const eveningMin = Number(elements.eveningMin.value);
   const dayMin = Number(elements.dayMin.value);
   const valid = Number.isInteger(eveningMin) && Number.isInteger(dayMin) && eveningMin >= 0 &&
-    dayMin <= LIGHT_SENSOR_MAX && eveningMin < dayMin;
+    dayMin <= limits.light_max && eveningMin < dayMin;
   if (!valid) {
-    elements.lightNote.textContent = `Evening must start below day, both whole numbers from 0 to ${LIGHT_SENSOR_MAX}.`;
+    elements.lightNote.textContent = `Evening must start below day, both whole numbers from 0 to ${limits.light_max}.`;
     return;
   }
   elements.lightNote.textContent = "Saved on the board - kept after a restart.";
@@ -3926,7 +3976,7 @@ function renderSummary() {
   const settings = [];
   if (board.volume) settings.push(setting(board.volume.muted ? "🔇" : "🔊", board.volume.muted ? "Muted" : `Volume ${board.volume.percent}%`));
   if (board.led) settings.push(setting("💡", `LED ${board.led.on ? "on" : "off"}, brightness ${board.led.brightness}%`));
-  if (board.vad) settings.push(setting("🎙️", `Hands-free ${board.vad.on ? "on" : "off"}, sensitivity ${board.vad.sensitivity} of 5`));
+  if (board.vad) settings.push(setting("🎙️", `Hands-free ${board.vad.on ? "on" : "off"}, sensitivity ${board.vad.sensitivity} of ${limits.vad_sensitivity_max}`));
   if (board.light) settings.push(setting("🌗", `Evening from ${board.light.eveningMin}, day from ${board.light.dayMin} (now ${board.light.band})`));
   if (!settings.length) settings.push(setting("🔌", "Connect the board to see its settings."));
   document.getElementById("summary-settings").replaceChildren(...settings);
@@ -4246,7 +4296,7 @@ elements.showProtocol.addEventListener("change", () => {
 });
 elements.vad.addEventListener("change", () => sendCommand(`VAD ${elements.vad.checked ? "on" : "off"}`));
 elements.vadSensitivity.addEventListener("input", () => {
-  elements.vadSensitivityValue.textContent = `${elements.vadSensitivity.value} of ${VAD_SENSITIVITY_MAX}`;
+  elements.vadSensitivityValue.textContent = `${elements.vadSensitivity.value} of ${limits.vad_sensitivity_max}`;
   sendSoon("vadSensitivity", `VAD_SENSITIVITY ${elements.vadSensitivity.value}`);
 });
 elements.vadHangover.addEventListener("input", () => {
@@ -4305,7 +4355,6 @@ setInterval(() => flushLogFile().catch((error) => {
   elements.saveLog.disabled = false;
 }), LOG_FILE_FLUSH_MS);
 
-document.getElementById("gain-factor").textContent = `×${BOARD_MIC_GAIN}`;
 if ("showDirectoryPicker" in window) elements.saveLog.hidden = false;
 if ("serial" in navigator) {
   // Replugged board: reopen it, unless Disconnect was clicked.
