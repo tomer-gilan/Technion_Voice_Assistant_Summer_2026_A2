@@ -1333,7 +1333,7 @@ class BoardLink {
         if (data.length - offset <= MAX_UNTERMINATED_LINE_BYTES) break;
         newlineAt = data.length;
       }
-      const line = this.decoder.decode(data.subarray(offset, newlineAt)).replace(/\r$/, "");
+      const line = this.decoder.decode(data.subarray(offset, newlineAt)).replace(/\r+$/, "");
       offset = newlineAt + 1;
       if (line.startsWith("@@")) this.handleProtocolLine(line);
       else this.onLine(line);
@@ -3833,13 +3833,14 @@ const REPLAY_MAX_GAP_MS = 3000;
 
 const replay = { lines: [], index: 0, timer: null, startMs: 0 };
 
-/** Turns a log the app saved ("[hh:mm:ss.mmm] text" per line) into
+/** Turns a log the app or serial_logger.ps1 saved ("[hh:mm:ss.mmm] text" per line) into
     { atMs, text } items. Lines without a time take the previous line's time;
     the app's own notes and sent commands are left out. */
 function parseReplayLog(text) {
   const items = [];
   let atMs = 0;
-  for (const raw of text.split(/\r?\n/)) {
+  // serial_logger.ps1's older logs end lines in \r\r\n and start with a BOM.
+  for (const raw of text.replace(/^﻿/, "").split(/\r*\n/)) {
     const match = raw.match(/^\[(\d+):(\d\d):(\d\d)\.(\d{3})\]\s?(.*)$/);
     let line = raw;
     if (match) {
