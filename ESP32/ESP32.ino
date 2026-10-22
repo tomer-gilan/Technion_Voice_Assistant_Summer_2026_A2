@@ -429,10 +429,11 @@ void handleServerMessage(uint8_t* payload, size_t length) {
     return;
   }
 
-  if (have_type && strncmp(type_buf, "response.output_audio", 22) == 0) {
-    // Any other response.output_audio* event (e.g. .done) carries no large
-    // payload, but there's nothing this step needs from it either - just
-    // log its size for visibility.
+  if (have_type && strncmp(type_buf, "response.output_audio.", 22) == 0) {
+    // Any other response.output_audio.* event (e.g. .done) carries no large
+    // payload, and nothing here needs it - skips the full JSON parse. (22 =
+    // the prefix's length with the dot, so the transcript events, which
+    // continue with "_transcript", don't match.)
     LOG_DEBUG("Event type: %s (%u bytes).\n", type_buf, (unsigned)length);
     return;
   }
