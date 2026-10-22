@@ -643,12 +643,11 @@ void handleServerMessage(uint8_t* payload, size_t length) {
     } else {
       // The PASS verdict itself waits for the ring buffer to actually finish
       // draining to the speaker - see checkPlaybackComplete() in loop().
-      // (Also reached for the opening greeting's response.done - harmless,
-      // since awaiting_reply is false then, so checkPlaybackComplete() stays
-      // a no-op until the next real LISTEN cycle resets this flag anyway.)
+      // Only a LISTEN's own response completes it - not the greeting's, a
+      // timer announcement's or a typed question's.
       response_in_flight = false;
-      response_fully_received = true;
       if (awaiting_reply) {
+        response_fully_received = true;
         esp32va_measure::markTurnEvent(esp32va_measure::TurnEvent::kResponseDone);
       }
     }
@@ -1076,6 +1075,11 @@ void startManualListen() {
     Serial.printf("LISTEN ignored - already recording.\n");
   } else if (awaiting_reply) {
     Serial.printf("LISTEN ignored - still waiting for or playing back a reply.\n");
+  } else if (response_in_flight || speech_in_progress) {
+    // The greeting, a timer announcement or a typed question's answer is on
+    // its way: its audio would arrive while the mic holds the ring (and be
+    // dropped), and a second response.create would be rejected.
+    LOG_INFO("LISTEN ignored - the assistant is still answering, try again when it is Ready.\n");
   } else if (!esp32va_reply_recorder::isRecorderIdle()) {
     Serial.printf("LISTEN ignored - still saving the last reply to the SD card, try again in a moment.\n");
   } else if (!esp32va_mic_capture::startManualCapture(kSampleRateHz * kManualRecordDurationSec)) {
@@ -1373,8 +1377,13 @@ void updatePipelineState() {
       snprintf(listen_detail, sizeof(listen_detail), "%u", (unsigned)kManualRecordDurationSec);
       esp32va_status::reportPipelineState(PipelineState::kListening, listen_detail);
     }
-  } else if (awaiting_reply) {
+  } else if (awaiting_reply || (response_in_flight && dropping_reply_audio)) {
     esp32va_status::reportPipelineState(PipelineState::kProcessing, nullptr);
+  } else if (response_in_flight) {
+    // The greeting, a timer announcement or a typed question's answer was
+    // asked for and its audio hasn't started yet - not Ready (a LISTEN would
+    // be refused, see startManualListen()).
+    esp32va_status::reportPipelineState(PipelineState::kSpeaking, unprompted_speech_detail);
   } else if (!esp32va_reply_recorder::isRecorderIdle()) {
     esp32va_status::reportPipelineState(PipelineState::kSaving, nullptr);
   } else if (esp32va_hands_free::isWaitingForSpeech()) {
