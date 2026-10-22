@@ -983,6 +983,11 @@ const STATUS_TAGS = new Set(["@@STAGE", "@@STATE", "@@RESULT", "@@MIC_LEVEL", "@
 const STATUS_REQUEST_DELAY_MS = 400;   // after connecting, ask for the full picture
 const NO_STATUS_HINT_MS = 4000;        // no @@STATE by then: the board runs older firmware
 const TALK_START_TIMEOUT_MS = 2500;
+const MAX_ASK_BYTES = 200;             // mirrors ESP32.ino's kMaxTypedQuestionLength - the board cuts a longer question
+const MAX_SSID_BYTES = 32;             // mirrors wifi_utils.cpp's kMaxSsidLength
+const MIN_PASSWORD_BYTES = 8;          // WPA2 - wifi_utils.cpp checks the same
+const MAX_PASSWORD_BYTES = 64;         // mirrors wifi_utils.cpp's kMaxPasswordLength
+const WIFI_ACK_TIMEOUT_MS = 4000;      // WIFI_PASSWORD sent but no @@WIFI_NET saved / "ignored" by then
 const ASK_ECHO_TIMEOUT_MS = 20000;     // a typed question the board never echoed back stops counting as pending    // LISTEN sent but no "listening" yet: unlock Talk again
 const TOOL_MIN_SHOWN_MS = 1200;        // a tool call is over in milliseconds - keep it readable
 const ERROR_SHOWN_MS = 3000;           // how long a failed LISTEN shows as an error
@@ -1645,11 +1650,12 @@ function freshBoardStatus() {
     timer: null,             // { endsAt (performance.now() ms), totalS } from @@TIMER, null when none runs
     timerTicker: null,
     askPending: null,  // a typed question sent with ASK, until the board echoes it as @@HEARD
+    wifiSavePending: null,  // { ssid, timer } from Save & connect until @@WIFI_NET saved or an "ignored" line
   };
 }
 
 const link = new BoardLink({
-  onLine: (line) => { appendLog(line); noteAskRefused(line); },
+  onLine: (line) => { appendLog(line); noteAskRefused(line); noteWifiRefused(line); },
   onNote: (text) => appendLog(`(app) ${text}`),
   onConnectionChange: handleConnectionChange,
   onListAnnounced: (files) => {
@@ -1671,6 +1677,9 @@ function clockStamp(date) {
   return `${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}.${pad(date.getMilliseconds(), 3)}`;
 }
 function formatSeconds(seconds) { return `${seconds.toFixed(1)} s`; }
+const utf8Encoder = new TextEncoder();
+/** The text's length in UTF-8 bytes - what the firmware's limits count (a Hebrew letter is 2). */
+function utf8Length(text) { return utf8Encoder.encode(text).length; }
 function formatBytes(bytes) { return bytes < 1024 ? `${bytes} B` : `${(bytes / 1024).toFixed(1)} KB`; }
 function formatDbfs(value) { return value === null ? "silent" : `${value.toFixed(1)} dBFS`; }
 function hex32(value) { return value.toString(16).padStart(8, "0"); }
@@ -2365,6 +2374,11 @@ function handleStatusLine(tag, rest) {
       break;
     case "WIFI_NET":
       board.wifiNet = { source: words[0], ssid: words.slice(1).join(" ") };
+      if (board.wifiSavePending && board.wifiNet.source === "saved" && board.wifiNet.ssid === board.wifiSavePending.ssid) {
+        clearTimeout(board.wifiSavePending.timer);
+        board.wifiSavePending = null;
+        elements.wifiNote.textContent = `Saved - the board is connecting to ${board.wifiNet.ssid}. If it can't, it says so in Board health.`;
+      }
       renderBoardOptions();
       break;
     case "BUTTON":
@@ -2401,6 +2415,7 @@ function onVadEvent([kind, first, second]) {
 function resetBoardStatus(shownState) {
   const old = state.board;
   [old.deferTimer, old.errorTimer, old.talkPendingTimer, old.noStatusTimer].forEach(clearTimeout);
+  if (old.wifiSavePending) clearTimeout(old.wifiSavePending.timer);
   clearInterval(old.timerTicker);
   clearInterval(old.listenTimer);
   state.board = freshBoardStatus();
@@ -2593,6 +2608,11 @@ function onAskSubmit(event) {
   event.preventDefault();
   const text = elements.askText.value.replace(/\s+/g, " ").trim();
   if (!text || elements.askSend.disabled) return;
+  if (utf8Length(text) > MAX_ASK_BYTES) {  // the board would cut it mid-question without saying so
+    elements.result.className = "result fail";
+    elements.result.textContent = `Too long - the board takes ${MAX_ASK_BYTES} bytes (about ${MAX_ASK_BYTES} English or ${MAX_ASK_BYTES / 2} Hebrew letters).`;
+    return;
+  }
   const board = state.board;
   board.cycleFirstBubble = null;  // a new turn: its bubbles go after the last one's
   board.cycleFirstSaid = null;
@@ -2851,7 +2871,9 @@ function renderBoardOptions() {
 }
 
 /** Saves a Wi-Fi network on the board: WIFI_SSID, then WIFI_PASSWORD - which
-    saves both and connects. The password never reaches the log. */
+    saves both and connects. The password never reaches the log. "Saved" is
+    shown once the board answers @@WIFI_NET saved <ssid> (see
+    handleStatusLine); a refusal reaches noteWifiRefused. */
 async function saveWifiNetwork() {
   const ssid = elements.wifiSsid.value.trim();
   const password = elements.wifiPassword.value;
@@ -2859,20 +2881,53 @@ async function saveWifiNetwork() {
     elements.wifiNote.textContent = "Type the network's name first.";
     return;
   }
-  if (password.length > 0 && password.length < 8) {
-    elements.wifiNote.textContent = "A Wi-Fi password is at least 8 characters (or none for an open network).";
+  if (utf8Length(ssid) > MAX_SSID_BYTES) {
+    elements.wifiNote.textContent = `The network name is too long - ${MAX_SSID_BYTES} bytes at most (a Hebrew letter takes 2).`;
     return;
   }
+  if (password !== password.trim()) {
+    elements.wifiNote.textContent = "The board drops spaces at the start or end of a password - remove them, or the saved password would differ.";
+    return;
+  }
+  const passwordBytes = utf8Length(password);
+  if (passwordBytes > 0 && (passwordBytes < MIN_PASSWORD_BYTES || passwordBytes > MAX_PASSWORD_BYTES)) {
+    elements.wifiNote.textContent = `A Wi-Fi password is ${MIN_PASSWORD_BYTES} to ${MAX_PASSWORD_BYTES} bytes (or none for an open network).`;
+    return;
+  }
+  const board = state.board;
+  if (board.wifiSavePending) clearTimeout(board.wifiSavePending.timer);
+  const pending = { ssid, timer: null };
+  board.wifiSavePending = pending;
+  elements.wifiNote.textContent = `Sent - waiting for the board to save ${ssid}…`;
   try {
     await link.send(`WIFI_SSID ${ssid}`);
     appendLog(`>> WIFI_SSID ${ssid}`);
     await link.send(password ? `WIFI_PASSWORD ${password}` : "WIFI_PASSWORD");
     appendLog(password ? ">> WIFI_PASSWORD ********" : ">> WIFI_PASSWORD");
     elements.wifiPassword.value = "";
-    elements.wifiNote.textContent = `Saved - the board is connecting to ${ssid}. If it can't, it says so in Board health.`;
+    if (state.board.wifiSavePending === pending) {  // not answered while sending
+      pending.timer = setTimeout(() => {
+        if (state.board.wifiSavePending !== pending) return;
+        state.board.wifiSavePending = null;
+        elements.wifiNote.textContent = "The board didn't confirm the new network - check the serial terminal.";
+      }, WIFI_ACK_TIMEOUT_MS);
+    }
   } catch (error) {
+    if (state.board.wifiSavePending === pending) state.board.wifiSavePending = null;
     elements.wifiNote.textContent = `Not sent: ${error.message}`;
   }
+}
+
+/** The board's answer to a WIFI_SSID / WIFI_PASSWORD it didn't take. Only
+    the first refusal is shown: after a refused WIFI_SSID the password is
+    refused too, with a less useful reason. */
+function noteWifiRefused(line) {
+  if (!line.startsWith("WIFI_SSID ignored") && !line.startsWith("WIFI_PASSWORD ignored")) return;
+  const pending = state.board.wifiSavePending;
+  if (!pending) return;
+  clearTimeout(pending.timer);
+  state.board.wifiSavePending = null;
+  elements.wifiNote.textContent = `Not saved: ${line}`;
 }
 
 /** Sends a control command once the user pauses dragging a slider. */
