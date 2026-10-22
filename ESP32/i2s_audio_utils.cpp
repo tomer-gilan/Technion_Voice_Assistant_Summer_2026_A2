@@ -115,10 +115,16 @@ void setupI2sFullDuplex() {
     .dma_buf_len = kI2sDmaBufLen,
     .use_apll = false,
     .tx_desc_auto_clear = true,  // auto-fills silence between writes, avoiding TX buffer underrun noise
-    .fixed_mclk = 0
+    .fixed_mclk = 0,
+    .mclk_multiple = I2S_MCLK_MULTIPLE_DEFAULT,
+    .bits_per_chan = I2S_BITS_PER_CHAN_DEFAULT
   };
 
   i2s_pin_config_t pin_config = {
+    // No master clock pin: neither the INMP441 nor the MAX98357A uses MCLK.
+    // Left out, this field was 0 - and the driver then put MCLK out on
+    // GPIO0, the BOOT button's pin.
+    .mck_io_num = I2S_PIN_NO_CHANGE,
     .bck_io_num = I2S_BCLK,             // shared clock line, also wired to the mic
     .ws_io_num = I2S_LRC,               // shared clock line, also wired to the mic
     .data_out_num = I2S_DOUT,           // to MAX98357A DIN
