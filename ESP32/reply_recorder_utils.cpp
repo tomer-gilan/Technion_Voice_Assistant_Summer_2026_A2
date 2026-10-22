@@ -60,6 +60,7 @@ void openRecordingFile() {
   if (file_descriptor < 0) {
     LOG_ERROR("Couldn't create %s (errno %d) - this reply won't be saved.\n", current_file_name, errno);
     write_failed = true;
+    esp32va_sd_card::noteCardError();
     esp32va_audio::ringStopRecordingTap();
     state = RecorderState::kAborting;
   }
@@ -82,6 +83,7 @@ void writePendingBlocks() {
       LOG_ERROR("Writing %s failed (errno %d) after %u bytes - stopping this recording.\n", current_file_name,
                 errno, (unsigned)bytes_written);
       write_failed = true;
+      esp32va_sd_card::noteCardError();
       esp32va_audio::ringStopRecordingTap();
       state = RecorderState::kAborting;
       return;
@@ -97,6 +99,7 @@ void closeRecording(FinishedRecording* finished) {
   if (file_descriptor >= 0 && close(file_descriptor) != 0) {
     LOG_ERROR("Closing %s failed (errno %d) - the file may be incomplete.\n", current_file_name, errno);
     write_failed = true;
+    esp32va_sd_card::noteCardError();
   }
   file_descriptor = -1;
   if (bytes_written == 0) {

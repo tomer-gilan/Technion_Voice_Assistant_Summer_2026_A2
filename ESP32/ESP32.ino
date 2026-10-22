@@ -20,7 +20,8 @@
 // ends the recording). The mic is read by its own task (mic_capture_utils.h)
 // so a slow send delays audio instead of losing it.
 //
-// Robustness: without an SD card it runs on without recordings; without
+// Robustness: without an SD card (or once one stops answering) it runs on
+// without recordings; without
 // Wi-Fi or OpenAI it goes offline (@@STATE offline) and keeps retrying while
 // the timer and the controls keep working; the Wi-Fi network can be changed
 // from the control center; a question with no answer times out after
@@ -1577,6 +1578,7 @@ void startOpenAiConnectionWhenNetworkReady() {
 void loop() {
   if (!should_keep_running) {
     serviceReplyRecording();  // closes a recording cut short by the halt
+    esp32va_sd_card::serviceCardCheck(isIdleForFileTransfer());
     checkForSerialCommand();
     return;
   }
@@ -1614,6 +1616,9 @@ void loop() {
     last_reply_activity_ms = millis();
   }
 
+  // Before the commands: a LIST / GET in this same pass then already knows
+  // whether a card that just failed a recording is still there.
+  esp32va_sd_card::serviceCardCheck(isIdleForFileTransfer());
   checkForSerialCommand();
   if (esp32va_button::takeButtonPress()) {
     handleTalkButtonPress();

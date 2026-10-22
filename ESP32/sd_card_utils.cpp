@@ -4,10 +4,13 @@
 #include <FS.h>
 #include <SD.h>
 #include <SPI.h>
+#include <dirent.h>
+#include <errno.h>
 #include <string.h>
 #include "parameters.h"
 #include "heap_diagnostics_utils.h"
 #include "log_utils.h"
+#include "status_report_utils.h"
 
 namespace esp32va_sd_card {
 
@@ -50,6 +53,23 @@ const char* cardTypeName(sdcard_type_t card_type) {
 }
 
 bool sd_card_usable = false;  // see setSdCardUsable()
+bool card_check_pending = false;  // see noteCardError()
+
+/** True when the card's root folder can still be opened. Not SD.cardType():
+    that only returns what was found at mount time. Opening a folder runs
+    FatFs's own status check (an SD SEND_STATUS command) and needs none of
+    the kMaxOpenFiles file slots. */
+bool cardAnswers() {
+  char root_path[sizeof(kSdMountPoint) + 1];
+  snprintf(root_path, sizeof(root_path), "%s/", kSdMountPoint);
+  DIR* root = opendir(root_path);
+  if (root == nullptr) {
+    LOG_DEBUG("SD re-check: opening %s failed (errno %d).\n", root_path, errno);
+    return false;
+  }
+  closedir(root);
+  return true;
+}
 
 }  // namespace
 
@@ -124,6 +144,28 @@ void setSdCardUsable(bool usable) {
 
 bool isSdCardUsable() {
   return sd_card_usable;
+}
+
+void noteCardError() {
+  card_check_pending = true;
+}
+
+void serviceCardCheck(bool board_idle) {
+  if (!card_check_pending || !board_idle) {
+    return;
+  }
+  card_check_pending = false;
+  if (!sd_card_usable) {
+    return;  // already marked unusable (or never was usable)
+  }
+  if (cardAnswers()) {
+    LOG_INFO("SD card re-checked after a file error - it still answers, so it stays in use.\n");
+    return;
+  }
+  sd_card_usable = false;
+  LOG_ERROR("SD card stopped answering (removed?) - running without recordings until Reset.\n");
+  esp32va_status::reportStage(esp32va_status::Stage::kSdCard, esp32va_status::StageState::kFail,
+                              "card removed or failed - insert it and press Reset");
 }
 
 }  // namespace esp32va_sd_card

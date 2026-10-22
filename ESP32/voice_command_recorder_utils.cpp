@@ -59,6 +59,7 @@ void beginVoiceCommand() {
   if (file_descriptor < 0) {
     LOG_ERROR("Couldn't create %s (errno %d) - this LISTEN's mic audio won't be saved.\n", current_file_name,
               errno);
+    esp32va_sd_card::noteCardError();
     return;
   }
   LOG_DEBUG("Recording the mic to %s.\n", current_file_name);
@@ -81,6 +82,7 @@ void appendMicChunk(int32_t* raw_i2s_words, uint32_t sample_count) {
     LOG_ERROR("Writing %s failed (errno %d) after %u bytes - the rest of this LISTEN isn't saved.\n",
               current_file_name, errno, (unsigned)bytes_written);
     write_failed = true;
+    esp32va_sd_card::noteCardError();
     close(file_descriptor);
     file_descriptor = -1;
     return;
@@ -98,6 +100,7 @@ void appendMicSamples(const int16_t* samples, uint32_t sample_count) {
     LOG_ERROR("Writing %s failed (errno %d) after %u bytes - the rest of this LISTEN isn't saved.\n",
               current_file_name, errno, (unsigned)bytes_written);
     write_failed = true;
+    esp32va_sd_card::noteCardError();
     close(file_descriptor);
     file_descriptor = -1;
     return;
@@ -126,6 +129,7 @@ bool finishVoiceCommand(FinishedVoiceCommand* finished) {
   if (file_descriptor >= 0 && close(file_descriptor) != 0) {
     LOG_ERROR("Closing %s failed (errno %d) - the file may be incomplete.\n", current_file_name, errno);
     write_failed = true;
+    esp32va_sd_card::noteCardError();
   }
   bool had_file = file_descriptor >= 0 || bytes_written > 0;
   file_descriptor = -1;

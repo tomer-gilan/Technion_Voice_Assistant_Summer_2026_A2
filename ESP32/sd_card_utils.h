@@ -37,7 +37,22 @@ void describeSdCard(char* out, size_t out_size);
     answer with an error line. Call once from setup(). */
 void setSdCardUsable(bool usable);
 
-/** True when the card passed every startup check (setSdCardUsable()). */
+/** True when the card passed every startup check (setSdCardUsable()) and
+    hasn't been found gone since (serviceCardCheck()). */
 bool isSdCardUsable();
+
+/** Tells this module a recording file couldn't be opened, written or
+    closed, so serviceCardCheck() re-checks the card. Only sets a flag:
+    safe from anywhere, the WebSocket callback included. */
+void noteCardError();
+
+/** From loop(): after a noteCardError(), once board_idle (nothing being
+    recorded, played or saved), checks whether the card still answers. If it
+    doesn't (pulled out, or failed), the card is marked unusable for good -
+    as if the board had booted without one: recordings stop, LIST / GET /
+    DELETE answer "no SD card" - and the SD startup check turns to fail. Up
+    to ~1.5 s with the card gone (the SD library's own retries), so never
+    from the WebSocket callback. */
+void serviceCardCheck(bool board_idle);
 
 }  // namespace esp32va_sd_card
