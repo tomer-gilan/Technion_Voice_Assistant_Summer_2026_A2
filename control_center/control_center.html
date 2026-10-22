@@ -1800,7 +1800,7 @@ function handleConnectionChange(connected, closedOnPurpose) {
   } else if (!closedOnPurpose) {
     state.portLost = true;
     showAlert("Lost the board's USB connection.",
-              "Check the cable and plug it back in - the app reconnects by itself. The board itself keeps running.");
+              "Check the cable and plug it back in - the app reconnects by itself. A board powered through this cable restarts (about 10 s to the greeting).");
   }
   document.getElementById("replay-log").disabled = connected;
   elements.status.classList.toggle("connected", connected);
@@ -3455,7 +3455,7 @@ const DEMO_SECTIONS = [
     ["vadtune", "17. כיוון Hands-free", "Sensitivity ו-Stop after silence, ובודקים דיבור ורעש."],
     ["bands", "18. ספי יום / ערב / לילה", "משנים ספים ולוחצים Apply thresholds."],
     ["persist", "19. ההגדרות נשמרות", "Reset ללוח, והעוצמה, הבהירות וההגדרות של Hands-free נשארות."],
-    ["nopc", "20. בלי מחשב", "ב-On the board itself: BOOT button ו-Status sounds, ומדליקים Hands-free. קודם מחברים את הלוח ל-power bank, ורק אז מנתקים את ה-USB (ניתוק USB לבדו מאתחל את הלוח, וצריך לחכות כ-10 שניות לברכה). שואלים בקול או ב-BOOT."],
+    ["nopc", "20. בלי מחשב", "ב-On the board itself: BOOT button ו-Status sounds, ומדליקים Hands-free (כולם נשמרים בלוח). מנתקים את ה-USB מהמחשב, ורק אז מחברים את ה-power bank (אף פעם לא את שניהם יחד: הנחיית הבטיחות של הקורס). הלוח עולה מחדש עם ההגדרות השמורות, וצריך לחכות כ-10 שניות לברכה. שואלים בקול או ב-BOOT."],
     ["replay", "21. שחזור לוג, בלי הלוח", "Replay a log… עם לוג שנשמר, במהירות 4x. בסיום Stop, ו-Connect board שוב."],
     ["stats", "22. סטטיסטיקה", "חלונית Statistics: מספרים, גרף זמני תגובה, Export CSV."],
     ["summary", "22. סיכום במסך מלא", "כפתור Summary: הפקודות, אחוז ההצלחה, זמן התגובה וההגדרות של הלוח, בגדול. Save report שומר דף HTML."],
@@ -3473,7 +3473,7 @@ const DEMO_SECTIONS = [
     ["badlight", "12. ערך אור בקצוות", "סליידר האור לקצה התחתון ואז לעליון, <code>Is it day or night</code> בכל אחד. <code>LIGHT 99999</code> בטרמינל נדחה."],
     ["busy", "15. Talk באמצע תשובה", "הכפתור Busy והבקשה נדחית. מחכים שיסיים, או Cancel."],
     ["pause", "17. הפסקה קצרה באמצע משפט", "<code>What is the capital... of France</code> עם עצירה של חצי שנייה: נשלח כשאלה אחת."],
-    ["reconnect", "9. ניתוק מרכז הבקרה", "קודם power bank, ורק אז מנתקים את כבל ה-USB מהמחשב: באנר אדום. מחברים שוב והדף מתחבר לבד."],
+    ["reconnect", "9. ניתוק מרכז הבקרה", "מנתקים את כבל ה-USB מהמחשב: באנר אדום, והלוח נכבה כי הוא מקבל חשמל מהכבל הזה. מחברים שוב: הלוח עולה מחדש (כ-10 שניות) והדף מתחבר לבד."],
     ["timeroffline", "7. טיימר כשאין חיבור", "<code>Set a timer for 30 seconds</code> ומכבים hotspot: הלוח עדיין מצפצף בזמן."],
     ["wifi", "1. ה-Wi-Fi נופל", "ה-hotspot כבוי ל-30 שניות: Offline ושני צלילים יורדים. אחרי שחוזר: Ready תוך כ-15 שניות ושני צלילים עולים."],
     ["netswitch", "3. החלפת רשת", "בכרטיס Wi-Fi network: שם וסיסמה של hotspot שני ← Save & connect. בסוף Back to default."],
