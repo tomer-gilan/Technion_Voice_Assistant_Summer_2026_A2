@@ -127,8 +127,21 @@ bool handleSetTimerCall(JsonDocument& doc, WebSocketsClient& webSocket) {
     sendToolOutput(webSocket, call_id, "Error: seconds must be a number.");  // so the model still answers
     return true;
   }
-  long seconds = lroundf(constrain(seconds_value.as<float>(), -1.0f, static_cast<float>(kMaxTimerSeconds)));
-  char output[64 + kMaxLabelLength];
+  // 0 cancels; a negative or sub-second value is a mistake, not a cancel, so
+  // it leaves a running timer alone and the model asks again.
+  char output[112 + kMaxLabelLength];
+  float requested_seconds = seconds_value.as<float>();
+  if (requested_seconds < 0.0f || (requested_seconds > 0.0f && requested_seconds < 1.0f)) {
+    LOG_INFO("set_timer refused: %.2f seconds is not 0 (cancel) or 1 to %ld - the timer is unchanged.\n",
+             requested_seconds, kMaxTimerSeconds);
+    snprintf(output, sizeof(output),
+             "Error: seconds must be 0 to cancel the timer, or from 1 to %ld. Nothing was changed - ask the user how long the timer should be.",
+             kMaxTimerSeconds);
+    sendToolOutput(webSocket, call_id, output);
+    return true;
+  }
+  bool capped = requested_seconds > static_cast<float>(kMaxTimerSeconds);
+  long seconds = capped ? kMaxTimerSeconds : lroundf(requested_seconds);
   if (seconds <= 0) {
     bool was_armed = timer_armed;
     timer_armed = false;
@@ -150,7 +163,11 @@ bool handleSetTimerCall(JsonDocument& doc, WebSocketsClient& webSocket) {
       setTimerLabel(timer_light_action ? "light on" : "light off");
     }
     LOG_INFO("Timer set for %ld s (voice command)%s%s - starts once that's been said.\n", seconds, timer_label[0] ? " - " : "", timer_label);
-    if (timer_label[0] != '\0') {
+    if (capped) {  // so the model says the 1-hour cap was applied instead of confirming what was asked
+      LOG_INFO("set_timer asked for %.0f s - capped at %ld s.\n", requested_seconds, kMaxTimerSeconds);
+      snprintf(output, sizeof(output), "The longest timer is %ld minutes, so it was capped and set for %ld seconds instead%s%s.",
+               kMaxTimerSeconds / 60, seconds, timer_label[0] ? ": " : "", timer_label);
+    } else if (timer_label[0] != '\0') {
       snprintf(output, sizeof(output), "Reminder set: %s, in %ld seconds.", timer_label, seconds);
     } else {
       snprintf(output, sizeof(output), "Timer set for %ld seconds.", seconds);
