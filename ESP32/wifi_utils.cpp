@@ -118,9 +118,10 @@ void startTimeSync() {
   }
   time_sync_started = true;
   esp32va_status::reportStage(esp32va_status::Stage::kTimeSync, esp32va_status::StageState::kActive, nullptr);
-  // TIMEZONE_UTC_OFFSET_SEC only affects localtime_r() (the greeting, "what
-  // time is it?") - SNTP itself always syncs to UTC. A POSIX TZ string in
-  // parameters.h (TIMEZONE_POSIX) also follows summer time.
+  // The time zone only affects localtime_r() (the greeting, "what time is
+  // it?") - SNTP itself always syncs to UTC. TIMEZONE_POSIX (parameters.h)
+  // wins when defined: configTzTime() sets TZ and calls tzset(), so summer
+  // time follows; otherwise the fixed TIMEZONE_UTC_OFFSET_SEC.
 #ifdef TIMEZONE_POSIX
   configTzTime(TIMEZONE_POSIX, "pool.ntp.org", "time.nist.gov");
 #else

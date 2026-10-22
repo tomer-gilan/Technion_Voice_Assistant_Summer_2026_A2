@@ -21,7 +21,7 @@ namespace esp32va_greeting {
     hours - no prefix at night, deliberately, since "Good night" reads as a
     farewell here, not a greeting). Builds the resulting response.create
     message and sends it over `webSocket`. Requires the system clock to
-    already be synced with TIMEZONE_UTC_OFFSET_SEC applied (see
+    already be synced with the time zone applied (TIMEZONE_POSIX, see
     wifi_utils.h's syncSystemTime() and parameters.h) so a chosen prefix matches
     real local time. Call once, when the session first becomes ready - not
     on every reconnect. */

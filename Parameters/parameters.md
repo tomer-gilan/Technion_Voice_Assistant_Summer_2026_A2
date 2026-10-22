@@ -36,7 +36,8 @@
 | `TALK_BUTTON_PIN` | 0 | כפתור BOOT |
 | `LIGHT_SENSOR_PIN` | (בהערה) | מוגדר: הלוח קורא LDR אמיתי. לא מוגדר: חיישן מדומה. רק פיני ADC1 (‏32-39) |
 | `OPENAI_MODEL` | `gpt-realtime-2.1-mini` | המודל |
-| `TIMEZONE_UTC_OFFSET_SEC` / `TIMEZONE_POSIX` | UTC+2 / (בהערה) | אזור הזמן. עם `TIMEZONE_POSIX` גם שעון קיץ |
+| `TIMEZONE_POSIX` | `IST-2IDT,M3.5.5/2,M10.5.0` | אזור הזמן: ישראל, עם מעבר אוטומטי לשעון קיץ (UTC+3) ובחזרה. כשהוא מוגדר הוא קובע |
+| `TIMEZONE_UTC_OFFSET_SEC` | UTC+2 | רק אם מוחקים את `TIMEZONE_POSIX`: הפרש קבוע מ-UTC, בלי שעון קיץ |
 | `kSerialBaudRate` | 115200 | חייב להתאים למרכז הבקרה |
 | `kManualRecordDurationSec` | 3 | כמה זמן מקליט Talk / LISTEN / BOOT |
 | `kMicSoftwareGain` | 2 | הגברה של המיקרופון לפני השליחה (x4 גרם לקיטום) |

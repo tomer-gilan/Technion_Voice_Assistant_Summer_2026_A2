@@ -48,9 +48,13 @@
 #define OPENAI_MODEL "gpt-realtime-2.1-mini"
 
 // ----- Clock -----
-// A fixed offset from UTC for the board's local time. For automatic summer
-// time instead, define a POSIX TZ string - for Israel:
-// #define TIMEZONE_POSIX "IST-2IDT,M3.5.5/2,M10.5.0"
+// The board's local time zone, as a POSIX TZ string: Israel, with summer
+// time switched automatically (IST = UTC+2, IDT = UTC+3 from the last Friday
+// of March 02:00 to the last Sunday of October 02:00 - Israel's own rule,
+// the Friday before the last Sunday, is the same date through 2027).
+// While it is defined, TIMEZONE_UTC_OFFSET_SEC is not used.
+#define TIMEZONE_POSIX "IST-2IDT,M3.5.5/2,M10.5.0"
+// Without TIMEZONE_POSIX: a fixed offset from UTC, no summer time.
 #define TIMEZONE_UTC_OFFSET_SEC (2 * 3600)  // UTC+2
 
 namespace esp32va_params {
