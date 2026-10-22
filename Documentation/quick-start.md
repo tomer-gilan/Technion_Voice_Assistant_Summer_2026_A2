@@ -39,7 +39,7 @@
 | עוצמה | `Set the volume to 30 percent` ואז `A bit louder` | הסליידר זז והוא מאשר |
 | תזכורת | `Remind me in 30 seconds to check the oven` | ספירה לאחור, ובסוף צפצופים, LED מהבהב ו-`Time's up - check the oven` |
 | שעה | `What time is it?` | השעה והתאריך מהשעון של הלוח |
-| חלק היום | `Is it day or night?` | לפי סליידר האור (מדמה חיישן) |
+| חלק היום | `Is it day or night?` | לפי סליידר האור (מדמה חיישן), או לפי **Auto day-cycle**: יום מדומה שלם בכ-2 דקות |
 | זיכרון | `My name is Dana` ואז `What is my name?` | זוכר את השם |
 
 ## מה רואים במסך
