@@ -1,7 +1,8 @@
 // Unit test 07 - onboard LED with PWM brightness
 // Fades the onboard LED (GPIO 2) up and down three times, then holds it at
-// 100%, 30% and off for 2 s each - the same LEDC setup the firmware uses for
-// "dim the light to 30 percent".
+// 100%, 30% and off for 2 s each - the same LEDC setup and the same square
+// brightness curve (duty = percent^2 / 100^2) the firmware uses for "dim the
+// light to 30 percent".
 //
 // PASS (by eye): the LED fades smoothly, and 30% is visibly dimmer than
 // 100%. The sketch prints "===== LED TEST DONE - PASS if ... =====" at the
@@ -22,9 +23,10 @@ constexpr int kFades = 3;
 constexpr uint32_t kFadeStepMs = 8;
 constexpr uint32_t kHoldMs = 2000;
 
-/** Sets the LED to percent brightness (0 = off), honoring its polarity. */
+/** Sets the LED to percent brightness (0 = off), honoring its polarity.
+    Square curve as board_state_utils.cpp, so the steps look even to the eye. */
 void setBrightness(uint32_t percent) {
-  uint32_t duty = percent * kPwmMaxDuty / 100;
+  uint32_t duty = percent * percent * kPwmMaxDuty / (100 * 100);
   if (!LED_ACTIVE_HIGH) {
     duty = kPwmMaxDuty - duty;
   }
