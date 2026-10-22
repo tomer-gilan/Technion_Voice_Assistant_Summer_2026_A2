@@ -10,7 +10,7 @@
 
 | הגדרה | איפה במרכז הבקרה | פקודה | טווח | ברירת מחדל |
 |---|---|---|---|---|
-| רשת Wi-Fi (שם וסיסמה) | Device controls ← Wi-Fi network | `WIFI_SSID <name>`, ואז `WIFI_PASSWORD <password>` | 2.4GHz בלבד, סיסמה 8-64 תווים או בלי | הרשת מ-`SECRETS.h` |
+| רשת Wi-Fi (שם וסיסמה) | Device controls ← Wi-Fi network | `WIFI_SSID <name>`, ואז `WIFI_PASSWORD <password>` | 2.4GHz בלבד, שם עד 32 בתים, סיסמה 8-64 בתים (אות עברית היא 2) או בלי. רווחים בקצוות הסיסמה נשמרים; סיסמה של רווחים בלבד = רשת פתוחה | הרשת מ-`SECRETS.h` |
 | חזרה לרשת ברירת המחדל | Wi-Fi network ← Back to default | `WIFI_FORGET` | | |
 | עוצמת הרמקול | Speaker volume | `VOLUME <0-100>` | 0-100% (בקול: 10-100%) | 100% |
 | השתקה | Mute | `MUTE on\|off` | | כבוי |
