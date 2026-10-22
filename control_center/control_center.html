@@ -994,6 +994,7 @@ const MAX_SSID_BYTES = 32;             // mirrors wifi_utils.cpp's kMaxSsidLengt
 const MIN_PASSWORD_BYTES = 8;          // WPA2 - wifi_utils.cpp checks the same
 const MAX_PASSWORD_BYTES = 64;         // mirrors wifi_utils.cpp's kMaxPasswordLength
 const WIFI_ACK_TIMEOUT_MS = 4000;      // WIFI_PASSWORD sent but no @@WIFI_NET saved / "ignored" by then
+const WIFI_ACK_BOOT_TIMEOUT_MS = 40000;  // the same while booting: setup() reads no commands in its Wi-Fi (20 s) and clock (15 s) waits
 const ASK_ECHO_TIMEOUT_MS = 20000;     // a typed question the board never echoed back stops counting as pending    // LISTEN sent but no "listening" yet: unlock Talk again
 const TOOL_MIN_SHOWN_MS = 1200;        // a tool call is over in milliseconds - keep it readable
 const ERROR_SHOWN_MS = 3000;           // how long a failed LISTEN shows as an error
@@ -2998,11 +2999,15 @@ async function saveWifiNetwork() {
     appendLog(passwordBytes > 0 ? ">> WIFI_PASSWORD ********" : ">> WIFI_PASSWORD");
     elements.wifiPassword.value = "";
     if (state.board.wifiSavePending === pending) {  // not answered while sending
+      // Still starting up (no @@STATE yet, or "booting"): the board may be in
+      // its boot Wi-Fi wait, and saves the network only once that ends.
+      const booting = !state.board.pipeline || state.board.pipeline.state === "booting";
+      if (booting) elements.wifiNote.textContent = "Sent - the board reads it once its Wi-Fi wait ends (up to 20 s)…";
       pending.timer = setTimeout(() => {
         if (state.board.wifiSavePending !== pending) return;
         state.board.wifiSavePending = null;
         elements.wifiNote.textContent = "The board didn't confirm the new network - check the serial terminal.";
-      }, WIFI_ACK_TIMEOUT_MS);
+      }, booting ? WIFI_ACK_BOOT_TIMEOUT_MS : WIFI_ACK_TIMEOUT_MS);
     }
   } catch (error) {
     if (state.board.wifiSavePending === pending) state.board.wifiSavePending = null;
