@@ -22,6 +22,15 @@ constexpr int kDefaultLedBrightnessPercent = esp32va_params::kDefaultLedBrightne
 const char kVolumeSettingKey[] = "volume";
 const char kMutedSettingKey[] = "muted";
 const char kLedBrightnessSettingKey[] = "led_bright";
+const char kSoundsSettingKey[] = "sounds_on";
+
+// Status sounds: two short tones each (a single one for a failed question).
+constexpr uint32_t kStatusToneMs = 120;
+constexpr uint32_t kStatusToneGapMs = 60;
+constexpr uint32_t kLowToneHz = 440;
+constexpr uint32_t kHighToneHz = 660;
+constexpr uint32_t kFailedToneHz = 330;
+constexpr uint32_t kFailedToneMs = 250;
 
 constexpr int kVoiceVolumeStepPercent = esp32va_params::kVoiceVolumeStepPercent;  // "louder" / "quieter" by voice
 constexpr size_t kToolResponseBufferSize = 256;  // function_call_output messages are tiny - no audio involved
@@ -29,6 +38,13 @@ char tool_response_message[kToolResponseBufferSize];
 
 uint8_t volume_percent = kDefaultVolumePercent;
 bool is_muted = false;
+bool status_sounds_on = false;
+StatusSound pending_sound = StatusSound::kNone;
+
+/** Prints "@@SOUNDS <on|off>". */
+void announceSounds() {
+  esp32va_status::printProtocolLine("@@SOUNDS %s", status_sounds_on ? "on" : "off");
+}
 
 /** Prints "@@VOLUME <percent> <muted|unmuted>". */
 void announceVolume() {
@@ -86,6 +102,7 @@ void setupDeviceControls() {
   is_muted = esp32va_settings::loadSetting(kMutedSettingKey, 0) != 0;
   setPlaybackVolume(volume_percent, is_muted);
   esp32va_board::setLedBrightness(static_cast<uint8_t>(constrain(saved_brightness, 0, kMaxPercent)));
+  status_sounds_on = esp32va_settings::loadSetting(kSoundsSettingKey, 0) != 0;
   LOG_INFO("Speaker volume %u%%%s, LED brightness %u%% (saved settings).\n", (unsigned)volume_percent,
            is_muted ? " (muted)" : "", (unsigned)esp32va_board::ledBrightnessPercent());
 }
@@ -130,6 +147,22 @@ bool handleControlCommand(const char* command, bool idle_for_beep) {
     playTestBeep();
     esp32va_status::printProtocolLine("@@BEEP played");
     LOG_INFO("Test beep played%s.\n", is_muted ? " (muted, so silent)" : "");
+    return true;
+  }
+
+  if ((argument = commandArgument(command, "SOUNDS")) != nullptr) {
+    bool turn_on = false;
+    if (!parseOnOff(argument, &turn_on)) {
+      Serial.printf("SOUNDS ignored - expected on or off, got \"%s\".\n", argument);
+    } else {
+      status_sounds_on = turn_on;
+      if (!turn_on) {
+        pending_sound = StatusSound::kNone;
+      }
+      esp32va_settings::saveSetting(kSoundsSettingKey, turn_on ? 1 : 0);
+      LOG_INFO("Status sounds turned %s.\n", turn_on ? "on" : "off");
+    }
+    announceSounds();
     return true;
   }
 
@@ -203,7 +236,9 @@ bool handleSetVolumeCall(JsonDocument& doc, WebSocketsClient& webSocket) {
     webSocket.sendTXT(tool_response_message);
     return true;
   }
-  volume_percent = static_cast<uint8_t>(constrain(requested, 0, kMaxPercent));
+  // Not below kMinVoiceVolumePercent by voice: at 0 the assistant couldn't
+  // even say that it did it.
+  volume_percent = static_cast<uint8_t>(constrain(requested, esp32va_params::kMinVoiceVolumePercent, kMaxPercent));
   is_muted = false;
   setPlaybackVolume(volume_percent, is_muted);
   esp32va_settings::saveSetting(kVolumeSettingKey, volume_percent);
@@ -222,6 +257,43 @@ bool handleSetVolumeCall(JsonDocument& doc, WebSocketsClient& webSocket) {
 void announceControlStates() {
   announceVolume();
   esp32va_board::announceLedState("status");
+  announceSounds();
+}
+
+void requestStatusSound(StatusSound sound) {
+  if (status_sounds_on) {
+    pending_sound = sound;
+  }
+}
+
+bool hasPendingStatusSound() {
+  return pending_sound != StatusSound::kNone;
+}
+
+void playPendingStatusSound() {
+  StatusSound sound = pending_sound;
+  pending_sound = StatusSound::kNone;
+  switch (sound) {
+    case StatusSound::kNone:
+      return;
+    case StatusSound::kOffline:
+      playTone(kHighToneHz, kStatusToneMs);
+      delay(kStatusToneGapMs);
+      playTone(kLowToneHz, kStatusToneMs);
+      break;
+    case StatusSound::kOnline:
+      playTone(kLowToneHz, kStatusToneMs);
+      delay(kStatusToneGapMs);
+      playTone(kHighToneHz, kStatusToneMs);
+      break;
+    case StatusSound::kFailed:
+      playTone(kFailedToneHz, kFailedToneMs);
+      break;
+    default:
+      LOG_ERROR("Unexpected status sound %d - not played.\n", (int)sound);
+      return;
+  }
+  LOG_DEBUG("Status sound %d played%s.\n", (int)sound, is_muted ? " (muted, so silent)" : "");
 }
 
 }  // namespace esp32va_controls

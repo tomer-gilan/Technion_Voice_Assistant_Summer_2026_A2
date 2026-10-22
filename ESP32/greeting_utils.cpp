@@ -60,7 +60,7 @@ constexpr size_t kMaxGreetingLen = 96;        // longest opener + longest prefix
 // around the greeting once embedded in the outer "instructions" string.
 constexpr char kGreetingResponseTemplate[] =
     R"JSON({"type":"response.create","response":{"instructions":"Say exactly and only the following, with no other words or tool calls: \"%s\""}})JSON";
-constexpr size_t kGreetingJsonBufferSize = kMaxGreetingLen + 128;  // template text + JSON punctuation, generous margin
+constexpr size_t kGreetingJsonBufferSize = kMaxGreetingLen + 160;  // the ~130-char template plus the greeting
 
 // Static, not stack-local: same reasoning as ESP32.ino's own buffers (avoids
 // heap fragmentation - see CLAUDE.md's Engineering Constraints).

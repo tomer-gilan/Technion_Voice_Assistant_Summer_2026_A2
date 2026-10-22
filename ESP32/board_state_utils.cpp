@@ -95,12 +95,18 @@ bool handleSetBoardStateCall(JsonDocument& doc, WebSocketsClient& webSocket) {
 
   JsonDocument args_doc;
   DeserializationError err = deserializeJson(args_doc, arguments_json);
-  if (err) {
-    LOG_ERROR("set_board_state args parse failed: %s\n", err.c_str());
-    LOG_DEBUG("Failed arguments string: %s\n", arguments_json);
-    return false;
+  JsonVariant led_on_value = args_doc["led_on"];
+  if (err || !led_on_value.is<bool>()) {
+    // Still answer the call, like the other tools - otherwise the model
+    // waits on it and the user hears nothing.
+    LOG_ERROR("set_board_state called without a valid led_on: %s\n", arguments_json);
+    snprintf(tool_response_message, kToolResponseBufferSize,
+             R"JSON({"type":"conversation.item.create","item":{"type":"function_call_output","call_id":"%s","output":"Error: led_on must be true or false - the LED was not changed."}})JSON",
+             call_id);
+    webSocket.sendTXT(tool_response_message);
+    return true;
   }
-  bool led_on = args_doc["led_on"] | false;
+  bool led_on = led_on_value.as<bool>();
   JsonVariant brightness_value = args_doc["brightness_percent"];
   bool brightness_given = brightness_value.is<int>() || brightness_value.is<float>();
   if (brightness_given) {

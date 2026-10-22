@@ -189,13 +189,17 @@ void setPlaybackVolume(uint8_t percent, bool muted) {
 }
 
 void playTestBeep() {
-  constexpr uint32_t kTotalSamples = kSampleRateHz * kBeepDurationMs / 1000;
+  playTone(kBeepFrequencyHz, kBeepDurationMs);
+}
+
+void playTone(uint32_t frequency_hz, uint32_t duration_ms) {
+  const uint32_t total_samples = kSampleRateHz * duration_ms / 1000;
   constexpr uint32_t kChunkWords = sizeof(tx_i2s_words) / sizeof(tx_i2s_words[0]);
   uint32_t samples_written = 0;
-  while (samples_written < kTotalSamples) {
-    uint32_t words = min(kChunkWords, kTotalSamples - samples_written);
+  while (samples_written < total_samples) {
+    uint32_t words = min(kChunkWords, total_samples - samples_written);
     for (uint32_t i = 0; i < words; i++) {
-      double phase = 2.0 * M_PI * kBeepFrequencyHz * (samples_written + i) / kSampleRateHz;
+      double phase = 2.0 * M_PI * frequency_hz * (samples_written + i) / kSampleRateHz;
       int32_t sample = static_cast<int32_t>(kBeepAmplitude * sin(phase)) * playback_volume_q12 / kVolumeUnityQ12;
       tx_i2s_words[i] = sample << 16;  // same 32-bit-wide TX alignment as drainRingBufferToSpeaker()
     }

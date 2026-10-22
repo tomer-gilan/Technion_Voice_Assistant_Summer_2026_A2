@@ -12,6 +12,12 @@
 //   BEEP                   0.3 s test tone, when idle  -> @@BEEP played, or @@BEEP busy
 //   LED <on|off>           onboard LED                 -> @@LED <on|off> <brightness> gui
 //   LED_BRIGHTNESS <0-100> its brightness in %         -> @@LED ...
+//   SOUNDS <on|off>        status sounds on the board  -> @@SOUNDS <on|off>
+//
+// Status sounds tell someone without the laptop what the board can't show
+// otherwise: two falling tones when it goes offline, two rising ones when
+// it's back, a low tone when a question failed. Off until switched on
+// (kept in flash), and silent while muted.
 //
 // The volume can also be set by voice, through the set_volume tool
 // (handleSetVolumeCall() below) -> @@VOLUME ...
@@ -46,7 +52,24 @@ bool handleSetVolumeCall(JsonDocument& doc, WebSocketsClient& webSocket);
     for set_board_state's brightness_percent (board_state_utils.h). */
 void setAndSaveLedBrightness(uint8_t percent);
 
-/** Prints the current @@VOLUME and @@LED lines - part of the STATUS reply. */
+/** Prints the current @@VOLUME, @@LED and @@SOUNDS lines - part of the
+    STATUS reply. */
 void announceControlStates();
+
+/** The status sounds (see above). */
+enum class StatusSound : uint8_t { kNone, kOffline, kOnline, kFailed };
+
+/** Asks for a status sound - played by playPendingStatusSound() once the
+    board is quiet. Ignored while status sounds are off. A newer request
+    replaces one that hasn't played yet. */
+void requestStatusSound(StatusSound sound);
+
+/** True when a requested status sound is waiting to play. */
+bool hasPendingStatusSound();
+
+/** Plays the waiting status sound (blocking, well under a second). Call
+    only while nothing records or plays - and hold hands-free listening off
+    around it, as for BEEP, so the mic doesn't take it for speech. */
+void playPendingStatusSound();
 
 }  // namespace esp32va_controls

@@ -71,6 +71,7 @@
 #include "vad_utils.h"
 #include "clock_timer_utils.h"
 #include "board_info_utils.h"
+#include "button_utils.h"
 
 namespace {
 // Unchanged from step 21 except for the get_time_of_day, set_volume,
@@ -167,6 +168,7 @@ uint32_t hands_free_turns_passed = 0;    // in a row, toward this step's PASS
 unsigned long session_not_ready_since_ms = 0;  // when the session was last lost (or boot) - see isAssistantOffline()
 bool setup_finished = false;  // setup() returned - "offline" means something only after that
 bool openai_connection_started = false;  // see startOpenAiConnectionWhenNetworkReady()
+bool offline_sound_requested = false;  // the "offline" status sound went out, so "back online" is due once ready
 }  // namespace
 
 bool isAssistantOffline();
@@ -298,6 +300,7 @@ void markReplyFailed(const char* reason) {
   awaiting_reply = false;
   Serial.printf("===== LISTEN #%u FAILED: %s =====\n", listen_cycle, reason);
   esp32va_status::printProtocolLine("@@RESULT fail %u %s", listen_cycle, reason);
+  esp32va_controls::requestStatusSound(esp32va_controls::StatusSound::kFailed);
   esp32va_measure::reportTurn(false);
   if (session_ready) {
     Serial.println(esp32va_hands_free::isHandsFreeOn() ? "Just talk to try again (or type LISTEN)." : "Type LISTEN to try again.");
@@ -1052,6 +1055,7 @@ void reprintFullStatus() {
   esp32va_wifi::reportWifiSignal();
   esp32va_wifi::announceWifiNetwork();
   esp32va_controls::announceControlStates();
+  esp32va_button::announceButtonState();
   esp32va_light_sensor::announceLightState();
   esp32va_hands_free::announceHandsFreeState();
   esp32va_clock::announceTimerState();
@@ -1119,6 +1123,21 @@ void askTypedQuestion(const String& text) {
   LOG_INFO("Typed question sent: \"%s\"\n", question.c_str());
 }
 
+/** The BOOT button (when switched on - button_utils.h): starts a LISTEN like
+    the Talk button, or cancels the one being recorded or answered. */
+void handleTalkButtonPress() {
+  if (!should_keep_running) {
+    return;
+  }
+  if (is_capturing || awaiting_reply) {
+    Serial.printf("Talk button: cancelling LISTEN #%u.\n", listen_cycle);
+    cancelListenTurn();
+    return;
+  }
+  Serial.printf("Talk button pressed.\n");
+  startManualListen();
+}
+
 /** Checks Serial for a typed command. LIST / GET / DELETE <name> / DELETE_ALL answer the laptop
     app (see sd_file_transfer_utils.h) - with @@BUSY unless idle. STATUS
     reprints the board's whole status (status_report_utils.h), CLOCK just
@@ -1127,7 +1146,8 @@ void askTypedQuestion(const String& text) {
     (device_controls_utils.h), LIGHT [<value>] / LIGHT_BANDS set/show the
     simulated light sensor (light_sensor_utils.h), VAD / VAD_SENSITIVITY /
     VAD_HANGOVER set hands-free listening (hands_free_utils.h), WIFI /
-    WIFI_SSID / WIFI_PASSWORD / WIFI_FORGET the network (wifi_utils.h) - all at any
+    WIFI_SSID / WIFI_PASSWORD / WIFI_FORGET the network (wifi_utils.h),
+    BUTTON the BOOT button as a Talk button (button_utils.h) - all at any
     time; BEEP and GET stop hands-free listening first. LISTEN starts a
     manual capture if the board can take one (startManualListen()). ASK
     <text> sends a typed question (askTypedQuestion()).
@@ -1158,7 +1178,8 @@ void checkForSerialCommand() {
     handled = esp32va_controls::handleControlCommand(command.c_str(), isIdleForFileTransfer()) ||
               esp32va_light_sensor::handleLightCommand(command.c_str()) ||
               esp32va_hands_free::handleHandsFreeCommand(command.c_str()) ||
-              esp32va_wifi::handleWifiCommand(command.c_str());
+              esp32va_wifi::handleWifiCommand(command.c_str()) ||
+              esp32va_button::handleButtonCommand(command.c_str());
   }
   if (pauses_hands_free) {
     esp32va_hands_free::holdOff();  // again: the cooldown counts from after the beep or the transfer
@@ -1175,7 +1196,7 @@ void checkForSerialCommand() {
     return;
   }
   if (!command.equalsIgnoreCase("LISTEN")) {
-    Serial.printf("Unknown command \"%s\" - expected LISTEN, CANCEL, ASK <text>, STATUS, CLOCK, VAD on|off, VAD_SENSITIVITY <1-5>, VAD_HANGOVER <600-1500>, LIGHT <0-%d>, LIGHT_BANDS <evening> <day>, VOLUME <0-100>, MUTE on|off, BEEP, LED on|off, LED_BRIGHTNESS <0-100>, WIFI, WIFI_SSID <name>, WIFI_PASSWORD [<password>], WIFI_FORGET, LIST, GET <name>, DELETE <name> or DELETE_ALL [replies|commands].\n",
+    Serial.printf("Unknown command \"%s\" - expected LISTEN, CANCEL, ASK <text>, STATUS, CLOCK, VAD on|off, VAD_SENSITIVITY <1-5>, VAD_HANGOVER <600-1500>, LIGHT <0-%d>, LIGHT_BANDS <evening> <day>, VOLUME <0-100>, MUTE on|off, BEEP, SOUNDS on|off, BUTTON on|off, LED on|off, LED_BRIGHTNESS <0-100>, WIFI, WIFI_SSID <name>, WIFI_PASSWORD [<password>], WIFI_FORGET, LIST, GET <name>, DELETE <name> or DELETE_ALL [replies|commands].\n",
              command.c_str(), esp32va_light_sensor::kMaxLightSensorValue);
     return;
   }
@@ -1260,6 +1281,15 @@ void updatePipelineState() {
   if (!should_keep_running) {
     return;  // haltSketch() already reported halted
   }
+  bool offline_now = !session_ready && setup_finished &&
+                     (!esp32va_wifi::isWifiConnected() || isAssistantOffline());
+  if (offline_now && !offline_sound_requested) {
+    offline_sound_requested = true;
+    esp32va_controls::requestStatusSound(esp32va_controls::StatusSound::kOffline);
+  } else if (session_ready && offline_sound_requested) {
+    offline_sound_requested = false;
+    esp32va_controls::requestStatusSound(esp32va_controls::StatusSound::kOnline);
+  }
   if (!session_ready) {
     if (setup_finished && !esp32va_wifi::isWifiConnected()) {
       esp32va_status::reportPipelineState(PipelineState::kOffline, "no Wi-Fi");
@@ -1333,6 +1363,8 @@ void setup() {
   setupI2sFullDuplex();
   esp32va_controls::setupDeviceControls();
   esp32va_controls::announceControlStates();
+  esp32va_button::setupTalkButton();
+  esp32va_button::announceButtonState();
   esp32va_hands_free::setupHandsFree();
   esp32va_hands_free::announceHandsFreeState();
   esp32va_status::reportStage(esp32va_status::Stage::kSpeaker, esp32va_status::StageState::kOk,
@@ -1466,6 +1498,9 @@ void loop() {
   }
 
   checkForSerialCommand();
+  if (esp32va_button::takeButtonPress()) {
+    handleTalkButtonPress();
+  }
   serviceCapture();
   drainRingBufferToSpeaker();
   serviceReplyRecording();
@@ -1482,6 +1517,11 @@ void loop() {
     unprompted_speech_detail = "timer";
     response_in_flight = true;  // like the greeting: hands-free waits for it to be heard
     last_reply_activity_ms = millis();
+  }
+  if (board_quiet && !response_in_flight && esp32va_controls::hasPendingStatusSound()) {
+    esp32va_hands_free::holdOff();  // as for BEEP: the mic mustn't take it for speech
+    esp32va_controls::playPendingStatusSound();
+    esp32va_hands_free::holdOff();  // and the cooldown counts from after it
   }
   esp32va_wifi::monitorWifiConnection();
   startOpenAiConnectionWhenNetworkReady();
