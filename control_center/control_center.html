@@ -1688,6 +1688,7 @@ const state = {
   logLines: [],
   logFile: null,  // { handle, bytesWritten, queued: [] } once a folder is picked
   downloadingName: null,    // the recording a GET is running for
+  downloadsRunning: 0,      // GETs asked for and not over yet - the board's loop() is held meanwhile, so Talk and Ask wait
   lastProgressPercent: -1,
   selectedSource: "",       // "Downloaded from the board ..." / "Playing the copy already on the laptop ..."
   sessionStamp: fileStamp(new Date()),
@@ -2130,6 +2131,8 @@ async function selectRecording(recording) {
     elements.playerStatus.textContent = "Downloading from the board…";
     state.downloadingName = recording.name;
     state.lastProgressPercent = -1;
+    state.downloadsRunning += 1;
+    updateTalkButton();
     try {
       const { data, crc } = await link.get(recording.name);
       if (copy) releaseCopy(copy);
@@ -2144,6 +2147,8 @@ async function selectRecording(recording) {
       return;
     } finally {
       state.downloadingName = null;
+      state.downloadsRunning -= 1;
+      updateTalkButton();
     }
   }
   if (state.selectedName !== recording.name) return;  // another one was picked meanwhile
@@ -2650,12 +2655,14 @@ function showPipelineState(shownState, detail) {
 
 /** Talk is usable only while the assistant is Ready or waiting for speech
     (or the board doesn't report its state at all). Locked while a LISTEN is
-    starting. */
+    starting, and while a recording downloads (the board would only read the
+    LISTEN once the transfer is over). */
 function updateTalkButton() {
   const board = state.board;
   const listening = board.shownState === "listening";
   const noReports = link.connected && !board.pipeline && board.legacyFirmware;
-  const ready = link.connected && !board.talkPending &&
+  const downloading = state.downloadsRunning > 0;
+  const ready = link.connected && !board.talkPending && !downloading &&
     ((board.pipeline && IDLE_STATES.has(board.pipeline.state)) || noReports);
   elements.talk.disabled = !ready;
   document.getElementById("selftest-run").disabled = !ready || noReports || selfTestRunning;
@@ -2667,7 +2674,8 @@ function updateTalkButton() {
   elements.cancelTalk.hidden = !link.connected ||
     !(["listening", "processing", "tool"].includes(shown) || (shown === "speaking" && !(board.pipeline && board.pipeline.detail)));
   if (!listening) {
-    elements.talkLabel.textContent = board.talkPending ? "Starting…" : ready || !link.connected ? "Talk" : "Busy";
+    elements.talkLabel.textContent = downloading && link.connected ? "Downloading…"
+      : board.talkPending ? "Starting…" : ready || !link.connected ? "Talk" : "Busy";
   }
 }
 
@@ -3419,7 +3427,9 @@ document.getElementById("phrases").replaceChildren(...EXAMPLE_PHRASES.map(([icon
   button.addEventListener("click", () => {
     if (elements.talk.disabled) {
       elements.result.className = "result";
-      elements.result.textContent = link.connected ? "Busy - try again when the assistant is Ready." : "Connect the board first.";
+      elements.result.textContent = !link.connected ? "Connect the board first."
+        : state.downloadsRunning ? "Downloading a recording - try again once it's done."
+        : "Busy - try again when the assistant is Ready.";
       return;
     }
     elements.result.className = "result";
