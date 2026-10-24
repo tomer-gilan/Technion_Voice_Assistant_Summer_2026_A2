@@ -2849,29 +2849,27 @@ document.getElementById("connection-alert-close").addEventListener("click", hide
 const DEMO_SECTIONS = [
   ["סיפורי משתמש", [
     ["intro", "הצגת הפרויקט (דקה, בלי מצגת)", "משפט אחד על המטרה. לומר: חיישן האור מדומה בסליידר, ועברית עובדת אבל פחות טוב."],
-    ["boot", "1. הדלקה ונורות תקינות", "Reset ללוח מול הבוחנים. Connect board, הנורות נהיות ירוקות אחת אחת וברכת פתיחה."],
+    ["boot", "1. הדלקה, נורות תקינות ומצב הלוח", "Reset ללוח מול הבוחנים. Connect board, הנורות נהיות ירוקות אחת אחת וברכת פתיחה. אחר כך <code>How are you doing</code>: עוצמת ה-Wi-Fi, כמה זמן הלוח דלוק וכמה זיכרון פנוי. תגית 📶 בשיחה."],
     ["talk", "2. שאלה בלחיצה", "Talk או רווח: <code>What is the capital of France</code>. לתת לבוחן לבחור דוגמה מ-Try saying ולשאול אותה."],
     ["transcript", "3. רואים מה שמע ומה ענה", "המצב משתנה (Listening, Processing, Speaking), והשיחה בבועות עם שעה וזמן תגובה. תגיות: 💡 🌙 🔊 ⏰ 🕒 📶."],
     ["led", "4. הדלקת אור בקול", "<code>Turn on the light</code>, <code>Dim the light to 30 percent</code>, ואז <code>Turn off the light</code>. הנורה במסך זוהרת לפי הבהירות."],
     ["voicevolume", "5. עוצמה בקול", "<code>Set the volume to 30 percent</code>, ואז <code>A bit louder</code>."],
     ["timer", "6. תזכורת, טיימר ושעה", "<code>Remind me in 30 seconds to check the oven</code>: ספירה לאחור במסך, ובסוף 3 צפצופים, LED מהבהב ו-<code>Time's up - check the oven</code>. אחר כך <code>Turn off the light in 20 seconds</code>: האור נכבה בסוף הטיימר. ואז <code>What time is it</code>."],
     ["daynight", "7. חלק היום לפי חיישן האור", "מזיזים את סליידר Light sensor לערך נמוך, <code>Is it day or night</code> (night), ואז מעלים ושואלים שוב."],
-    ["status", "8. איך הלוח מרגיש", "<code>How are you doing</code>: עוצמת ה-Wi-Fi, כמה זמן הלוח דלוק וכמה זיכרון פנוי. תגית 📶 בשיחה."],
-    ["handsfree", "9. Hands-free בלי כפתור", "מדליקים את המתג ומדברים. הוא מתחיל ועוצר לבד."],
-    ["memory", "10. זיכרון שיחה", "<code>My name is Omri</code> ואז <code>What is my name</code>"],
-    ["hebrew", "11. עברית", "<code>מה בירת צרפת</code>: עונה בעברית. התמלול בבועה יכול להיות לא מדויק."],
-    ["typed", "12. שאלה בכתב", "בשדה <code>Or type a question…</code> ולוחצים Ask. עונה בקול כרגיל. עד 200 בתים (כ-100 אותיות בעברית)."],
-    ["cancel", "13. ביטול באמצע", "Talk ומיד Cancel: <code>LISTEN #N CANCELLED</code> והלוח חוזר ל-Ready."],
-    ["selftest", "14. Self-test", "הכפתור ליד Board health: ה-LED מהבהב, צפצוף, וכל השורות עם ✓."],
-    ["recordings", "15. ניגון הקלטות מה-SD", "לשונית ההקלטות: מנגנים את הפקודה האחרונה עם waveform, ואפשר למחוק."],
-    ["settings", "16. עוצמה, השתקה ובהירות", "סליידר עוצמה ו-Test beep, Mute, בהירות LED."],
-    ["vadtune", "17. כיוון Hands-free", "Sensitivity ו-Stop after silence, ובודקים דיבור ורעש."],
-    ["bands", "18. ספי יום / ערב / לילה", "משנים ספים ולוחצים Apply thresholds."],
-    ["persist", "19. ההגדרות נשמרות", "Reset ללוח, והעוצמה, הבהירות וההגדרות של Hands-free נשארות."],
-    ["nopc", "20. בלי מחשב", "ב-On the board itself: BOOT button ו-Status sounds, ומדליקים Hands-free (כולם נשמרים בלוח). מנתקים את ה-USB מהמחשב, ורק אז מחברים את ה-power bank (אף פעם לא את שניהם יחד: הנחיית הבטיחות של הקורס). הלוח עולה מחדש עם ההגדרות השמורות, וצריך לחכות כ-10 שניות לברכה. שואלים בקול או ב-BOOT."],
-    ["replay", "21. שחזור לוג, בלי הלוח", "Replay a log… עם לוג שנשמר, במהירות 4x. בסיום Stop, ו-Connect board שוב."],
-    ["stats", "22. סטטיסטיקה", "חלונית Statistics: מספרים, גרף זמני תגובה, Export CSV."],
-    ["summary", "22. סיכום במסך מלא", "כפתור Summary: הפקודות, אחוז ההצלחה, זמן התגובה וההגדרות של הלוח, בגדול. Save report שומר דף HTML."],
+    ["handsfree", "8. Hands-free בלי כפתור", "מדליקים את המתג ומדברים. הוא מתחיל ועוצר לבד."],
+    ["memory", "9. זיכרון שיחה", "<code>My name is Omri</code> ואז <code>What is my name</code>"],
+    ["typed", "10. שאלה בכתב", "בשדה <code>Or type a question…</code> ולוחצים Ask. עונה בקול כרגיל. עד 200 בתים (כ-100 אותיות בעברית)."],
+    ["cancel", "11. ביטול באמצע", "Talk ומיד Cancel: <code>LISTEN #N CANCELLED</code> והלוח חוזר ל-Ready."],
+    ["selftest", "Self-test (בלי סיפור)", "הכפתור ליד Board health: ה-LED מהבהב, צפצוף, וכל השורות עם ✓."],
+    ["recordings", "12. ניגון הקלטות מה-SD", "לשונית ההקלטות: מנגנים את הפקודה האחרונה עם waveform, ואפשר למחוק."],
+    ["settings", "13. עוצמה, השתקה ובהירות", "סליידר עוצמה ו-Test beep, Mute, בהירות LED."],
+    ["vadtune", "14. כיוון Hands-free", "Sensitivity ו-Stop after silence, ובודקים דיבור ורעש."],
+    ["bands", "ספי יום / ערב / לילה (בלי סיפור)", "משנים ספים ולוחצים Apply thresholds."],
+    ["persist", "ההגדרות נשמרות (בלי סיפור)", "Reset ללוח, והעוצמה, הבהירות וההגדרות של Hands-free נשארות."],
+    ["nopc", "15. כפתור BOOT, ובלי מחשב", "ב-On the board itself: BOOT button ו-Status sounds, ומדליקים Hands-free (כולם נשמרים בלוח). מנתקים את ה-USB מהמחשב, ורק אז מחברים את ה-power bank (אף פעם לא את שניהם יחד: הנחיית הבטיחות של הקורס). הלוח עולה מחדש עם ההגדרות השמורות, וצריך לחכות כ-10 שניות לברכה. שואלים בקול או ב-BOOT."],
+    ["replay", "שחזור לוג, בלי הלוח (בלי סיפור)", "Replay a log… עם לוג שנשמר, במהירות 4x. בסיום Stop, ו-Connect board שוב."],
+    ["stats", "16. סטטיסטיקה", "חלונית Statistics: מספרים, גרף זמני תגובה, Export CSV."],
+    ["summary", "16. סיכום במסך מלא", "כפתור Summary: הפקודות, אחוז ההצלחה, זמן התגובה וההגדרות של הלוח, בגדול. Save report שומר דף HTML."],
   ]],
   ["מקרי קצה (הרשימה המורחבת)", [
     ["noise", "13. רעש לא מפעיל", "Hands-free דלוק: דפיקה על השולחן או מחיאת כפיים, והמצב נשאר Waiting for speech."],
@@ -2895,7 +2893,7 @@ const DEMO_SECTIONS = [
 ];
 const DEMO_STORAGE_KEY = "esp32va-demo-checklist";
 /** Tools whose use ticks a checklist item by itself (autoTickDemo). */
-const DEMO_TOOL_ITEMS = { set_board_state: "led", set_volume: "voicevolume", get_time_of_day: "daynight", get_board_status: "status" };
+const DEMO_TOOL_ITEMS = { set_board_state: "led", set_volume: "voicevolume", get_time_of_day: "daynight", get_board_status: "boot" };
 
 /** Ticked items, kept in this browser (may be unavailable - then just for this page). */
 let demoDone = new Set();
@@ -3092,9 +3090,9 @@ document.getElementById("selftest-close").addEventListener("click", () => { docu
 
 /** The 25 minutes of Documentation/demo-plan.md: [from minute, what to show]. */
 const DEMO_PLAN = [
-  [0, "הצגה קצרה"], [1, "הדלקה ונורות"], [2, "שאלה בלחיצה"], [3.5, "LED ועוצמה בקול"], [5, "תזכורת וטיימר"],
-  [6.5, "חלק היום ומצב הלוח"], [8, "Hands-free ורעש"], [10, "זיכרון ועברית"], [11.5, "שאלה בכתב וביטול"],
-  [13.5, "Self-test והקלטות SD"], [15, "הגדרות ושמירה"], [17, "בלי מחשב"], [19, "שחזור לוג"], [20, "רובסטיות: רשת וחומרה"],
+  [0, "הצגה קצרה"], [1, "הדלקה ומצב הלוח"], [2, "שאלה בלחיצה"], [3.5, "LED ועוצמה בקול"], [5, "תזכורת וטיימר"],
+  [6.5, "חלק היום"], [8, "Hands-free ורעש"], [10, "זיכרון שיחה"], [11.5, "שאלה בכתב וביטול"],
+  [13.5, "Self-test והקלטות SD"], [15, "הגדרות ושמירה"], [17, "BOOT ובלי מחשב"], [19, "שחזור לוג"], [20, "רובסטיות: רשת וחומרה"],
   [23, "סטטיסטיקה וסיכום"], [24, "רזרבה"],
 ];
 const DEMO_LENGTH_MIN = 25;
