@@ -162,6 +162,13 @@ void handleServerMessage(uint8_t* payload, size_t length) {
       handled = esp32va_clock::handleSetTimerCall(doc, webSocket);
     } else if (strcmp(function_name, "get_board_status") == 0) {
       handled = esp32va_info::handleGetBoardStatusCall(doc, webSocket);
+    } else if (strcmp(function_name, "set_hands_free") == 0) {
+      // Only in answer to the user - a LISTEN, or a typed question (ASK) -
+      // never during the greeting or a timer announcement, where nobody
+      // asked for anything.
+      bool user_request_in_progress =
+          awaiting_reply || (response_in_flight && strcmp(unprompted_speech_detail, "typed") == 0);
+      handled = esp32va_hands_free::handleSetHandsFreeCall(doc, webSocket, user_request_in_progress);
     } else {
       LOG_ERROR("Unhandled function call: %s\n", function_name);
     }
@@ -316,11 +323,18 @@ void handleServerMessage(uint8_t* payload, size_t length) {
 }
 
 /** Shows the OpenAI startup check as failed (red in the laptop app):
-    offline, retrying every offlineRetryIntervalMs(). */
+    offline, retrying every offlineRetryIntervalMs() - and that OpenAI
+    refused the API key, if that's why. */
 void reportOpenAiStageOffline() {
   char stage_detail[kStateDetailBufferSize];
-  snprintf(stage_detail, sizeof(stage_detail), "offline - retrying every %lu s",
-           esp32va_openai::offlineRetryIntervalMs() / 1000);
+  int refused_http_code = esp32va_openai::lastKeyRefusalHttpCode();
+  if (refused_http_code != 0) {
+    snprintf(stage_detail, sizeof(stage_detail), "API key refused (HTTP %d) - retrying every %lu s", refused_http_code,
+             esp32va_openai::offlineRetryIntervalMs() / 1000);
+  } else {
+    snprintf(stage_detail, sizeof(stage_detail), "offline - retrying every %lu s",
+             esp32va_openai::offlineRetryIntervalMs() / 1000);
+  }
   esp32va_status::reportStage(esp32va_status::Stage::kOpenAi, esp32va_status::StageState::kFail, stage_detail);
 }
 
@@ -333,6 +347,7 @@ void onWebSocketEvent(WStype_t type, uint8_t* payload, size_t length) {
       connection_count++;
       esp32va_measure::markBootMilestone(esp32va_measure::BootMilestone::kSocketConnected);  // first connect only
       LOG_INFO("Connected (#%u).\n", connection_count);
+      esp32va_openai::noteHandshakeAccepted();  // OpenAI took the API key
       session_ready = false;
       esp32va_status::reportStage(esp32va_status::Stage::kOpenAi, esp32va_status::StageState::kActive,
                                   "setting up the session");
@@ -341,7 +356,7 @@ void onWebSocketEvent(WStype_t type, uint8_t* payload, size_t length) {
       // step 7 - see Documentation/decisions.md "Discoveries").
       should_send_session_update = true;
       break;
-    case WStype_DISCONNECTED:
+    case WStype_DISCONNECTED: {
       // Distinguishing why matters: mid-turn is a real, visible failure
       // (that LISTEN cycle's reply is lost); idle is expected/benign, most
       // likely the server's own idle timeout.
@@ -359,6 +374,9 @@ void onWebSocketEvent(WStype_t type, uint8_t* payload, size_t length) {
       esp32va_audio::resetRingBuffer();  // any partial reply audio is now stale - don't play it
       markReplyFailed("disconnected before a reply arrived");
       session_not_ready_since_ms = millis();
+      // A handshake OpenAI refused (HTTP 401/403): the API key - counted,
+      // and the saved key may give way to SECRETS.h's (or back).
+      int refused_http_code = esp32va_openai::noteDisconnectReason(payload, length, webSocket);
       if (esp32va_openai::registerDisconnect(webSocket)) {
         // Offline - but never halted: it keeps retrying, and the timer and
         // the controls keep working meanwhile.
@@ -367,13 +385,22 @@ void onWebSocketEvent(WStype_t type, uint8_t* payload, size_t length) {
                       esp32va_openai::offlineRetryIntervalMs() / 1000);
       } else if (!esp32va_openai::isOffline()) {
         char stage_detail[kStateDetailBufferSize];
-        snprintf(stage_detail, sizeof(stage_detail), "disconnected - reconnecting (attempt %u of %u)",
-                 (unsigned)esp32va_openai::reconnectAttemptCount(),
-                 (unsigned)esp32va_openai::attemptsBeforeOffline());
-        esp32va_status::reportStage(esp32va_status::Stage::kOpenAi, esp32va_status::StageState::kActive,
+        if (refused_http_code != 0) {
+          snprintf(stage_detail, sizeof(stage_detail), "API key refused (HTTP %d) - retrying (attempt %u of %u)",
+                   refused_http_code, (unsigned)esp32va_openai::reconnectAttemptCount(),
+                   (unsigned)esp32va_openai::attemptsBeforeOffline());
+        } else {
+          snprintf(stage_detail, sizeof(stage_detail), "disconnected - reconnecting (attempt %u of %u)",
+                   (unsigned)esp32va_openai::reconnectAttemptCount(),
+                   (unsigned)esp32va_openai::attemptsBeforeOffline());
+        }
+        esp32va_status::reportStage(esp32va_status::Stage::kOpenAi,
+                                    refused_http_code != 0 ? esp32va_status::StageState::kFail
+                                                           : esp32va_status::StageState::kActive,
                                     stage_detail);
       }
       break;
+    }
     case WStype_TEXT:
       handleServerMessage(payload, length);
       break;

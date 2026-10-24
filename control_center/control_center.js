@@ -31,7 +31,7 @@ const SAFE_FILE_NAME = /^[A-Za-z0-9_-][A-Za-z0-9_.-]{0,30}$/;  // a plain name, 
 const STATUS_TAGS = new Set(["@@STAGE", "@@STATE", "@@RESULT", "@@MIC_LEVEL", "@@HEARD", "@@SAID", "@@WIFI",
                              "@@LED", "@@VOLUME", "@@LIGHT", "@@BEEP", "@@VAD", "@@VAD_LEVEL", "@@VAD_EVENT",
                              "@@TIMING", "@@BOOT_TIMING", "@@TIMER", "@@CLOCK", "@@WIFI_NET", "@@BUTTON",
-                             "@@SOUNDS", "@@ALIVE", "@@LIMITS"]);
+                             "@@SOUNDS", "@@ALIVE", "@@LIMITS", "@@OPENAI_KEY"]);
 const STATUS_REQUEST_DELAY_MS = 400;   // after connecting, ask for the full picture
 const NO_STATUS_HINT_MS = 4000;        // no @@STATE by then: the board runs older firmware
 const BOARD_SILENT_MS = 15000;         // no line from the board for this long (it sends @@ALIVE every 5 s): "not responding"
@@ -44,6 +44,12 @@ const MIN_PASSWORD_BYTES = 8;          // WPA2 - wifi_utils.cpp checks the same
 const MAX_PASSWORD_BYTES = 64;         // mirrors wifi_utils.cpp's kMaxPasswordLength
 const WIFI_ACK_TIMEOUT_MS = 4000;      // WIFI_PASSWORD sent but no @@WIFI_NET saved / "ignored" by then
 const WIFI_ACK_BOOT_TIMEOUT_MS = 40000;  // the same while booting: setup() reads no commands in its Wi-Fi (20 s) and clock (15 s) waits
+const MIN_API_KEY_BYTES = 20;          // mirrors openai_realtime_utils.h's kMinApiKeyLength
+const MAX_API_KEY_BYTES = 200;         // mirrors openai_realtime_utils.h's kMaxApiKeyLength
+const API_KEY_PATTERN = /^sk-[A-Za-z0-9_-]+$/;  // what the board takes - openai_realtime_utils.cpp's isPlausibleApiKey()
+// The player and the board's mic (LAPTOP_PLAYBACK - ESP32/hands_free_utils.h).
+const PLAYBACK_HOLD_MARGIN_MS = 1500;  // LAPTOP_PLAYBACK on <ms>: the recording's time left, plus this
+const PLAYBACK_HOLD_RESEND_MS = 500;   // a hold ending this close to the one already sent isn't sent again
 const ASK_ECHO_TIMEOUT_MS = 20000;     // a typed question the board never echoed back stops counting as pending
 const TOOL_MIN_SHOWN_MS = 1200;        // a tool call is over in milliseconds - keep it readable
 const ERROR_SHOWN_MS = 3000;           // how long a failed LISTEN shows as an error
@@ -71,6 +77,7 @@ const VAD_HANGOVER_MAX_MS = 1500;      // mirrors parameters.h's kMaxVadHangover
 const DEFAULT_LIMITS = Object.freeze({
   max_ask_bytes: MAX_ASK_BYTES, max_ssid_bytes: MAX_SSID_BYTES,
   min_password_bytes: MIN_PASSWORD_BYTES, max_password_bytes: MAX_PASSWORD_BYTES,
+  min_api_key_bytes: MIN_API_KEY_BYTES, max_api_key_bytes: MAX_API_KEY_BYTES,
   max_kept_recordings: MAX_KEPT_RECORDINGS, mic_gain: BOARD_MIC_GAIN, light_max: LIGHT_SENSOR_MAX,
   max_utterance_ms: MAX_UTTERANCE_S * 1000,
   vad_sensitivity_min: VAD_SENSITIVITY_MIN, vad_sensitivity_max: VAD_SENSITIVITY_MAX,
@@ -81,6 +88,8 @@ const DEFAULT_LIMITS = Object.freeze({
     replay (resetBoardStatus()). */
 const limits = { ...DEFAULT_LIMITS };
 const VAD_NOTE_DEFAULT = "Higher sensitivity hears quieter voices - and more of the room's noise.";
+const PLAYBACK_VAD_NOTE = "Paused while a recording plays here - the board's mic would take it for a question.";
+const PLAYER_PAUSED_FOR_LISTEN = "Paused - the board is recording a question, and its mic would hear this. Press play again once it's done.";
 const DISCARD_TEXT = {                 // @@VAD_EVENT discarded <reason> - vad_utils.h's DiscardReason
   short: "too short to be speech (a click, a knock?)",
   unvoiced: "no voice in it (a cough, a laugh, running water?)",
@@ -88,7 +97,8 @@ const DISCARD_TEXT = {                 // @@VAD_EVENT discarded <reason> - vad_u
 };
 const TOOL_LABELS = { set_board_state: "Switching the LED", get_time_of_day: "Reading the light sensor",
                       set_volume: "Changing the volume", get_current_time: "Checking the clock",
-                      set_timer: "Setting a timer", get_board_status: "Checking the board" };
+                      set_timer: "Setting a timer", get_board_status: "Checking the board",
+                      set_hands_free: "Switching hands-free" };
 const STATE_TEXT = {
   offline: ["Not connected", "Connect the board to start."],
   unknown: ["Connected", "Waiting for the board to report its state…"],
@@ -735,6 +745,12 @@ const elements = {
   wifiSave: document.getElementById("wifi-save"),
   wifiForget: document.getElementById("wifi-forget"),
   wifiNote: document.getElementById("wifi-note"),
+  apiKeyControl: document.getElementById("api-key-control"),
+  apiKeyInUse: document.getElementById("api-key-in-use"),
+  apiKeyInput: document.getElementById("api-key"),
+  apiKeySave: document.getElementById("api-key-save"),
+  apiKeyForget: document.getElementById("api-key-forget"),
+  apiKeyNote: document.getElementById("api-key-note"),
   beep: document.getElementById("beep"),
   ledControl: document.getElementById("led-control"),
   led: document.getElementById("led"),
@@ -803,8 +819,13 @@ function freshBoardStatus() {
     cycleTools: new Set(),   // tools already noted in the conversation this LISTEN
     timer: null,             // { endsAt (performance.now() ms), totalS } from @@TIMER, null when none runs
     timerTicker: null,
+    timerNote: null,         // the set_timer note waiting for the board's @@TIMER <left> <total> (see noteToolInConversation())
+    timerOffThisTurn: null,  // "cancelled" / "none" once @@TIMER off came in this LISTEN or typed question
     askPending: null,  // a typed question sent with ASK, until the board echoes it as @@HEARD
     wifiSavePending: null,  // { ssid, timer } from Save & connect until @@WIFI_NET saved or an "ignored" line
+    apiKey: null,           // { source, hint } from @@OPENAI_KEY - null: the firmware can't take a key from here
+    apiKeySavePending: null,  // { hint, timer } from Save & connect until @@OPENAI_KEY saved <hint> or an "ignored" line
+    playbackHoldUntil: 0,   // performance.now() the board was told the player plays until (LAPTOP_PLAYBACK) - 0: not playing
     aliveSeen: false,  // an @@ALIVE came since connecting or the last restart - only then is silence flagged (older firmware sends none)
     aliveTicker: null, // checkBoardAlive() once a second while connected
     quietFrom: 0,      // silence isn't counted before this (performance.now()) - moved on while it isn't watched
@@ -813,7 +834,7 @@ function freshBoardStatus() {
 }
 
 const link = new BoardLink({
-  onLine: (line) => { appendLog(line); noteAskRefused(line); noteWifiRefused(line); },
+  onLine: (line) => { appendLog(line); noteAskRefused(line); noteWifiRefused(line); noteApiKeyRefused(line); },
   onNote: (text) => appendLog(`(app) ${text}`),
   onConnectionChange: handleConnectionChange,
   onListAnnounced: (files) => {
@@ -958,10 +979,17 @@ async function sendCommand(text) {
   }
   try {
     await link.send(command);
-    appendLog(`>> ${command}`);
+    appendLog(`>> ${withoutSecrets(command)}`);
   } catch (error) {
     appendLog(`(app) Not sent: ${error.message}`);
   }
+}
+
+/** A command as the log shows it: an API key or a Wi-Fi password typed in
+    the command box becomes ******** (the log can be saved and shared). */
+function withoutSecrets(command) {
+  const secret = /^(OPENAI_KEY(?!_FORGET)|WIFI_PASSWORD)(.*)$/i.exec(command);
+  return secret && secret[2].trim() ? `${secret[1]} ********` : command;
 }
 
 /** Saves the log as it grows into a folder of your choice - pick tools/ so
@@ -1295,6 +1323,62 @@ function showSelectedCopy(copy, { autoplay = false, keepPosition = false } = {})
   }
 }
 
+/** Tells the board whether the player is playing a recording out loud
+    (LAPTOP_PLAYBACK - ESP32/hands_free_utils.h), so its mic doesn't take
+    the recording for a question: "on <ms>" - the time left at this speed,
+    plus PLAYBACK_HOLD_MARGIN_MS - whenever playback starts or resumes,
+    jumps or changes speed; "off" once it's paused, over or replaced. The
+    board ends a hold by itself when that time is up, so a page closed
+    mid-playback can't keep its mic off. */
+function syncPlaybackHold() {
+  const board = state.board;
+  if (!link.connected || state.replayActive) return;
+  const audio = elements.audio;
+  const playing = !audio.paused && !audio.ended && !audio.error && audio.readyState >= HTMLMediaElement.HAVE_FUTURE_DATA;
+  if (!playing) {
+    if (board.playbackHoldUntil) {
+      board.playbackHoldUntil = 0;
+      sendQuietly("LAPTOP_PLAYBACK off");
+      if (elements.vadNote.textContent === PLAYBACK_VAD_NOTE) elements.vadNote.textContent = VAD_NOTE_DEFAULT;
+    }
+    return;
+  }
+  const holdMs = Number.isFinite(audio.duration)
+    ? Math.ceil((Math.max(0, audio.duration - audio.currentTime) / (audio.playbackRate || 1)) * 1000) + PLAYBACK_HOLD_MARGIN_MS
+    : null;  // length unknown: the board holds for its longest
+  const until = performance.now() + (holdMs === null ? 5 * 60 * 1000 : holdMs);
+  if (board.playbackHoldUntil && Math.abs(until - board.playbackHoldUntil) < PLAYBACK_HOLD_RESEND_MS) return;
+  board.playbackHoldUntil = until;
+  sendQuietly(holdMs === null ? "LAPTOP_PLAYBACK on" : `LAPTOP_PLAYBACK on ${holdMs}`);
+  if (board.vad && board.vad.on) elements.vadNote.textContent = PLAYBACK_VAD_NOTE;
+}
+
+/** The player's status line from before pausePlayerForListen(), to put back. */
+let playerStatusBeforePause = "";
+
+/** Pauses the player for a question the user asked for (Talk, the BOOT
+    button, LISTEN): the board's mic is recording, and mustn't record the
+    recording too. */
+function pausePlayerForListen() {
+  const status = elements.playerStatus.textContent;
+  if (status !== PLAYER_PAUSED_FOR_LISTEN) playerStatusBeforePause = status;
+  elements.playerStatus.textContent = PLAYER_PAUSED_FOR_LISTEN;
+  elements.audio.pause();
+}
+
+/** The player starting - not while the board records a question the user
+    asked for (pausePlayerForListen()). A hands-free recording gives way
+    instead: the board cancels it once told (LAPTOP_PLAYBACK). */
+function onPlayerPlay() {
+  requestAnimationFrame(animatePlayhead);
+  const pipeline = state.board.pipeline;
+  if (link.connected && pipeline && pipeline.state === "listening" && pipeline.detail !== "vad") {
+    pausePlayerForListen();
+  } else if (elements.playerStatus.textContent === PLAYER_PAUSED_FOR_LISTEN) {
+    elements.playerStatus.textContent = playerStatusBeforePause;
+  }
+}
+
 /** Empties the player back to its "nothing selected" state, with a message. */
 function resetPlayer(message) {
   state.selectedName = null;
@@ -1455,11 +1539,13 @@ function handleStatusLine(tag, rest) {
       if (words[0] === "booting") {
         onUsageBoardBooting();
         board.aliveSeen = false;  // setup()'s waits send no @@ALIVE - watched again from its next one
+        board.playbackHoldUntil = 0;  // a restarted board forgot LAPTOP_PLAYBACK - told again at its first @@ALIVE
       }
       if (wasRunning && words[0] === "booting") {
         elements.result.className = "result";
         elements.result.textContent = "The board restarted.";
         board.timer = null;  // the timer lived in the board's RAM - gone with the restart
+        settleTimerNote("⏰ Timer not set - the board restarted");
         renderTimer();
       }
       onPipelineState(board.pipeline);
@@ -1553,6 +1639,15 @@ function handleStatusLine(tag, rest) {
       }
       renderBoardOptions();
       break;
+    case "OPENAI_KEY":
+      board.apiKey = { source: words[0], hint: words.slice(1).join(" ") };
+      if (board.apiKeySavePending && board.apiKey.source === "saved" && board.apiKey.hint === board.apiKeySavePending.hint) {
+        clearTimeout(board.apiKeySavePending.timer);
+        board.apiKeySavePending = null;
+        elements.apiKeyNote.textContent = `Saved - the board is reconnecting to OpenAI with ${board.apiKey.hint}. If OpenAI refuses it, Board health says so.`;
+      }
+      renderBoardOptions();
+      break;
     case "BUTTON":
       board.talkButton = words[0] === "on";
       renderBoardOptions();
@@ -1564,6 +1659,9 @@ function handleStatusLine(tag, rest) {
     case "CLOCK":
       break;  // only the self-test reads it (waitForStatus, above)
     case "ALIVE":
+      // The first since connecting or a restart: loop() reads commands now,
+      // so a recording already playing is announced (LAPTOP_PLAYBACK).
+      if (!board.aliveSeen) syncPlaybackHold();
       board.aliveSeen = true;  // the heartbeat: from now on, silence counts (checkBoardAlive)
       break;
     case "LIMITS":
@@ -1594,6 +1692,7 @@ function applyLimitsToInputs() {
   elements.askText.maxLength = limits.max_ask_bytes;
   elements.wifiSsid.maxLength = limits.max_ssid_bytes;
   elements.wifiPassword.maxLength = limits.max_password_bytes;
+  elements.apiKeyInput.maxLength = limits.max_api_key_bytes;
   elements.vadSensitivity.min = limits.vad_sensitivity_min;
   elements.vadSensitivity.max = limits.vad_sensitivity_max;
   elements.vadHangover.min = limits.vad_hangover_min_ms;
@@ -1626,6 +1725,8 @@ function resetBoardStatus(shownState) {
   const old = state.board;
   [old.deferTimer, old.errorTimer, old.talkPendingTimer, old.noStatusTimer].forEach(clearTimeout);
   if (old.wifiSavePending) clearTimeout(old.wifiSavePending.timer);
+  if (old.apiKeySavePending) clearTimeout(old.apiKeySavePending.timer);
+  settleTimerNote("⏰ Timer not confirmed - the board disconnected", old);
   clearInterval(old.timerTicker);
   clearInterval(old.listenTimer);
   clearInterval(old.aliveTicker);
@@ -1737,6 +1838,11 @@ function onPipelineState({ state: pipelineState, detail }) {
     board.cycleFirstBubble = null;
     board.cycleFirstSaid = null;
     board.cycleTools.clear();
+    settleTimerNote("⏰ Timer not set");  // a timer the last turn set has started (and said so) by now
+    board.timerOffThisTurn = null;
+    // A question the user asked for (Talk, BOOT, LISTEN - not hands-free):
+    // its mic mustn't record the player too.
+    if (link.connected && detail !== "vad" && !elements.audio.paused) pausePlayerForListen();
   }
   if (pipelineState === "tool" && detail && !board.cycleTools.has(detail)) {
     board.cycleTools.add(detail);
@@ -1845,6 +1951,7 @@ function updateTalkButton() {
 
 function onTalkClick() {
   if (elements.talk.disabled) return;
+  if (!elements.audio.paused) pausePlayerForListen();  // before the board starts recording
   const board = state.board;
   board.talkPending = true;
   updateTalkButton();
@@ -1870,6 +1977,8 @@ function onAskSubmit(event) {
   board.cycleFirstBubble = null;  // a new turn: its bubbles go after the last one's
   board.cycleFirstSaid = null;
   board.cycleTools.clear();
+  settleTimerNote("⏰ Timer not set");
+  board.timerOffThisTurn = null;
   board.askPending = text;
   board.askPendingAt = performance.now();
   sendCommand(`ASK ${text}`);
@@ -1948,6 +2057,7 @@ function addConversationNote(text, kind = "") {
   note.className = `action ${kind}`.trim();
   note.textContent = text;
   insertConversationItem(note, null);
+  return note;
 }
 
 /** Puts a bubble or note into the conversation, keeping the current LISTEN's
@@ -1985,16 +2095,26 @@ function noteToolInConversation(tool) {
       ? `${PART_OF_DAY_ICONS[band] || "🔆"} Read the light sensor: ${band} (${board.light.value})`
       : "🔆 Read the light sensor", "tool");
   } else if (tool === "set_timer") {
-    const timer = board.timer;
-    addConversationNote(!timer ? "⏰ Timer cancelled"
-      : timer.label ? `⏰ Reminder set: ${timer.label}, in ${formatDuration(timer.totalS)}`
-      : `⏰ Timer set for ${formatDuration(timer.totalS)}`, "tool");
+    // A cancel shows at once: the board prints @@TIMER off before this
+    // state. A new timer only starts once its spoken confirmation is over,
+    // and reports @@TIMER <left> <total> then - so its note is filled in by
+    // onTimerLine(), and says "not set" if no timer came (a refused call).
+    if (board.timerOffThisTurn) {
+      addConversationNote(board.timerOffThisTurn === "cancelled" ? "⏰ Timer cancelled" : "⏰ No timer was running", "tool");
+    } else {
+      settleTimerNote("⏰ Timer not set");
+      board.timerNote = addConversationNote("⏰ Setting a timer…", "tool");
+    }
   } else if (tool === "get_board_status") {
     addConversationNote(`📶 Checked the board: Wi-Fi${board.wifiRssi !== null ? ` ${board.wifiRssi} dBm` : ""}, memory, uptime`, "tool");
   } else if (tool === "get_current_time") {
     addConversationNote(`🕒 Read the board's clock`, "tool");
   } else if (tool === "set_volume") {
     addConversationNote(`🔊 Volume set to ${board.volume ? board.volume.percent : "?"}% by voice`, "tool");
+  } else if (tool === "set_hands_free") {
+    addConversationNote(board.vad
+      ? `🎙️ Hands-free ${board.vad.on ? "on - just start talking" : "off - press Talk to ask"} (by voice)`
+      : "🎙️ Switched hands-free by voice", "tool");
   } else {
     addConversationNote(`⚙️ Ran ${tool}`, "tool");
   }
@@ -2024,9 +2144,23 @@ function onTimerLine([first, second, ...rest]) {
     if (!board.stages.openai || board.stages.openai.state !== "ok") autoTickDemo("timeroffline");
     return;
   }
-  board.timer = first === "off" ? null
-    : { endsAt: performance.now() + Number(first) * 1000, totalS: Number(second) || Number(first), label: rest.join(" ") };
+  if (first === "off") {
+    board.timerOffThisTurn = board.timer ? "cancelled" : "none";
+    board.timer = null;
+  } else {
+    board.timer = { endsAt: performance.now() + Number(first) * 1000, totalS: Number(second) || Number(first), label: rest.join(" ") };
+    settleTimerNote(board.timer.label ? `⏰ Reminder set: ${board.timer.label}, in ${formatDuration(board.timer.totalS)}`
+      : `⏰ Timer set for ${formatDuration(board.timer.totalS)}`);
+  }
   renderTimer();
+}
+
+/** Fills in the set_timer note that's still waiting for the board's
+    @@TIMER line, if there is one (see noteToolInConversation()). */
+function settleTimerNote(text, board = state.board) {
+  if (!board.timerNote) return;
+  board.timerNote.textContent = text;
+  board.timerNote = null;
 }
 
 /** The countdown chip next to the state - ticks once a second while a timer runs. */
@@ -2108,10 +2242,14 @@ function updateControlsEnabled() {
   for (const input of [elements.wifiSsid, elements.wifiPassword, elements.wifiSave, elements.wifiForget]) {
     input.disabled = !connected || !board.wifiNet;
   }
+  for (const input of [elements.apiKeyInput, elements.apiKeySave, elements.apiKeyForget]) {
+    input.disabled = !connected || !board.apiKey;
+  }
 }
 
-/** The board-only options (BOOT button, status sounds) and the Wi-Fi card,
-    each shown once the board has reported it (older firmware doesn't). */
+/** The board-only options (BOOT button, status sounds), the Wi-Fi card and
+    the API key card, each shown once the board has reported it (older
+    firmware doesn't). */
 function renderBoardOptions() {
   const board = state.board;
   const hasButton = board.talkButton !== undefined;
@@ -2125,7 +2263,67 @@ function renderBoardOptions() {
   if (board.wifiNet) {
     elements.wifiNet.textContent = `${board.wifiNet.ssid} (${board.wifiNet.source === "saved" ? "saved here" : "default"})`;
   }
+  elements.apiKeyControl.hidden = !board.apiKey;
+  if (board.apiKey) {
+    elements.apiKeyInUse.textContent = `${board.apiKey.hint} (${board.apiKey.source === "saved" ? "saved here" : "default"})`;
+  }
   updateControlsEnabled();
+}
+
+/** The hint the board shows for a key - its first 3 and last 4 characters,
+    as openai_realtime_utils.cpp's describeActiveKey() writes it. */
+function apiKeyHint(key) {
+  return `${key.slice(0, 3)}...${key.slice(-4)}`;
+}
+
+/** Saves an OpenAI API key on the board (OPENAI_KEY <key>), which then
+    reconnects with it. The key never reaches the log. "Saved" is shown once
+    the board answers @@OPENAI_KEY saved <hint> (see handleStatusLine); a
+    refusal reaches noteApiKeyRefused. */
+async function saveApiKey() {
+  const key = elements.apiKeyInput.value.trim();  // a paste often brings a space or a line break along
+  if (!key) {
+    elements.apiKeyNote.textContent = "Paste the key first.";
+    return;
+  }
+  if (key.length < limits.min_api_key_bytes || key.length > limits.max_api_key_bytes || !API_KEY_PATTERN.test(key)) {
+    elements.apiKeyNote.textContent = `That doesn't look like an OpenAI API key: it starts with sk-, has ${limits.min_api_key_bytes} to ` +
+      `${limits.max_api_key_bytes} characters, and only letters, digits, - and _.`;
+    return;
+  }
+  const board = state.board;
+  if (board.apiKeySavePending) clearTimeout(board.apiKeySavePending.timer);
+  const pending = { hint: apiKeyHint(key), timer: null };
+  board.apiKeySavePending = pending;
+  elements.apiKeyNote.textContent = `Sent - waiting for the board to save ${pending.hint}…`;
+  try {
+    await link.send(`OPENAI_KEY ${key}`);
+    appendLog(">> OPENAI_KEY ********");
+    elements.apiKeyInput.value = "";
+    if (state.board.apiKeySavePending === pending) {  // not answered while sending
+      // Still starting up: setup() reads no commands in its Wi-Fi and clock waits.
+      const booting = !state.board.pipeline || state.board.pipeline.state === "booting";
+      if (booting) elements.apiKeyNote.textContent = "Sent - the board reads it once its Wi-Fi and clock waits end (up to 35 s)…";
+      pending.timer = setTimeout(() => {
+        if (state.board.apiKeySavePending !== pending) return;
+        state.board.apiKeySavePending = null;
+        elements.apiKeyNote.textContent = "The board didn't confirm the new key - check the serial terminal.";
+      }, booting ? WIFI_ACK_BOOT_TIMEOUT_MS : WIFI_ACK_TIMEOUT_MS);
+    }
+  } catch (error) {
+    if (state.board.apiKeySavePending === pending) state.board.apiKeySavePending = null;
+    elements.apiKeyNote.textContent = `Not sent: ${error.message}`;
+  }
+}
+
+/** The board's answer to an OPENAI_KEY it didn't take. */
+function noteApiKeyRefused(line) {
+  if (!line.startsWith("OPENAI_KEY ignored")) return;
+  const pending = state.board.apiKeySavePending;
+  if (!pending) return;
+  clearTimeout(pending.timer);
+  state.board.apiKeySavePending = null;
+  elements.apiKeyNote.textContent = `Not saved: ${line}`;
 }
 
 /** Saves a Wi-Fi network on the board: WIFI_SSID, then WIFI_PASSWORD - which
@@ -2618,7 +2816,8 @@ function onSaveConversationClick() {
 
 document.getElementById("save-conversation").addEventListener("click", onSaveConversationClick);
 
-/** Example requests for whoever is trying the assistant - [icon, phrase]. */
+/** Example requests for whoever is trying the assistant - [icon, phrase].
+    Shown as a list to read, not buttons: Talk (or Hands-free) asks. */
 const EXAMPLE_PHRASES = [
   ["❓", "What can you do?"],
   ["💬", "What is the capital of France?"],
@@ -2634,25 +2833,13 @@ const EXAMPLE_PHRASES = [
   ["🌙", "Turn off the light in 20 seconds"],
   ["🕒", "What time is it?"],
   ["📶", "How are you doing?"],
+  ["🎙️", "Switch to hands-free mode"],
 ];
 document.getElementById("phrases").replaceChildren(...EXAMPLE_PHRASES.map(([icon, phrase]) => {
-  const button = document.createElement("button");
-  button.type = "button";
-  button.title = "Starts recording - then say it";
-  button.append(Object.assign(document.createElement("span"), { textContent: icon, ariaHidden: "true" }), `“${phrase}”`);
-  button.addEventListener("click", () => {
-    if (elements.talk.disabled) {
-      elements.result.className = "result";
-      elements.result.textContent = !link.connected ? "Connect the board first."
-        : state.downloadsRunning ? "Downloading a recording - try again once it's done."
-        : "Busy - try again when the assistant is Ready.";
-      return;
-    }
-    elements.result.className = "result";
-    elements.result.textContent = `Say: “${phrase}”`;
-    onTalkClick();
-  });
-  return button;
+  const item = document.createElement("li");
+  item.className = "phrase";
+  item.append(Object.assign(document.createElement("span"), { textContent: icon, ariaHidden: "true" }), `“${phrase}”`);
+  return item;
 }));
 document.getElementById("connection-alert-close").addEventListener("click", hideAlert);
 
@@ -2663,7 +2850,7 @@ const DEMO_SECTIONS = [
   ["סיפורי משתמש", [
     ["intro", "הצגת הפרויקט (דקה, בלי מצגת)", "משפט אחד על המטרה. לומר: חיישן האור מדומה בסליידר, ועברית עובדת אבל פחות טוב."],
     ["boot", "1. הדלקה ונורות תקינות", "Reset ללוח מול הבוחנים. Connect board, הנורות נהיות ירוקות אחת אחת וברכת פתיחה."],
-    ["talk", "2. שאלה בלחיצה", "Talk או רווח: <code>What is the capital of France</code>. לתת לבוחן ללחוץ על דוגמה ב-Try saying."],
+    ["talk", "2. שאלה בלחיצה", "Talk או רווח: <code>What is the capital of France</code>. לתת לבוחן לבחור דוגמה מ-Try saying ולשאול אותה."],
     ["transcript", "3. רואים מה שמע ומה ענה", "המצב משתנה (Listening, Processing, Speaking), והשיחה בבועות עם שעה וזמן תגובה. תגיות: 💡 🌙 🔊 ⏰ 🕒 📶."],
     ["led", "4. הדלקת אור בקול", "<code>Turn on the light</code>, <code>Dim the light to 30 percent</code>, ואז <code>Turn off the light</code>. הנורה במסך זוהרת לפי הבהירות."],
     ["voicevolume", "5. עוצמה בקול", "<code>Set the volume to 30 percent</code>, ואז <code>A bit louder</code>."],
@@ -3067,6 +3254,7 @@ function renderSummary() {
     chip("🕒", "Told the time", toolCount("get_current_time")),
     chip("⏰", "Set a timer", toolCount("set_timer")),
     chip("📶", "Checked the board", toolCount("get_board_status")),
+    chip("🎙️", "Switched hands-free", toolCount("set_hands_free")),
     chip("🤫", "Ignored a noise", usage.noisesIgnored),
   );
 
@@ -3171,7 +3359,7 @@ const TOUR_STEPS = [
   [".conversation", "5. The conversation",
    "What it heard and what it answered, with the response time, and a tag whenever it did something on the board (LED, volume, timer)."],
   ["#phrases", "6. Ideas to try",
-   "Click a phrase to start recording, then say it: turn the light on, set the volume, set a timer, ask the time or whether it's day or night."],
+   "Things it understands - press Talk and say one: turn the light on, set the volume, set a timer, ask the time or whether it's day or night, or switch hands-free on by voice."],
   ["#controls-heading", "7. Settings",
    "Volume, mute, LED brightness, and the light sensor's thresholds. The board saves them, so they stay after a reset."],
   ["#usage-heading", "8. Statistics",
@@ -3414,6 +3602,12 @@ elements.wifiForget.addEventListener("click", () => {
   sendCommand("WIFI_FORGET");
   elements.wifiNote.textContent = "Back to the default network (from SECRETS.h) - connecting.";
 });
+elements.apiKeySave.addEventListener("click", saveApiKey);
+elements.apiKeyInput.addEventListener("keydown", (event) => { if (event.key === "Enter") saveApiKey(); });
+elements.apiKeyForget.addEventListener("click", () => {
+  sendCommand("OPENAI_KEY_FORGET");
+  elements.apiKeyNote.textContent = "Back to the default key (from SECRETS.h) - reconnecting.";
+});
 elements.beep.addEventListener("click", () => {
   elements.volumeNote.textContent = "Beeping…";
   sendCommand("BEEP");
@@ -3438,9 +3632,13 @@ elements.send.addEventListener("click", () => { sendCommand(elements.command.val
 elements.command.addEventListener("keydown", (event) => {
   if (event.key === "Enter") { sendCommand(elements.command.value); elements.command.value = ""; }
 });
-elements.audio.addEventListener("play", () => requestAnimationFrame(animatePlayhead));
+elements.audio.addEventListener("play", onPlayerPlay);
 elements.audio.addEventListener("seeked", drawWaveform);
 elements.audio.addEventListener("ended", drawWaveform);
+// The board's mic stays off while the player plays out loud (syncPlaybackHold()).
+for (const type of ["playing", "pause", "ended", "emptied", "abort", "error", "seeked", "ratechange", "durationchange"]) {
+  elements.audio.addEventListener(type, syncPlaybackHold);
+}
 elements.waveform.addEventListener("click", (event) => {
   const audio = elements.audio;
   if (!audio.duration) return;

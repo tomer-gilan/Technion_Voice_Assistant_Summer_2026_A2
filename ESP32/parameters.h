@@ -5,8 +5,8 @@
 // internals (the voice detector's thresholds, buffer sizes, tones...) stay
 // next to their code; Parameters/parameters.md lists them too. Settings the
 // user can change at run time (volume, LED brightness, light thresholds,
-// hands-free, Wi-Fi network...) are set from the control center instead and
-// kept in flash; see Parameters/parameters.md.
+// hands-free, Wi-Fi network, API key...) are set from the control center
+// instead and kept in flash; see Parameters/parameters.md.
 // Secrets (Wi-Fi password, API key) are in SECRETS.h, not here.
 // This file is this project's config_parameters.h (the rubric's name for it).
 // The assistant's instructions and tools are in realtime_session_config.h.
@@ -122,6 +122,12 @@ constexpr char kNtpServer2[] = "time.nist.gov";
 // center before the board tries SECRETS.h's network instead - and back the
 // same way. In RAM only: the saved network stays in flash for the next boot.
 constexpr uint32_t kWifiAttemptsBeforeFallback = 2;
+// The same for an OpenAI API key saved from the control center: refused
+// this many times in a row (HTTP 401 or 403 on the WebSocket handshake) and
+// the board tries SECRETS.h's key instead - and back the same way. In RAM
+// only: the saved key stays in flash for the next boot. The attempts keep
+// their usual backoff.
+constexpr uint32_t kOpenAiKeyRefusalsBeforeFallback = 2;
 // Failed OpenAI connections in a row (backing off 1, 2, 4, 8... s) before
 // the board reports itself offline. It keeps retrying after that, every
 // kOfflineRetryIntervalMs, for as long as it takes.

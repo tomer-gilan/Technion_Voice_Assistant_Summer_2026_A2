@@ -1,15 +1,33 @@
 #include "openai_realtime_utils.h"
 
 #include <Arduino.h>
+#include <ctype.h>
+#include <string.h>
 #include "parameters.h"
 #include "secrets_include.h"
+#include "command_parse_utils.h"
 #include "log_utils.h"
+#include "settings_store_utils.h"
+#include "status_report_utils.h"
 
 namespace {
 const char kOpenAiHost[] = "api.openai.com";
 constexpr uint16_t kOpenAiPort = 443;
 const char kOpenAiPath[] = "/v1/realtime?model=" OPENAI_MODEL;
-const char kOpenAiAuthHeader[] = "Authorization: Bearer " OPENAI_API_KEY;
+const char kAuthHeaderPrefix[] = "Authorization: Bearer ";
+const char kApiKeyPrefix[] = "sk-";
+const char kApiKeySettingKey[] = "openai_key";
+constexpr size_t kKeyHintBufferSize = 16;  // "sk-...AbCd"
+constexpr uint32_t kKeyRefusalsBeforeFallback = esp32va_params::kOpenAiKeyRefusalsBeforeFallback;
+static_assert(sizeof(OPENAI_API_KEY) - 1 <= esp32va_openai::kMaxApiKeyLength,
+              "SECRETS.h's OPENAI_API_KEY is longer than kMaxApiKeyLength (openai_realtime_utils.h) - raise it");
+
+char active_api_key[esp32va_openai::kMaxApiKeyLength + 1] = "";
+bool using_saved_key = false;
+// The Authorization header the next handshake sends (the library copies it).
+char auth_header[sizeof(kAuthHeaderPrefix) + esp32va_openai::kMaxApiKeyLength] = "";
+uint32_t key_refusals_in_a_row = 0;  // on the active key, since it last got through or was chosen
+int key_refused_http_code = 0;       // see lastKeyRefusalHttpCode()
 
 // GTS Root R4 - the root api.openai.com's cert chain verifies up to (leaf
 // -> Google Trust Services "WE1" intermediate -> this root). Verified
@@ -35,7 +53,9 @@ p/SgguMh1YQdc4acLa/KNJvxn7kjNuK8YAOdgLOaVsjh4rsUecrNIdSUtUlD
 // A closed/refused connection could be one transient blip - only call the
 // board offline once it has happened kOpenAiAttemptsBeforeOffline times in a
 // row (a bad API key, no internet, a server rejection). Even then it keeps
-// trying, every kOfflineRetryIntervalMs, and recovers by itself.
+// trying, every kOfflineRetryIntervalMs, and recovers by itself - a new key
+// from the control center is tried at once (the sketch's
+// reconnectWithNewApiKey()).
 constexpr uint32_t kAttemptsBeforeOffline = esp32va_params::kOpenAiAttemptsBeforeOffline;
 constexpr unsigned long kInitialBackoffMs = esp32va_params::kInitialReconnectBackoffMs;
 constexpr unsigned long kOfflineRetryIntervalMs = esp32va_params::kOfflineRetryIntervalMs;
@@ -48,12 +68,180 @@ unsigned long reconnect_backoff_ms = kInitialBackoffMs;
 // with room to spare. Static: no heap per tool call.
 constexpr size_t kToolResponseBufferSize = 384;
 char tool_response_message[kToolResponseBufferSize];
+
+/** True if key looks like an OpenAI API key: "sk-", then only letters,
+    digits, '-' and '_', kMinApiKeyLength to kMaxApiKeyLength in all - so a
+    paste with a space, a quote or a line break in it is caught here, and
+    never reaches the HTTP header. */
+bool isPlausibleApiKey(const char* key) {
+  size_t length = strlen(key);
+  if (length < esp32va_openai::kMinApiKeyLength || length > esp32va_openai::kMaxApiKeyLength ||
+      strncmp(key, kApiKeyPrefix, sizeof(kApiKeyPrefix) - 1) != 0) {
+    return false;
+  }
+  for (const char* character = key; *character != '\0'; character++) {
+    if (!isalnum(static_cast<unsigned char>(*character)) && *character != '-' && *character != '_') {
+      return false;
+    }
+  }
+  return true;
+}
+
+/** Makes SECRETS.h's key the active one. */
+void useDefaultKey() {
+  using_saved_key = false;
+  snprintf(active_api_key, sizeof(active_api_key), "%s", OPENAI_API_KEY);
+}
+
+/** Makes the key saved in flash the active one. Returns false, changing
+    nothing, if no key was saved (or what was saved isn't one). */
+bool useSavedKey() {
+  char saved_key[esp32va_openai::kMaxApiKeyLength + 1];
+  if (!esp32va_settings::loadTextSetting(kApiKeySettingKey, saved_key, sizeof(saved_key))) {
+    return false;
+  }
+  if (!isPlausibleApiKey(saved_key)) {
+    LOG_ERROR("The API key saved in flash doesn't look like one - using SECRETS.h's.\n");
+    return false;
+  }
+  using_saved_key = true;
+  snprintf(active_api_key, sizeof(active_api_key), "%s", saved_key);
+  return true;
+}
+
+/** Writes the active key's hint - its first 3 and last 4 characters - into out. */
+void describeActiveKey(char* out, size_t out_size) {
+  size_t length = strlen(active_api_key);
+  if (length < 8) {
+    snprintf(out, out_size, "(not-set)");  // e.g. SECRETS.example.h's "sk-..."
+  } else {
+    snprintf(out, out_size, "%.3s...%s", active_api_key, active_api_key + length - 4);
+  }
+}
+
+/** Puts the active key into the Authorization header the next handshake
+    sends, tells the app (@@OPENAI_KEY), and starts the refusal count over. */
+void applyActiveKey(WebSocketsClient& webSocket) {
+  snprintf(auth_header, sizeof(auth_header), "%s%s", kAuthHeaderPrefix, active_api_key);
+  webSocket.setExtraHeaders(auth_header);
+  key_refusals_in_a_row = 0;
+  esp32va_openai::announceApiKey();
+}
+
+/** The HTTP status in a WStype_DISCONNECTED reason ("... HTTP 401"), 0 if
+    it holds none. reason isn't '\0'-terminated - length bytes. */
+int httpCodeInReason(const uint8_t* reason, size_t length) {
+  const char kMarker[] = "HTTP ";
+  const size_t marker_length = sizeof(kMarker) - 1;
+  if (reason == nullptr) {
+    return 0;
+  }
+  for (size_t start = 0; start + marker_length < length; start++) {
+    if (memcmp(reason + start, kMarker, marker_length) != 0) {
+      continue;
+    }
+    int code = 0;
+    for (size_t at = start + marker_length; at < length && at < start + marker_length + 3 && isdigit(reason[at]); at++) {
+      code = code * 10 + (reason[at] - '0');
+    }
+    return code;
+  }
+  return 0;
+}
 }  // namespace
 
 namespace esp32va_openai {
 
+void loadApiKey() {
+  if (!useSavedKey()) {
+    useDefaultKey();
+  }
+  snprintf(auth_header, sizeof(auth_header), "%s%s", kAuthHeaderPrefix, active_api_key);
+}
+
+void announceApiKey() {
+  char hint[kKeyHintBufferSize];
+  describeActiveKey(hint, sizeof(hint));
+  esp32va_status::printProtocolLine("@@OPENAI_KEY %s %s", using_saved_key ? "saved" : "default", hint);
+}
+
+bool handleApiKeyCommand(const char* command, WebSocketsClient& webSocket, bool* key_changed) {
+  using esp32va_cmd::commandArgument;  // command_parse_utils.h
+  *key_changed = false;
+  const char* argument = nullptr;
+  if ((argument = commandArgument(command, "OPENAI_KEY_FORGET")) != nullptr) {
+    esp32va_settings::removeSetting(kApiKeySettingKey);
+    useDefaultKey();
+    key_refused_http_code = 0;
+    LOG_INFO("Forgot the saved OpenAI API key - back to the default one.\n");
+    applyActiveKey(webSocket);
+    *key_changed = true;
+    return true;
+  }
+  if ((argument = commandArgument(command, "OPENAI_KEY")) != nullptr) {
+    if (*argument == '\0') {
+      announceApiKey();
+      return true;
+    }
+    if (!isPlausibleApiKey(argument)) {
+      // The argument isn't echoed: it may well be a real key with one typo.
+      Serial.printf("OPENAI_KEY ignored - expected an OpenAI API key: sk-..., %u to %u characters, only letters, "
+                    "digits, - and _.\n",
+                    (unsigned)kMinApiKeyLength, (unsigned)kMaxApiKeyLength);
+      return true;
+    }
+    snprintf(active_api_key, sizeof(active_api_key), "%s", argument);
+    esp32va_settings::saveTextSetting(kApiKeySettingKey, active_api_key);
+    using_saved_key = true;
+    key_refused_http_code = 0;
+    LOG_INFO("Saved a new OpenAI API key (%u characters).\n", (unsigned)strlen(active_api_key));
+    applyActiveKey(webSocket);
+    *key_changed = true;
+    return true;
+  }
+  return false;
+}
+
+void noteHandshakeAccepted() {
+  key_refusals_in_a_row = 0;
+  key_refused_http_code = 0;
+}
+
+int noteDisconnectReason(const uint8_t* reason, size_t length, WebSocketsClient& webSocket) {
+  int http_code = httpCodeInReason(reason, length);
+  if (http_code != 401 && http_code != 403) {
+    return 0;
+  }
+  key_refused_http_code = http_code;
+  key_refusals_in_a_row++;
+  LOG_ERROR("OpenAI refused the %s API key (HTTP %d) - check it, or set another in the control center.\n",
+            using_saved_key ? "saved" : "default", http_code);
+  if (key_refusals_in_a_row < kKeyRefusalsBeforeFallback) {
+    return http_code;
+  }
+  if (using_saved_key) {
+    LOG_ERROR("Saved API key refused %u times in a row - trying the default key instead (the saved one is kept).\n",
+              (unsigned)key_refusals_in_a_row);
+    useDefaultKey();
+  } else if (useSavedKey()) {
+    LOG_ERROR("Default API key refused %u times in a row - trying the saved key again.\n",
+              (unsigned)key_refusals_in_a_row);
+  } else {
+    return http_code;  // only the default key exists - keep trying it
+  }
+  applyActiveKey(webSocket);  // the next attempt (on the usual backoff) uses it
+  return http_code;
+}
+
+int lastKeyRefusalHttpCode() {
+  return key_refused_http_code;
+}
+
 void beginOpenAiRealtimeConnection(WebSocketsClient& webSocket) {
-  webSocket.setExtraHeaders(kOpenAiAuthHeader);
+  if (auth_header[0] == '\0') {
+    loadApiKey();  // setup() should have - but never connect with no key at all
+  }
+  webSocket.setExtraHeaders(auth_header);
   webSocket.beginSslWithCA(kOpenAiHost, kOpenAiPort, kOpenAiPath, kOpenAiRootCaCert);
   if (esp32va_params::kHeartbeatIntervalMs > 0) {
     webSocket.enableHeartbeat(esp32va_params::kHeartbeatIntervalMs, esp32va_params::kHeartbeatPongTimeoutMs,

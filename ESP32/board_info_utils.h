@@ -18,7 +18,8 @@
 namespace esp32va_info {
 
 /** Prints the @@LIMITS line above from the firmware's own constants: the
-    typed question, Wi-Fi name and password sizes in bytes, recordings kept,
+    typed question, Wi-Fi name and password and API key sizes in bytes,
+    recordings kept,
     the mic's software gain, the light sensor's top value, the longest
     hands-free utterance and the hands-free sensitivity / end-of-speech
     silence ranges. Once at boot and again for every STATUS. */

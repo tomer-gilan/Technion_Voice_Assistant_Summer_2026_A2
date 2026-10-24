@@ -54,10 +54,12 @@ bool handleGetBoardStatusCall(JsonDocument& doc, WebSocketsClient& webSocket) {
 void announceLimits() {
   esp32va_status::printProtocolLine(
       "@@LIMITS max_ask_bytes=%u max_ssid_bytes=%u min_password_bytes=%u max_password_bytes=%u "
+      "min_api_key_bytes=%u max_api_key_bytes=%u "
       "max_kept_recordings=%u mic_gain=%d light_max=%d max_utterance_ms=%u vad_sensitivity_min=%u "
       "vad_sensitivity_max=%u vad_hangover_min_ms=%u vad_hangover_max_ms=%u",
       (unsigned)esp32va_params::kMaxTypedQuestionBytes, (unsigned)esp32va_wifi::kMaxSsidLength,
       (unsigned)esp32va_wifi::kMinPasswordLength, (unsigned)esp32va_wifi::kMaxPasswordLength,
+      (unsigned)esp32va_openai::kMinApiKeyLength, (unsigned)esp32va_openai::kMaxApiKeyLength,
       (unsigned)esp32va_recordings::kMaxKeptRecordings, (int)esp32va_params::kMicSoftwareGain,
       (int)esp32va_light_sensor::kMaxLightSensorValue, (unsigned)esp32va_vad::kMaxUtteranceMs,
       (unsigned)esp32va_vad::kMinSensitivity, (unsigned)esp32va_vad::kMaxSensitivity,

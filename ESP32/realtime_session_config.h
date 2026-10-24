@@ -2,7 +2,7 @@
 
 // The session.update message the board sends on every (re)connect (from
 // loop(), once the socket is up): the assistant's instructions, the audio
-// formats and the six tools. Edit the assistant's persona, reply length or
+// formats and the seven tools. Edit the assistant's persona, reply length or
 // language here.
 //
 // Data only - included by ESP32.ino alone. The pieces below are adjacent
@@ -19,7 +19,7 @@ namespace esp32va_session {
 
 // The session: 24kHz PCM in / 8kHz mu-law out, manual turn control (the
 // board's own voice detector, not the server's), the one-short-sentence
-// instructions and the six tools.
+// instructions and the seven tools.
 const char kSessionUpdateMessage[] =
     R"JSON({"type":"session.update","session":{"type":"realtime","model":")JSON"
     OPENAI_MODEL
@@ -58,9 +58,21 @@ const char kSessionUpdateMessage[] =
     "light off (or on) - don't switch it now. "
     "When the user asks how you or the board are doing, or about the Wi-Fi signal, uptime or memory, "
     "call get_board_status and answer from its result. "
+    "Hands-free mode (also called voice activation, VAD or voice activity detection) means the board "
+    "listens by itself and the user just starts talking; with it off, the user presses a button to "
+    "ask each question. "
+    "Call set_hands_free only when THIS message explicitly asks to switch that mode: with on true for "
+    "requests like 'switch to hands-free mode', 'I want to talk without pressing a button' or 'turn "
+    "on voice activity detection', with on false for requests like 'turn off hands-free', 'go back "
+    "to the button' or 'disable VAD'. "
+    "STRICT RULE: never call set_hands_free for a question about the mode (e.g. 'what is "
+    "hands-free?' or 'is hands-free on?'), for a passing mention of hands, buttons or voices, for "
+    "unclear, partial or noisy audio, or because of an earlier request - if you are not completely "
+    "sure that the user wants the listening mode changed right now, do not call it, and answer or "
+    "ask instead. "
     "If the user asks what you can do, say in one sentence that you answer questions and can switch "
     "the light, change the volume, set timers and reminders, switch the light later, tell the time "
-    "or the part of the day, and report how the board is doing."
+    "or the part of the day, report how the board is doing, and switch hands-free listening on or off."
     // Audio: 24 kHz PCM in (= esp32va_vad::kSampleRateHz), 8 kHz mu-law out; no server
     // turn detection - the board's own voice detector ends a turn.
     R"JSON(","output_modalities":["audio"],)JSON"
@@ -71,7 +83,7 @@ const char kSessionUpdateMessage[] =
     R"JSON("output":{"format":{"type":"audio/pcmu"},"voice":")JSON"
     OPENAI_VOICE
     R"JSON("}},)JSON"
-    // The six tools (dispatched in handleServerMessage()): one field per line.
+    // The seven tools (dispatched in handleServerMessage()): one field per line.
     R"JSON("tools":[)JSON"
     R"JSON({"type":"function","name":"set_board_state",)JSON"
     R"JSON("description":"Turns the ESP32 dev board's onboard LED on or off, optionally at a brightness.",)JSON"
@@ -100,7 +112,12 @@ const char kSessionUpdateMessage[] =
     R"JSON("seconds":{"type":"integer","description":"how long until it rings, in seconds (1 to 3600), or 0 to cancel"},)JSON"
     R"JSON("label":{"type":"string","description":"what it is for, in a few words, e.g. check the oven - only if the user said"},)JSON"
     R"JSON("light":{"type":"string","enum":["on","off"],"description":"switch the LED on or off when it rings - only when the user asked for the light to change later"})JSON"
-    R"JSON(},"required":["seconds"]}})JSON"
+    R"JSON(},"required":["seconds"]}},)JSON"
+    R"JSON({"type":"function","name":"set_hands_free",)JSON"
+    R"JSON("description":"Switches hands-free listening on or off, exactly like the control center's Hands-free switch. Only for an explicit request in this very message to change the mode.",)JSON"
+    R"JSON("parameters":{"type":"object","properties":{)JSON"
+    R"JSON("on":{"type":"boolean","description":"true: hands-free on (talk without pressing a button); false: off (press a button to talk)"})JSON"
+    R"JSON(},"required":["on"]}})JSON"
     R"JSON(],"tool_choice":"auto",)JSON"
     R"JSON("reasoning":{"effort":"low"}}})JSON";
 

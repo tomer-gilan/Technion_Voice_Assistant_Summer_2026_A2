@@ -21,7 +21,12 @@
     sliders under it VAD_SENSITIVITY / VAD_HANGOVER, and the meter shows
     @@VAD_LEVEL against the noise floor and the speech threshold while the
     board waits for speech (ESP32/hands_free_utils.h). Shown only when the
-    board reports @@VAD.
+    board reports @@VAD. While the player plays a recording out loud, the
+    page sends LAPTOP_PLAYBACK on/off, so the board's mic doesn't take it
+    for a question.
+  - The Wi-Fi card sends WIFI_SSID / WIFI_PASSWORD / WIFI_FORGET
+    (ESP32/wifi_utils.h), the API key card OPENAI_KEY / OPENAI_KEY_FORGET
+    (ESP32/openai_realtime_utils.h) - neither secret ever reaches the log.
   - Recordings use LIST / GET / DELETE (ESP32/sd_file_transfer_utils.h).
   Close serial_logger.ps1 / the Arduino Serial Monitor first: only one
   program can hold the port.
@@ -455,9 +460,12 @@
   .result.ok { color: var(--ok); }
   .result.fail { color: var(--error); }
 
-  .phrases { display: flex; flex-wrap: wrap; gap: 6px; }
-  .phrases button { border-radius: 999px; font-size: 13px; padding: 5px 12px; display: inline-flex; gap: 6px; align-items: center; }
-  .phrases button:hover { background: var(--accent-soft); }
+  /* Examples to read, not buttons: the same pills as before, with nothing to click. */
+  .phrases { display: flex; flex-wrap: wrap; gap: 6px; list-style: none; margin: 0; padding: 0; }
+  .phrase {
+    display: inline-flex; gap: 6px; align-items: center; font-size: 13px; line-height: normal; padding: 5px 12px;
+    border-radius: 999px; border: 1px solid var(--border); background: var(--panel); color: var(--text); white-space: nowrap;
+  }
 
   /* ----- Device controls ----- */
   .controls { display: flex; flex-direction: column; gap: 14px; }
@@ -810,12 +818,24 @@
         </div>
         <p class="control-note" id="wifi-note" aria-live="polite">Saved in the board's flash - no compile needed. 2.4 GHz networks only; leave the password empty for an open network. Spaces at either end of a password are kept.</p>
       </div>
+      <div class="control" id="api-key-control" hidden>
+        <div class="control-title">
+          <span>OpenAI API key</span>
+          <span style="font-weight:400;font-size:13px;color:var(--muted)">using <b id="api-key-in-use">-</b></span>
+        </div>
+        <div class="thresholds">
+          <label>New key<input id="api-key" class="wide" type="password" maxlength="200" placeholder="sk-..." autocomplete="off" spellcheck="false" disabled></label>
+          <button id="api-key-save" type="button" disabled>Save &amp; connect</button>
+          <button id="api-key-forget" type="button" disabled>Back to default</button>
+        </div>
+        <p class="control-note" id="api-key-note" aria-live="polite">Saved in the board's flash - no compile needed. The board reconnects to OpenAI with it right away, and only ever shows its first and last characters.</p>
+      </div>
     </section>
 
     <section class="panel" aria-labelledby="try-heading">
       <div class="panel-head"><h2 id="try-heading">Try saying</h2></div>
-      <p class="hint">Click a phrase to start recording, then say it. Works best in English; Hebrew works too, less well.</p>
-      <div class="phrases" id="phrases"></div>
+      <p class="hint">Things the assistant understands - press Talk (or Space) and say one, or just say it with Hands-free on. Works best in English; Hebrew works too, less well.</p>
+      <ul class="phrases" id="phrases" aria-label="Example requests"></ul>
     </section>
     </div>
   </div>

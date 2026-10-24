@@ -32,9 +32,9 @@
 // Robustness: without an SD card (or once one stops answering) it runs on
 // without recordings; without
 // Wi-Fi or OpenAI it goes offline (@@STATE offline) and keeps retrying while
-// the timer and the controls keep working; the Wi-Fi network can be changed
-// from the control center; a question with no answer times out after
-// kReplyTimeoutMs. Only a mic task that can't start halts it.
+// the timer and the controls keep working; the Wi-Fi network and the OpenAI
+// API key can be changed from the control center; a question with no answer
+// times out after kReplyTimeoutMs. Only a mic task that can't start halts it.
 //
 // Built step by step - this is step 30 and the improvements after it
 // (Documentation/versions.md; the earlier sketches are in
@@ -186,6 +186,7 @@ void beginListenTurn(esp32va_measure::ListenMode mode);
 void handleVoiceStarted();
 void handleVoiceDiscarded();
 void cancelListenTurn();
+void dropHandsFreeRecordingDuringLaptopPlayback();
 void sendCaptureChunk();
 void finishCapture();
 void serviceCapture();
@@ -228,6 +229,7 @@ void checkReplyTimeout();
 void checkPlaybackComplete();
 bool isAssistantOffline();
 void dropDeadSocketOnWifiLoss();
+void reconnectWithNewApiKey();
 void updatePipelineState();
 void reportAliveHeartbeat();
 void startOpenAiConnectionWhenNetworkReady();
@@ -253,8 +255,9 @@ void serviceReplyRecording();
     mount + self-test + recorders, Wi-Fi, time sync, then open the secure
     WebSocket connection - with a heap snapshot after each stage, and each
     startup check reported as @@STAGE for the laptop app. Also loads the
-    saved volume / brightness / hands-free settings. Halts only if the mic
-    task can't start; without an SD card it runs on without recordings. */
+    saved volume / brightness / hands-free settings and the API key. Halts
+    only if the mic task can't start; without an SD card it runs on without
+    recordings. */
 void setup() {
   Serial.begin(kSerialBaudRate);
   esp32va_heap::startCountingFailedAllocations();
@@ -277,6 +280,8 @@ void setup() {
   esp32va_button::announceButtonState();
   esp32va_hands_free::setupHandsFree();
   esp32va_hands_free::announceHandsFreeState();
+  esp32va_openai::loadApiKey();  // before any connection - the saved key, or SECRETS.h's
+  esp32va_openai::announceApiKey();
   esp32va_info::announceLimits();
   esp32va_status::reportStage(esp32va_status::Stage::kSpeaker, esp32va_status::StageState::kOk,
                               "ready - check it by ear with Test beep");
@@ -402,6 +407,9 @@ void loop() {
   }
   if (esp32va_button::takeButtonLongPress()) {
     runTechnicianCheck();
+  }
+  if (esp32va_hands_free::isLaptopPlaying()) {
+    dropHandsFreeRecordingDuringLaptopPlayback();  // the mic would take the recording for a question
   }
   serviceCapture();
   esp32va_audio::drainRingBufferToSpeaker();

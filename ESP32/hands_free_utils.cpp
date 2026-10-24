@@ -9,6 +9,7 @@
 #include "command_parse_utils.h"
 #include "log_utils.h"
 #include "mic_capture_utils.h"
+#include "openai_realtime_utils.h"
 #include "settings_store_utils.h"
 #include "status_report_utils.h"
 
@@ -19,6 +20,7 @@ namespace {
 using esp32va_mic_capture::CaptureMode;
 
 constexpr uint32_t kLevelReportIntervalMs = 100;
+constexpr long kLongestLaptopHoldAcceptedMs = 24L * 3600 * 1000;  // a LAPTOP_PLAYBACK hold past this is a typo, not a recording
 const char kEnabledSettingKey[] = "vad_on";
 const char kSensitivitySettingKey[] = "vad_sens";
 const char kHangoverSettingKey[] = "vad_hang";
@@ -31,6 +33,9 @@ uint32_t discards_in_a_row = 0;  // utterances in a row that weren't speech (dis
 bool is_paused = false;          // pausing after kMaxDiscardsInARow of them
 unsigned long paused_since_ms = 0;
 unsigned long last_level_report_ms = 0;
+bool laptop_playing = false;     // LAPTOP_PLAYBACK on, until off or laptop_hold_ms ran out
+unsigned long laptop_playing_since_ms = 0;
+uint32_t laptop_hold_ms = 0;
 
 using esp32va_cmd::commandArgument;  // command_parse_utils.h
 using esp32va_cmd::parseOnOff;
@@ -115,6 +120,43 @@ const char* discardReasonWord(esp32va_vad::DiscardReason reason) {
   }
 }
 
+/** LAPTOP_PLAYBACK on [<ms>] | off (see the header): holds listening off
+    while the laptop plays a recording out loud, or lets it listen again. */
+void handleLaptopPlaybackCommand(const char* argument) {
+  bool turn_on = false;
+  const char* hold_text = "";
+  if (strncasecmp(argument, "on ", 3) == 0) {
+    turn_on = true;
+    hold_text = argument + 3;
+    while (*hold_text == ' ') {
+      hold_text++;
+    }
+  } else if (!parseOnOff(argument, &turn_on)) {
+    Serial.printf("LAPTOP_PLAYBACK ignored - expected on [<ms>] or off, got \"%s\".\n", argument);
+    return;
+  }
+  long hold_ms = kMaxLaptopPlaybackHoldMs;
+  if (*hold_text != '\0' && !parseWholeNumber(hold_text, 1, kLongestLaptopHoldAcceptedMs, &hold_ms)) {
+    Serial.printf("LAPTOP_PLAYBACK ignored - expected milliseconds after on, got \"%s\".\n", hold_text);
+    return;
+  }
+  if (!turn_on) {
+    if (laptop_playing) {
+      laptop_playing = false;
+      LOG_INFO("The laptop's recording is paused or over - hands-free may listen again.\n");
+    }
+    return;  // the cooldown already counts from the last pass that held listening off
+  }
+  laptop_hold_ms = static_cast<uint32_t>(min(hold_ms, static_cast<long>(kMaxLaptopPlaybackHoldMs)));
+  laptop_playing_since_ms = millis();
+  if (!laptop_playing) {
+    LOG_INFO("The laptop is playing a recording - hands-free doesn't listen until it's over (%lu s at most).\n",
+             (unsigned long)(laptop_hold_ms / 1000));
+  }
+  laptop_playing = true;
+  holdOff();  // a mic waiting for speech stops right away, not on the next serviceHandsFree()
+}
+
 }  // namespace
 
 void setupHandsFree() {
@@ -139,17 +181,10 @@ bool handleHandsFreeCommand(const char* command) {
     bool turn_on = false;
     if (!parseOnOff(argument, &turn_on)) {
       Serial.printf("VAD ignored - expected on or off, got \"%s\".\n", argument);
+      announceHandsFreeState();
     } else {
-      hands_free_on = turn_on;
-      esp32va_settings::saveSetting(kEnabledSettingKey, turn_on ? 1 : 0);
-      discards_in_a_row = 0;
-      is_paused = false;
-      if (!turn_on) {
-        stopListening();
-      }
-      LOG_INFO("Hands-free listening turned %s.\n", turn_on ? "on" : "off");
+      setHandsFree(turn_on, false);
     }
-    announceHandsFreeState();
     return true;
   }
 
@@ -183,7 +218,64 @@ bool handleHandsFreeCommand(const char* command) {
     return true;
   }
 
+  if ((argument = commandArgument(command, "LAPTOP_PLAYBACK")) != nullptr) {
+    handleLaptopPlaybackCommand(argument);
+    return true;
+  }
+
   return false;
+}
+
+void setHandsFree(bool turn_on, bool by_voice) {
+  hands_free_on = turn_on;
+  esp32va_settings::saveSetting(kEnabledSettingKey, turn_on ? 1 : 0);
+  discards_in_a_row = 0;
+  is_paused = false;
+  if (!turn_on) {
+    stopListening();
+  }
+  LOG_INFO("Hands-free listening turned %s%s.\n", turn_on ? "on" : "off", by_voice ? " (voice command)" : "");
+  announceHandsFreeState();
+}
+
+bool handleSetHandsFreeCall(JsonDocument& doc, WebSocketsClient& webSocket, bool user_request_in_progress) {
+  const char* call_id = doc["call_id"] | (const char*)nullptr;
+  const char* arguments_json = doc["arguments"] | "{}";
+  if (call_id == nullptr) {
+    LOG_ERROR("Function call missing call_id.\n");
+    return false;
+  }
+  if (!user_request_in_progress) {
+    // Still answer the call, like the other tools - otherwise the model
+    // waits on it and the user hears nothing.
+    LOG_ERROR("set_hands_free called while no question was being answered - hands-free not changed.\n");
+    esp32va_openai::sendFunctionCallOutput(webSocket, call_id,
+                                           "Error: no request from the user to act on - hands-free was not changed.");
+    return true;
+  }
+  JsonDocument args_doc;
+  DeserializationError err = deserializeJson(args_doc, arguments_json);
+  JsonVariant on_value = args_doc["on"];
+  if (err || !on_value.is<bool>()) {
+    LOG_ERROR("set_hands_free called without a valid on: %s\n", arguments_json);
+    esp32va_openai::sendFunctionCallOutput(webSocket, call_id,
+                                           "Error: on must be true or false - hands-free was not changed.");
+    return true;
+  }
+  bool turn_on = on_value.as<bool>();
+  const char* output = nullptr;
+  if (turn_on == hands_free_on) {
+    LOG_INFO("Hands-free is already %s (voice command) - nothing changed.\n", turn_on ? "on" : "off");
+    output = turn_on ? "Hands-free was already on - the user can just start talking, no button needed."
+                     : "Hands-free was already off - the user presses Talk or the button to ask.";
+  } else {
+    setHandsFree(turn_on, true);
+    output = turn_on ? "Hands-free is now on - from now on the user can just start talking, no button needed."
+                     : "Hands-free is now off - from now on the user presses Talk or the button to ask.";
+  }
+  esp32va_openai::sendFunctionCallOutput(webSocket, call_id, output);
+  LOG_DEBUG("Sent function_call_output.\n");
+  return true;
 }
 
 void announceHandsFreeState() {
@@ -199,7 +291,18 @@ bool isWaitingForSpeech() {
   return esp32va_mic_capture::captureMode() == CaptureMode::kArmed;
 }
 
+bool isLaptopPlaying() {
+  if (laptop_playing && millis() - laptop_playing_since_ms >= laptop_hold_ms) {
+    laptop_playing = false;  // its "off" never came (the page closed mid-playback?)
+    LOG_INFO("The laptop's recording should be over by now - hands-free may listen again.\n");
+  }
+  return laptop_playing;
+}
+
 void serviceHandsFree(bool board_can_listen) {
+  if (isLaptopPlaying()) {
+    board_can_listen = false;  // the mic would hear the recording - and the cooldown counts from its end
+  }
   unsigned long now_ms = millis();
   if (!board_can_listen) {
     last_busy_ms = now_ms;

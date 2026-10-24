@@ -124,6 +124,26 @@ void cancelListenTurn() {
   printNextTurnHint();
 }
 
+/** While the laptop plays a recording out loud (LAPTOP_PLAYBACK,
+    hands_free_utils.h), every loop() pass: a hands-free utterance still
+    being recorded is the recording, or mixed with it - it's cancelled like
+    CANCEL, before it becomes a question. Also one whose kVoiceStarted
+    loop() hasn't taken yet (the mic task confirmed speech just as the
+    playback began). A manual LISTEN (Talk, BOOT, LISTEN) is left alone: the
+    user asked for that one, and the control center pauses its player for
+    it. No new hands-free utterance starts meanwhile. */
+void dropHandsFreeRecordingDuringLaptopPlayback() {
+  if (is_capturing && capture.mode == esp32va_measure::ListenMode::kVoice) {
+    LOG_INFO("The laptop is playing a recording - cancelling the hands-free recording, it would hear it.\n");
+    cancelListenTurn();
+  } else if (!is_capturing && esp32va_mic_capture::isCaptureInProgress()) {
+    // A manual capture sets is_capturing at once (startManualListen()), so
+    // this can only be speech the mic task confirmed and loop() hasn't taken.
+    LOG_INFO("The laptop is playing a recording - ignored the speech the mic just heard.\n");
+    esp32va_mic_capture::stopCapture();
+  }
+}
+
 /** Takes up to one chunk of captured audio, saves the mic's own samples to
     the SD card, and streams them with the software gain applied as one
     input_audio_buffer.append - its base64 written straight into the JSON

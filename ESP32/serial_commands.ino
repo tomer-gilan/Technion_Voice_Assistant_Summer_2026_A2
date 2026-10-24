@@ -23,13 +23,15 @@ bool commandPausesHandsFree(const char* command) {
 }
 
 /** Prints everything the laptop app shows about the board right now: every
-    startup check, the assistant's state, Wi-Fi signal, volume, LED, the
-    light sensor, hands-free, the timer, the clock and the board's fixed
-    limits (@@LIMITS) - the answer to STATUS. */
+    startup check, the assistant's state, Wi-Fi signal and network, the API
+    key in use (as a hint), volume, LED, the light sensor, hands-free, the
+    timer, the clock and the board's fixed limits (@@LIMITS) - the answer to
+    STATUS. */
 void reprintFullStatus() {
   esp32va_status::reprintStatusSnapshot();
   esp32va_wifi::reportWifiSignal();
   esp32va_wifi::announceWifiNetwork();
+  esp32va_openai::announceApiKey();
   esp32va_controls::announceControlStates();
   esp32va_button::announceButtonState();
   esp32va_light_sensor::announceLightState();
@@ -114,13 +116,15 @@ void runTechnicianCheck() {
     / BEEP / LED / LED_BRIGHTNESS control the hardware
     (device_controls_utils.h), LIGHT [<value>] / LIGHT_BANDS set/show the
     simulated light sensor (light_sensor_utils.h), VAD / VAD_SENSITIVITY /
-    VAD_HANGOVER set hands-free listening (hands_free_utils.h), WIFI /
+    VAD_HANGOVER set hands-free listening and LAPTOP_PLAYBACK holds it off
+    while the laptop plays a recording (hands_free_utils.h), WIFI /
     WIFI_SSID / WIFI_PASSWORD / WIFI_FORGET the network (wifi_utils.h),
-    BUTTON the BOOT button as a Talk button (button_utils.h) - all at any
-    time; BEEP and GET stop hands-free listening first. LISTEN starts a
-    manual capture if the board can take one (startManualListen()). ASK
-    <text> sends a typed question (askTypedQuestion()).
-    Anything else is logged and ignored. */
+    OPENAI_KEY / OPENAI_KEY_FORGET the API key (openai_realtime_utils.h -
+    a new key reconnects at once, reconnectWithNewApiKey()), BUTTON the BOOT
+    button as a Talk button (button_utils.h) - all at any time; BEEP and GET
+    stop hands-free listening first. LISTEN starts a manual capture if the
+    board can take one (startManualListen()). ASK <text> sends a typed
+    question (askTypedQuestion()). Anything else is logged and ignored. */
 void checkForSerialCommand() {
   if (!Serial.available()) {
     return;
@@ -147,15 +151,20 @@ void checkForSerialCommand() {
     esp32va_clock::announceClock();
     handled = true;
   }
+  bool api_key_changed = false;
   if (!handled) {
     handled = esp32va_controls::handleControlCommand(command.c_str(), isIdleForFileTransfer()) ||
               esp32va_light_sensor::handleLightCommand(command.c_str()) ||
               esp32va_hands_free::handleHandsFreeCommand(command.c_str()) ||
               esp32va_wifi::handleWifiCommand(command.c_str(), raw_line.c_str()) ||
+              esp32va_openai::handleApiKeyCommand(command.c_str(), webSocket, &api_key_changed) ||
               esp32va_button::handleButtonCommand(command.c_str());
   }
   if (pauses_hands_free) {
     esp32va_hands_free::holdOff();  // again: the cooldown counts from after the beep or the transfer
+  }
+  if (api_key_changed) {
+    reconnectWithNewApiKey();
   }
   if (handled) {
     return;
@@ -169,7 +178,13 @@ void checkForSerialCommand() {
     return;
   }
   if (!command.equalsIgnoreCase("LISTEN")) {
-    Serial.printf("Unknown command \"%s\" - expected LISTEN, CANCEL, ASK <text>, STATUS, CLOCK, VAD on|off, VAD_SENSITIVITY <1-5>, VAD_HANGOVER <600-1500>, LIGHT <0-%d>, LIGHT_BANDS <evening> <day>, VOLUME <0-100>, MUTE on|off, BEEP, SOUNDS on|off, BUTTON on|off, LED on|off, LED_BRIGHTNESS <0-100>, WIFI, WIFI_SSID <name>, WIFI_PASSWORD [<password>], WIFI_FORGET, LIST, GET <name>, DELETE <name> or DELETE_ALL [replies|commands].\n",
+    // Not echoed if it may hold a secret - e.g. "OPENAI_KEYsk-..." typed without its space.
+    bool may_hold_secret = command.substring(0, 10).equalsIgnoreCase("OPENAI_KEY") ||
+                           command.substring(0, 13).equalsIgnoreCase("WIFI_PASSWORD");
+    if (may_hold_secret) {
+      command = "(not shown - it may hold a key or a password)";
+    }
+    Serial.printf("Unknown command \"%s\" - expected LISTEN, CANCEL, ASK <text>, STATUS, CLOCK, VAD on|off, VAD_SENSITIVITY <1-5>, VAD_HANGOVER <600-1500>, LAPTOP_PLAYBACK on [<ms>]|off, LIGHT <0-%d>, LIGHT_BANDS <evening> <day>, VOLUME <0-100>, MUTE on|off, BEEP, SOUNDS on|off, BUTTON on|off, LED on|off, LED_BRIGHTNESS <0-100>, WIFI, WIFI_SSID <name>, WIFI_PASSWORD [<password>], WIFI_FORGET, OPENAI_KEY [<key>], OPENAI_KEY_FORGET, LIST, GET <name>, DELETE <name> or DELETE_ALL [replies|commands].\n",
              command.c_str(), esp32va_light_sensor::kMaxLightSensorValue);
     return;
   }

@@ -244,6 +244,30 @@ void dropDeadSocketOnWifiLoss() {
   wifi_was_up = wifi_up;
 }
 
+/** A new API key was saved from the control center (or the saved one
+    forgotten - OPENAI_KEY, openai_realtime_utils.h). The open connection,
+    or an attempt still in its handshake, uses the old key, so it's closed:
+    the usual disconnect path - a LISTEN in progress fails, the state shows
+    reconnecting - as for a new Wi-Fi network. The next attempt, with the
+    new key, is made at once rather than at the offline pace, with the same
+    short fast-retry window as when Wi-Fi comes back. Before the first
+    connection, or with Wi-Fi down, there's nothing to close: the next
+    connection (dropDeadSocketOnWifiLoss() retries at once when Wi-Fi is
+    back) starts with the new key. */
+void reconnectWithNewApiKey() {
+  if (!openai_connection_started || !esp32va_wifi::isWifiConnected()) {
+    Serial.printf("The new API key is used once Wi-Fi and the clock are up.\n");
+    return;
+  }
+  webSocket.disconnect();  // a no-op when nothing is open (waiting to retry)
+  esp32va_openai::resetReconnectBackoff(webSocket);  // after the disconnect, which counted an attempt
+  Serial.printf("Connecting to OpenAI with the new API key...\n");
+  esp32va_status::reportStage(esp32va_status::Stage::kOpenAi, esp32va_status::StageState::kActive,
+                              "new API key - connecting");
+  wifi_return_fast_retry = true;
+  wifi_returned_ms = millis();
+}
+
 /** Works out what the assistant is doing from this sketch's flags and
     reports it as @@STATE when it changes (status_report_utils.h). Called
     every loop() pass. */
@@ -289,9 +313,10 @@ void updatePipelineState() {
       return;
     }
     if (isAssistantOffline()) {
-      esp32va_status::reportPipelineState(PipelineState::kOffline, esp32va_wifi::isTimeSynced()
-                                                                       ? "OpenAI unreachable"
-                                                                       : "no clock - the network may block NTP");
+      const char* offline_detail = !esp32va_wifi::isTimeSynced()                    ? "no clock - the network may block NTP"
+                                   : esp32va_openai::lastKeyRefusalHttpCode() != 0 ? "OpenAI refused the API key"
+                                                                                   : "OpenAI unreachable";
+      esp32va_status::reportPipelineState(PipelineState::kOffline, offline_detail);
       return;
     }
     if (!session_ever_ready) {
