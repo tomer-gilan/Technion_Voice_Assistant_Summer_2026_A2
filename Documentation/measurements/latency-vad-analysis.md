@@ -8,7 +8,7 @@ Test conditions (15.10.2026): a hotspot from a phone, RSSI at boot between -37 a
 
 ### Results
 
-![Response time](Documentation/images/response-time.png)
+![Response time](../images/response-time.png)
 
 | What | Result |
 |---|---|
@@ -20,9 +20,9 @@ Test conditions (15.10.2026): a hotspot from a phone, RSSI at boot between -37 a
 | Full boot (until ready to talk) | 6.8 / 9.1 / 10.8 seconds |
 | The longest stage of the boot | The encrypted connection to OpenAI, 3.9 to 5.1 seconds |
 
-![The statistics panel](Documentation/images/statistics.png)
+![The statistics panel](../images/statistics.png)
 
-![Boot and memory](Documentation/images/boot-and-memory.png)
+![Boot and memory](../images/boot-and-memory.png)
 
 | Memory (heap) | |
 |---|---|
