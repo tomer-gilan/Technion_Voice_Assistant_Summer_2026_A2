@@ -1,3 +1,28 @@
+## How it works
+
+![The path of one sentence](Documentation/images/sentence-path.png)
+
+1. A separate task (FreeRTOS) reads the microphone at 24kHz every 20ms, even when the main loop is busy.
+2. Every 100ms of audio is sent right away over a single encrypted WebSocket connection to OpenAI. We do not wait for the end of the recording, because 3 seconds of raw audio do not even fit in the free memory.
+3. The model answers with mu-law audio at 8kHz (6 times smaller than PCM at 24kHz). The ESP32 decodes and plays it.
+4. When the model wants to do something on the board, it calls a "tool" with a JSON schema. The ESP32 carries it out and returns a result, and the model says what was done.
+5. The board constantly prints `@@...` lines to Serial, and the control center reads them ([the protocol](Documentation/architecture.md)).
+
+### The tools the model can call
+
+| Tool | What it does | Example |
+|---|---|---|
+| `set_board_state` | Turns the LED on or off, and can also set the brightness | `Turn on the light`, `Dim the light to 30 percent` |
+| `get_time_of_day` | Reads the light sensor (simulated from the control center) and returns day, evening or night | `Is it day or night?` |
+| `set_volume` | Sets the volume in percent (10-100), or raises / lowers it by 20% | `Set the volume to 30 percent`, `Louder` |
+| `get_current_time` | The date and time from the board's clock (synchronized from the internet, in Israel time including daylight saving time), and how much time is left on the timer | `What time is it?` |
+| `get_board_status` | The Wi-Fi signal strength, how many minutes the board has been on and how much memory is free | `How are you doing?` |
+| `set_hands_free` | Turns Hands-free on or off, exactly like the switch in the control center. Only when the current question explicitly asks for it: a question about the mode, or a passing mention of a button, changes nothing | `Switch to hands-free mode`, `I want to talk without pressing a button`, `Disable VAD` |
+| `set_timer` | A timer of 1 to 3600 seconds (20 to 60 seconds in the demo), or a cancel (0). Above an hour, it sets one hour and the assistant says so. A negative value or one shorter than a second is rejected, and the assistant asks again without touching the running timer. At the end the assistant says so out loud (including what the reminder is about), and it can turn the light on or off | `Remind me in 30 seconds to check the oven`, `Turn off the light in 20 seconds` |
+
+![What happens when you ask to turn on the light](Documentation/images/led-sequence.png)
+
+
 # How the Code Is Built - Voice Assistant on ESP32
 
 Group A2, IoT course, Summer 2026. This document explains the code: what each part does, how the board moves between states, and how the control center knows what is happening on the board. How it works from the outside is explained in the [README](../README.md).

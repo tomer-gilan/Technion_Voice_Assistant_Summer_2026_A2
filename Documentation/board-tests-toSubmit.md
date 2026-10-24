@@ -34,4 +34,3 @@ All the tests below were run on the board with the submission firmware, **and th
 | 19 | The board runs for an hour or more without being touched | It does not go to HALTED even after server disconnects (before: after 5 scattered disconnects) | ✅ |
 | 20 | `Unit Tests/06_sd_card` and `07_led_pwm` (08 was checked in test 14) | PASSED / what each one says | ✅ |
 
-**Unit test 09 (the light sensor) was not run:** the LDR is not connected to the board. As the course guide instructs, the sensor value is simulated from the control center (the Light sensor slider). The code for the real sensor and the wiring and calibration instructions are in [calibration.md](calibration.md), for future use once the sensor is connected.
