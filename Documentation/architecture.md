@@ -41,7 +41,7 @@ flowchart LR
 | Wi-Fi והשעון | `wifi_utils` | `esp32va_wifi` |
 | זיכרון קבוע (NVS) | `settings_store_utils` | `esp32va_settings` |
 
-שלושה קבצים בלי קוד: `parameters.h` (כל הפרמטרים הקבועים - ראו [Parameters/parameters.md](../Parameters/parameters.md)), `realtime_session_config.h` (הודעת ההגדרות של הסשן: ההוראות למודל ורשימת הכלים) ו-`SECRETS.h` (סיסמת ה-Wi-Fi ומפתח ה-API, לא בגיט; התבנית היא `SECRETS.example.h`).
+שלושה קבצים בלי קוד: `parameters.h` (כל הפרמטרים הקבועים - ראו [Parameters/parameters.md](../Parameters/parameters.md)), `realtime_session_config.h` (הודעת ההגדרות של הסשן: ההוראות למודל ורשימת הכלים) ו-`SECRETS.h` (רשת ה-Wi-Fi ומפתח ה-API של ברירת המחדל - את שניהם אפשר להחליף ממרכז הבקרה; לא בגיט, התבנית היא `SECRETS.example.h`).
 
 | מודול | מה הוא עושה |
 |---|---|
@@ -52,12 +52,12 @@ flowchart LR
 | `state_machine.ino` | מכונת המצבים: המעברים (פונקציות בשם לכל מעבר), `updatePipelineState()` שגוזרת את המצב (`@@STATE`), ובדיקות ה-timeout, ה-offline והחיבור |
 | `verdicts.ino` | PASSED/FAILED של כל שאלה ושל השלב, עצירה (halt), מדידות ההקלטה וההקלטות ב-SD |
 | `wifi_utils` | Wi-Fi ושעון: התחברות בלי להיתקע, הרשת השמורה ב-flash (או זו של `SECRETS.h`; אם הרשת השמורה נכשלת פעמיים ברצף עוברים לזו של `SECRETS.h`, ובחזרה באותו אופן), פקודות `WIFI_*`, וסנכרון השעה לפי שעון ישראל כולל שעון קיץ |
-| `openai_realtime_utils` | החיבור המאובטח ל-OpenAI, אימות, פעימת לב (ping כל 15 שניות; שני pong ברצף שלא חזרו תוך 10 שניות סוגרים את החיבור) שמגלה חיבור מת, התחברות מחדש עם המתנה שגדלה, ומצב offline (אף פעם לא מוותר). גם שליחת התוצאה של כלי (`sendFunctionCallOutput`) |
+| `openai_realtime_utils` | החיבור המאובטח ל-OpenAI, אימות, פעימת לב (ping כל 15 שניות; שני pong ברצף שלא חזרו תוך 10 שניות סוגרים את החיבור) שמגלה חיבור מת, התחברות מחדש עם המתנה שגדלה, ומצב offline (אף פעם לא מוותר). מפתח ה-API: השמור ב-flash (או זה של `SECRETS.h`; אם OpenAI דוחה את השמור פעמיים ברצף, HTTP 401/403, עוברים לזה של `SECRETS.h`, ובחזרה באותו אופן) ופקודות `OPENAI_KEY*`. גם שליחת התוצאה של כלי (`sendFunctionCallOutput`) |
 | `realtime_json_utils` | סריקה מהירה של הודעות גדולות מהשרת בלי לפענח את כל ה-JSON |
 | `i2s_audio_utils` | המיקרופון והרמקול (I2S), ה-ring buffer של הניגון ופענוח mu-law |
 | `mic_capture_utils` | משימה נפרדת (FreeRTOS) שקוראת את המיקרופון בלי הפסקה |
 | `vad_utils` | גלאי הקול: מחליט מתי מישהו התחיל ומתי סיים לדבר |
-| `hands_free_utils` | מצב Hands-free: מקשיב לבד כשהלוח פנוי ושולח רק דיבור אמיתי |
+| `hands_free_utils` | מצב Hands-free: מקשיב לבד כשהלוח פנוי ושולח רק דיבור אמיתי. גם הכלי `set_hands_free` (הדלקה וכיבוי בקול), ו-`LAPTOP_PLAYBACK`: לא מקשיב בזמן שמרכז הבקרה מנגן הקלטה ברמקולים של המחשב |
 | `board_state_utils` | ה-LED (כולל בהירות) והכלי `set_board_state` |
 | `light_sensor_utils` | חיישן האור (בגרסת ההגשה הערך מדומה ממרכז הבקרה, כי ה-LDR לא מחובר; LDR אמיתי נקרא כשמגדירים `LIGHT_SENSOR_PIN`) והכלי `get_time_of_day` |
 | `device_controls_utils` | פקודות עוצמה, השתקה, צפצוף ו-LED מהמחשב, צלילי המצב (`SOUNDS`), והכלי `set_volume` |
@@ -221,10 +221,11 @@ flowchart TD
 | `@@BOOT_TIMING` | `@@BOOT_TIMING ... total_ms=6120` | כמה זמן לקח כל שלב בעלייה |
 | `@@HEAP` | `@@HEAP free=139900 largest=110580 ...` | הזיכרון הפנוי אחרי כל שלב |
 | `@@WIFI_NET` | `@@WIFI_NET saved <hotspot>` | איזו רשת הלוח משתמש בה: `saved` (נשמרה ממרכז הבקרה) או `default` (מ-`SECRETS.h`, גם כשהלוח עבר אליה כי הרשת השמורה נכשלה פעמיים). אף פעם לא הסיסמה |
+| `@@OPENAI_KEY` | `@@OPENAI_KEY saved sk-...AbCd` | באיזה מפתח API הלוח משתמש: `saved` (נשמר ממרכז הבקרה) או `default` (מ-`SECRETS.h`, גם כשהלוח עבר אליו כי OpenAI דחו את השמור פעמיים). רק 3 התווים הראשונים ו-4 האחרונים, אף פעם לא המפתח המלא |
 | `@@BUTTON` | `@@BUTTON off` | האם כפתור BOOT משמש ככפתור Talk |
 | `@@SOUNDS` | `@@SOUNDS on` | האם צלילי המצב מודלקים |
 | `@@ALIVE` | `@@ALIVE 125` | פעימת חיים: זמן מההדלקה בשניות, כל 5 שניות מתוך `loop()`. אחרי ה-`@@ALIVE` הראשון, 15 שניות בלי אף שורה מהלוח מאפרות את הסטטוס במרכז הבקרה ("Board not responding"), והשורה הבאה מחזירה אותו. לא מודפסת בזמן ההמתנות ב-`setup()` ובזמן הורדת הקלטה, ושם גם אין בדיקה (כמו ב-Replay). לוח עם קושחה ישנה, שלא שולח אותה, אף פעם לא מסומן |
-| `@@LIMITS` | `@@LIMITS max_ask_bytes=200 max_ssid_bytes=32 min_password_bytes=8 max_password_bytes=64 max_kept_recordings=5 mic_gain=2 light_max=6142 max_utterance_ms=10000 vad_sensitivity_min=1 vad_sensitivity_max=5 vad_hangover_min_ms=600 vad_hangover_max_ms=1500` | הגבולות שהלוח עובד איתם, ישר מהקבועים בקושחה: אורך `ASK`, אורך שם וסיסמת Wi-Fi, כמה הקלטות נשמרות, ההגברה, הערך המרבי של חיישן האור, אורך הפקודה הקולית הארוכה ביותר וטווחי ה-Hands-free. מודפסת בהדלקה ובתשובה ל-`STATUS`. מרכז הבקרה משתמש בהם לבדיקת הקלט, ואם הם לא הגיעו (קושחה ישנה) נשארות ברירות המחדל שבדף |
+| `@@LIMITS` | `@@LIMITS max_ask_bytes=200 max_ssid_bytes=32 min_password_bytes=8 max_password_bytes=64 min_api_key_bytes=20 max_api_key_bytes=200 max_kept_recordings=5 mic_gain=2 light_max=6142 max_utterance_ms=10000 vad_sensitivity_min=1 vad_sensitivity_max=5 vad_hangover_min_ms=600 vad_hangover_max_ms=1500` | הגבולות שהלוח עובד איתם, ישר מהקבועים בקושחה: אורך `ASK`, אורך שם וסיסמת Wi-Fi, אורך מפתח ה-API, כמה הקלטות נשמרות, ההגברה, הערך המרבי של חיישן האור, אורך הפקודה הקולית הארוכה ביותר וטווחי ה-Hands-free. מודפסת בהדלקה ובתשובה ל-`STATUS`. מרכז הבקרה משתמש בהם לבדיקת הקלט, ואם הם לא הגיעו (קושחה ישנה) נשארות ברירות המחדל שבדף |
 
 ### שורות של העברת קבצים (מהלוח)
 
@@ -245,9 +246,11 @@ flowchart TD
 | `SOUNDS on\|off` | צלילי מצב |
 | `BUTTON on\|off` | כפתור BOOT ככפתור Talk (ולחיצה ארוכה: בדיקת טכנאי) |
 | `WIFI`, `WIFI_SSID <name>`, `WIFI_PASSWORD [<password>]`, `WIFI_FORGET` | הרשת: מה בשימוש, שמירת רשת חדשה (השם, ואז הסיסמה, שמירה והתחברות), חזרה לברירת המחדל. הסיסמה היא כל מה שאחרי המילה ורווח אחד, כולל רווחים בקצוות (8-64 בתים; רווחים בלבד או כלום = רשת פתוחה) |
+| `OPENAI_KEY [<key>]`, `OPENAI_KEY_FORGET` | מפתח ה-API: מה בשימוש (בלי מפתח), שמירת מפתח חדש והתחברות מחדש מיד, חזרה למפתח של `SECRETS.h`. מפתח הוא `sk-` ואחריו רק אותיות, ספרות, `-` ו-`_`, באורך 20-200; אחר נדחה (`OPENAI_KEY ignored`) בלי שהמפתח מודפס |
+| `LAPTOP_PLAYBACK on [<ms>]`, `LAPTOP_PLAYBACK off` | מרכז הבקרה מנגן הקלטה ברמקולים של המחשב, עוד כ-ms מילישניות: Hands-free לא מקשיב עד `off` או עד שהזמן נגמר (5 דקות לכל היותר), ומשפט של Hands-free שכבר הוקלט מבוטל. לא נשמר ואין לו שורת `@@` |
 | `LED on\|off`, `LED_BRIGHTNESS <0-100>` | ה-LED |
 | `LIGHT <0-6142>`, `LIGHT_BANDS <evening> <day>` | חיישן האור המדומה והספים שלו |
-| `VAD on\|off`, `VAD_SENSITIVITY <1-5>`, `VAD_HANGOVER <600-1500>` | Hands-free |
+| `VAD on\|off`, `VAD_SENSITIVITY <1-5>`, `VAD_HANGOVER <600-1500>` | Hands-free (את `VAD on\|off` אפשר גם בקול: הכלי `set_hands_free` עושה בדיוק אותו דבר) |
 | `LIST`, `GET <name>`, `DELETE <name>`, `DELETE_ALL [replies\|commands]` | ההקלטות ב-SD |
 
 ### כפתור BOOT: צלילים ובדיקת טכנאי
@@ -271,7 +274,7 @@ flowchart TD
 
 ## כלי חדש בשלושה צעדים
 
-ככה הוספנו את `set_volume`, `get_current_time`, `set_timer` ו-`get_board_status`:
+ככה הוספנו את `set_volume`, `get_current_time`, `set_timer`, `get_board_status` ו-`set_hands_free`:
 
 1. מוסיפים את הכלי לרשימת הכלים בהודעת ההגדרות של הסשן (`kSessionUpdateMessage` ב-`realtime_session_config.h`): שם, תיאור באנגלית למודל, וסכמת JSON של הפרמטרים.
 2. כותבים פונקציה במודול המתאים שקוראת את הפרמטרים, מבצעת, מדפיסה שורת `@@` ושולחת ל-OpenAI את התוצאה (`function_call_output`) עם `esp32va_openai::sendFunctionCallOutput()`. את הבקשה לענות (`response.create`) שולח `server_events.ino` פעם אחת, כשהתשובה עם הכלים נגמרת.

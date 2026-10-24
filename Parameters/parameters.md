@@ -12,17 +12,19 @@
 |---|---|---|---|---|
 | רשת Wi-Fi (שם וסיסמה) | Device controls ← Wi-Fi network | `WIFI_SSID <name>`, ואז `WIFI_PASSWORD <password>` | 2.4GHz בלבד, שם עד 32 בתים, סיסמה 8-64 בתים (אות עברית היא 2) או בלי. רווחים בקצוות הסיסמה נשמרים; סיסמה של רווחים בלבד = רשת פתוחה | הרשת מ-`SECRETS.h` |
 | חזרה לרשת ברירת המחדל | Wi-Fi network ← Back to default | `WIFI_FORGET` | | |
+| מפתח OpenAI API | Device controls ← OpenAI API key ← Save & connect | `OPENAI_KEY <key>` | `sk-` ואחריו אותיות, ספרות, `-` ו-`_`, באורך 20-200. הלוח מתחבר מחדש מיד, ומציג רק את 3 התווים הראשונים ו-4 האחרונים | המפתח מ-`SECRETS.h` |
+| חזרה למפתח ברירת המחדל | OpenAI API key ← Back to default | `OPENAI_KEY_FORGET` | | |
 | עוצמת הרמקול | Speaker volume | `VOLUME <0-100>` | 0-100% (בקול: 10-100%) | 100% |
 | השתקה | Mute | `MUTE on\|off` | | כבוי |
 | בהירות ה-LED | Brightness | `LED_BRIGHTNESS <0-100>` | 0-100% | 100% |
 | ספי חיישן האור (ערב, יום) | Evening from / Day from ← Apply thresholds | `LIGHT_BANDS <evening> <day>` | 0-6142 | 1000 / 3000 |
-| Hands-free | המתג ליד Talk | `VAD on\|off` | | כבוי |
+| Hands-free | המתג ליד Talk, או בקול ("Switch to hands-free mode") | `VAD on\|off` | | כבוי |
 | רגישות ה-Hands-free | Sensitivity | `VAD_SENSITIVITY <1-5>` | 1 (רק קול חזק) עד 5 | 3 |
 | שקט שמסיים משפט | Stop after silence | `VAD_HANGOVER <600-1500>` | 0.6-1.5 שניות | 1 שנייה |
 | כפתור BOOT ככפתור Talk | On the board itself | `BUTTON on\|off` | | **כבוי** |
 | צלילי מצב (offline / online / שאלה שנכשלה) | On the board itself | `SOUNDS on\|off` | | **כבוי** |
 
-הגדרות זמניות, שלא נשמרות: מצב ה-LED (`LED on|off`, הלוח תמיד עולה עם LED כבוי), וערך חיישן האור המדומה (`LIGHT <0-6142>`, רק כשאין LDR מחובר).
+הגדרות זמניות, שלא נשמרות: מצב ה-LED (`LED on|off`, הלוח תמיד עולה עם LED כבוי), וערך חיישן האור המדומה (`LIGHT <0-6142>`, רק כשאין LDR מחובר). מרכז הבקרה שולח לבד גם `LAPTOP_PLAYBACK on <ms>|off` בזמן שהנגן שלו מנגן הקלטה, כדי שה-Hands-free לא יקשיב לה.
 
 ## 2. פרמטרים קבועים בקוד: `ESP32/parameters.h`
 
@@ -55,6 +57,7 @@
 | `kWifiRestartConnectAfterMs` | 60000 | אם ה-Wi-Fi לא מתחבר, מתחילים את החיבור מחדש כל דקה |
 | `kNtpServer1`, `kNtpServer2` | `pool.ntp.org`, `time.nist.gov` | שרתי השעה (SNTP) |
 | `kWifiAttemptsBeforeFallback` | 2 | כמה ניסיונות חיבור כושלים ברצף לרשת ששמרו ממרכז הבקרה (ההמתנה בהדלקה, ואז ניסיון בדקה) עד שהלוח עובר לרשת מ-`SECRETS.h`, ובחזרה באותו אופן. רק בזיכרון: הרשת השמורה נשארת ב-flash להדלקה הבאה |
+| `kOpenAiKeyRefusalsBeforeFallback` | 2 | אותו דבר למפתח ה-API ששמרו ממרכז הבקרה: כמה פעמים ברצף OpenAI דוחים אותו (HTTP 401 או 403 בפתיחת החיבור) עד שהלוח עובר למפתח מ-`SECRETS.h`, ובחזרה באותו אופן. רק בזיכרון: המפתח השמור נשאר ב-flash. הניסיונות ממשיכים בקצב הרגיל (1, 2, 4... שניות, ואז כל 30 שניות) |
 | `kOpenAiAttemptsBeforeOffline` | 5 | ניסיונות חיבור ברצף עד מצב offline |
 | `kInitialReconnectBackoffMs` | 1000 | ההמתנה לפני הניסיון הראשון להתחבר מחדש ל-OpenAI (מוכפלת בכל ניסיון: 1, 2, 4, 8 שניות) |
 | `kOfflineRetryIntervalMs` | 30000 | כל כמה זמן מנסים שוב במצב offline (כשה-Wi-Fi חוזר, מנסים מיד) |
@@ -93,7 +96,9 @@
 | `kTimePrefixChancePercent` | `greeting_utils.cpp` | 20 | הסיכוי שהברכה בהדלקה תתחיל ב-"Good morning/afternoon/evening" |
 | `kSignalReportIntervalMs`, `kStillWaitingReportMs` | `wifi_utils.cpp` | 10000, 15000 | כל כמה זמן מדווחים את עוצמת ה-Wi-Fi, ו"עדיין מחכה" בזמן התחברות |
 | `kMaxSsidLength`, `kMinPasswordLength`, `kMaxPasswordLength` | `wifi_utils.h` | 32, 8, 64 | גבולות שם רשת ה-Wi-Fi והסיסמה, בבתים (מגבלות 802.11 ו-WPA2). הלוח שולח אותם למרכז הבקרה בשורת `@@LIMITS`, יחד עם שאר הגבולות שהדף בודק |
-| `kWifiReturnFastRetryMs` | `ESP32.ino` | 10000 | כשה-Wi-Fi חוזר, מנסים להתחבר ל-OpenAI כל שנייה במשך 10 שניות, ואז חוזרים לקצב ה-offline |
+| `kMinApiKeyLength`, `kMaxApiKeyLength` | `openai_realtime_utils.h` | 20, 200 | גבולות האורך של מפתח API שאפשר לשמור ממרכז הבקרה (מפתח `sk-proj-` הוא 164 תווים). גם הם נשלחים ב-`@@LIMITS`. מפתח ארוך יותר ב-`SECRETS.h` עוצר את הקומפילציה עם הסבר |
+| `kWifiReturnFastRetryMs` | `ESP32.ino` | 10000 | כשה-Wi-Fi חוזר, או כששומרים מפתח API חדש, מנסים להתחבר ל-OpenAI כל שנייה במשך 10 שניות, ואז חוזרים לקצב ה-offline |
+| `kMaxLaptopPlaybackHoldMs` | `hands_free_utils.h` | 5 דקות | הכי הרבה זמן ש-`LAPTOP_PLAYBACK on` עוצר את ה-Hands-free. מרכז הבקרה שולח כמה זמן נשאר להקלטה (ועוד 1.5 שניות), כך שזה רק גבול לדף שנסגר באמצע ניגון |
 | `kHandsFreeTurnsToPass`, `kMinLowestHeapBytes` | `ESP32.ino` | 5, 20KB | תנאי ה-PASS של בדיקת שלב 30 ("HANDS-FREE PASSED"): 5 שאלות Hands-free ברצף, והזיכרון הפנוי לא ירד מתחת ל-20KB |
 | `kPreRollMs` | `vad_utils.h` | 500 | כמה אודיו מלפני תחילת הדיבור נשלח (ה-pre-roll) |
 | `kMaxUtteranceMs` | `vad_utils.h` | 10000 | משפט ארוך ביותר ב-Hands-free |
@@ -112,7 +117,7 @@
 | סוד | מה |
 |---|---|
 | `WIFI_SSID`, `WIFI_PASSWORD` | רשת ברירת המחדל (אפשר להחליף ממרכז הבקרה) |
-| `OPENAI_API_KEY` | מפתח ל-OpenAI Realtime API |
+| `OPENAI_API_KEY` | מפתח ברירת המחדל ל-OpenAI Realtime API (אפשר להחליף ממרכז הבקרה) |
 
 הקובץ ב-`.gitignore`. בגיט נמצאת רק התבנית `ESP32/SECRETS.example.h`: מעתיקים אותה ל-`SECRETS.h` וממלאים. בלי `SECRETS.h` הקומפילציה נעצרת עם הודעה שמסבירה מה לעשות.
 
