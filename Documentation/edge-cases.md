@@ -1,23 +1,19 @@
-<div dir="rtl">
+# Edge Cases - Voice Assistant on ESP32
 
-# מקרי קצה - עוזר קולי על ESP32
+Group A2, IoT course, Summer 2026.
 
-קבוצה A2, קורס IoT, קיץ 2026.
+Cases the system knows how to handle, and how to see them in the demo.
 
-מקרים שהמערכת יודעת לטפל בהם, ואיך אפשר לראות את זה בהדגמה.
-
-| # | המקרה | מה המערכת עושה | איך מדגימים | ✓ |
+| # | The case | What the system does | How to demo it | ✓ |
 |---|---|---|---|---|
-| 1 | רעש בחדר במצב Hands-free (דפיקה על השולחן, מחיאת כפיים, צעדים) | גלאי הקול מזהה שזה לא דיבור ולא מתחיל להקליט. | דופקים על השולחן ומוחאים כפיים ליד המכשיר. המצב נשאר Waiting for speech. | |
-| 2 | שקט | במצב Hands-free שקט לא נשלח לענן בכלל. בשימוש בכפתור, המערכת מחזירה משפט כללי. | Hands-free דלוק ושותקים: לא מתחילה הקלטה. לוחצים Talk ושותקים: העוזר עונה במשפט כללי. | |
-| 3 | לוחצים Talk כשהעוזר עוד עונה | אי אפשר להתחיל הקלטה שנייה כל עוד העוזר מדבר (גם ברכה, הודעת טיימר או תשובה לשאלה בכתב): הבקשה נדחית (גם `LISTEN` מהטרמינל ו-BOOT, עם הודעה). מחכים שהוא יסיים, או לוחצים Cancel. | באמצע תשובה הכפתור Talk כתוב Busy ולא לוחץ, וגם רווח לא מתחיל הקלטה. | |
-| 4 | הפסקה קצרה באמצע משפט | ההקלטה ממשיכה עד שקט של כשנייה (אפשר לשנות ב-Stop after silence). | אומרים משפט עם עצירה קצרה באמצע. הוא נשלח כשאלה אחת. | |
-| 5 | החיבור ל-OpenAI נופל | הלוח מתחבר מחדש לבד, עם המתנה שגדלה בין ניסיונות (backoff). אחרי 5 ניסיונות כושלים ברצף הוא עובר ל-Offline (נורית OpenAI אדומה) וממשיך לנסות כל 30 שניות, לעולם לא נעצר. כשהרשת חוזרת הוא מתחבר מחדש תוך כמה שניות, וכשהחיבור חוזר הוא מתאושש לבד. | מכבים את ה-hotspot לכמה שניות ומדליקים. נורית OpenAI נהיית אדומה, ואחרי שהרשת חוזרת היא חוזרת לירוק לבד. | |
-| 6 | Reset ללוח | ההגדרות (עוצמה, השתקה, בהירות, ספי אור, Hands-free) נשמרות ב-flash וחוזרות אחרי העלייה. | משנים עוצמה, לוחצים Reset, ובודקים שהעוצמה נשארה. | |
-| 7 | מרכז הבקרה מתנתק באמצע | מופיע באנר אדום, וכשמחברים שוב הדף מתחבר לבד ומקבל את המצב הנוכחי (STATUS). | לוחצים Disconnect ואז Connect, או מנתקים את כבל ה-USB ומחברים שוב. כל הנורות והמצב מופיעים שוב. | |
-| 8 | עוצמה מחוץ לטווח | הלוח מגביל את העוצמה ל-0 עד 100. | אומרים `Set the volume to 150 percent`. העוצמה נעצרת על 100%. | |
-| 9 | דיבור ממרחק סטנדרטי (מטר) עם רעש רקע | גלאי הקול מזהה את הדיבור גם כשיש רעש ברקע, והעוזר מבין את הבקשה ומבצע אותה. | אחד מתופף על השולחן, והשני עומד במרחק מטר מהמכשיר ואומר `Turn on the light`. ה-LED נדלק. | |
-| 10 | הטיימר נגמר כשאין חיבור ל-OpenAI | הטיימר רץ על הלוח עצמו, אז הוא מצפצף ומהבהב גם בלי אינטרנט. רק ההודעה בקול צריכה חיבור: אם אין חיבור כשהטיימר נגמר, היא לא נאמרת. | מפעילים `Set a timer for 30 seconds` ומכבים את ה-hotspot. אחרי 30 שניות הלוח מצפצף. | |
-| 11 | כמה בקשות חומרה בפקודה אחת | העוזר קולט את כל הבקשות שבפקודה ומבצע את כולן יחד. | אומרים `Set the light brightness and the volume to 100 percent`. גם בהירות ה-LED וגם העוצמה עולות ל-100%. | |
-
-</div>
+| 1 | Noise in the room in Hands-free mode (a knock on the table, a clap, footsteps) | The voice detector recognizes that it is not speech and does not start recording. | Knock on the table and clap next to the device. The state stays Waiting for speech. | |
+| 2 | Silence | In Hands-free mode, silence is not sent to the cloud at all. When using the button, the system answers with a generic sentence. | Hands-free on and stay silent: no recording starts. Click Talk and stay silent: the assistant answers with a generic sentence. | |
+| 3 | Clicking Talk while the assistant is still answering | A second recording cannot start while the assistant is speaking (also a greeting, a timer message or an answer to a typed question): the request is rejected (also `LISTEN` from the terminal and BOOT, with a message). Wait for it to finish, or click Cancel. | In the middle of an answer the Talk button shows Busy and cannot be clicked, and the space bar does not start a recording either. | |
+| 4 | A short pause in the middle of a sentence | The recording continues until about a second of silence (can be changed with Stop after silence). | Say a sentence with a short stop in the middle. It is sent as one question. | |
+| 5 | The connection to OpenAI drops | The board reconnects on its own, with a growing wait between attempts (backoff). After 5 failed attempts in a row it goes Offline (red OpenAI light) and keeps retrying every 30 seconds, never stopping. When the network comes back it reconnects within a few seconds, and when the connection comes back it recovers on its own. | Turn off the hotspot for a few seconds and turn it back on. The OpenAI light turns red, and after the network comes back it turns green again on its own. | |
+| 6 | Board Reset | The settings (volume, mute, brightness, light thresholds, Hands-free) are saved in flash and come back after startup. | Change the volume, press Reset, and check that the volume stayed. | |
+| 7 | The control center disconnects in the middle | A red banner appears, and when you connect again the page reconnects on its own and gets the current state (STATUS). | Click Disconnect and then Connect, or unplug the USB cable and plug it in again. All the lights and the state appear again. | |
+| 8 | Volume out of range | The board limits the volume to 0 to 100. | Say `Set the volume to 150 percent`. The volume stops at 100%. | |
+| 9 | Speech from a standard distance (a meter) with background noise | The voice detector recognizes the speech even with noise in the background, and the assistant understands the request and carries it out. | One person drums on the table, and the other stands a meter from the device and says `Turn on the light`. The LED turns on. | |
+| 10 | The timer ends when there is no connection to OpenAI | The timer runs on the board itself, so it beeps and blinks even without internet. Only the spoken message needs a connection: if there is no connection when the timer ends, it is not said. | Start `Set a timer for 30 seconds` and turn off the hotspot. After 30 seconds the board beeps. | |
+| 11 | Several hardware requests in one command | The assistant catches all the requests in the command and carries them all out together. | Say `Set the light brightness and the volume to 100 percent`. Both the LED brightness and the volume go up to 100%. | |

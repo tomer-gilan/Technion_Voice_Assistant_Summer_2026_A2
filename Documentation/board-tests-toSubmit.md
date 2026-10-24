@@ -1,41 +1,37 @@
-<div dir="rtl">
+# Board Test Report - Submission Version
 
-# דוח בדיקות על הלוח - גרסת ההגשה
+All the tests below were run on the board with the submission firmware, **and they all passed** (✅). The report covers all the changes of the submission version compared with the previous version: first tests that confirm that what worked before still works, and then the new features (no SD card, Offline mode, switching networks without compiling, the BOOT button and status sounds). Each firmware change is a separate commit, so every test can be linked to the change it checks.
 
-כל הבדיקות שלמטה הורצו על הלוח עם קושחת ההגשה, **וכולן עברו** (✅). הדוח מכסה את כל השינויים של גרסת ההגשה לעומת הגרסה הקודמת: קודם כל בדיקות שמוודאות שמה שעבד קודם עדיין עובד, ואחריהן הפיצ'רים החדשים (בלי SD, מצב Offline, החלפת רשת בלי קימפול, כפתור BOOT וצלילי מצב). כל שינוי בקושחה הוא commit נפרד, כך שאפשר לקשר כל בדיקה לשינוי שהיא בודקת.
+**Setup:** `ESP32/SECRETS.example.h` was copied to `ESP32/SECRETS.h` with the hotspot details and the API key, and then `ESP32/ESP32.ino` was uploaded.
 
-**הכנה:** `ESP32/SECRETS.example.h` הועתק ל-`ESP32/SECRETS.h` עם פרטי ה-hotspot ומפתח ה-API, ואז נצרב `ESP32/ESP32.ino`.
+## A. What worked before still works
 
-## א. מה שהיה קודם עדיין עובד
-
-| # | בדיקה | מה צריך לקרות | commit שנבדק | תוצאה |
+| # | Test | What should happen | Commit tested | Result |
 |---|---|---|---|---|
-| 1 | הדלקה רגילה (hotspot דלוק, כרטיס בפנים) | כל הנורות ירוקות, ברכת פתיחה, הדלקה תוך כ-7-11 שניות כמו קודם | כולם | ✅ |
-| 2 | Test beep ו-Talk עם שאלה | צפצוף נקי, הקלטה, תשובה נשמעת בלי רעשים חדשים | `I2S: no master clock pin` | ✅ |
-| 3 | 10 שאלות ברצף, חלקן עם כלים (LED, עוצמה, טיימר) | הכל כמו קודם, `LISTEN #N PASSED` | כולם | ✅ |
-| 4 | Hands-free: 5 שאלות בקול, ודפיקות על השולחן | מתחיל מדיבור, לא מדפיקות, `HANDS-FREE PASSED` | כולם | ✅ |
-| 5 | ההקלטות: Play, Download, Delete | עובד כמו קודם | `Robustness...` | ✅ |
-| 6 | ההגדרות נשמרות אחרי Reset | עוצמה, בהירות, Hands-free | | ✅ |
+| 1 | Normal boot (hotspot on, card inserted) | All the lights green, an opening greeting, boot within about 7-11 seconds as before | All | ✅ |
+| 2 | Test beep and Talk with a question | A clean beep, a recording, an answer heard with no new noises | `I2S: no master clock pin` | ✅ |
+| 3 | 10 questions in a row, some with tools (LED, volume, timer) | Everything as before, `LISTEN #N PASSED` | All | ✅ |
+| 4 | Hands-free: 5 questions by voice, and knocks on the table | Starts on speech, not on knocks, `HANDS-FREE PASSED` | All | ✅ |
+| 5 | The recordings: Play, Download, Delete | Works as before | `Robustness...` | ✅ |
+| 6 | The settings are kept after a Reset | Volume, brightness, Hands-free | | ✅ |
 
-## ב. השינויים החדשים
+## B. The new changes
 
-| # | בדיקה | מה צריך לקרות | תוצאה |
+| # | Test | What should happen | Result |
 |---|---|---|---|
-| 7 | Reset **בלי** כרטיס SD | נורית SD אדומה עם `running without recordings`, העוזר עונה לשאלות, LIST מחזיר `no SD card`. **אין** HALTED | ✅ |
-| 8 | Reset כשה-hotspot **כבוי**, ואחרי 30 שניות מדליקים | אחרי 20 שניות ההדלקה ממשיכה, העיגול Offline, הפקדים עובדים. כשה-hotspot עולה, OpenAI מתחבר לבד וחוזר Ready | ✅ |
-| 9 | מכבים את ה-hotspot באמצע עבודה לדקה, ומדליקים | Offline (`no Wi-Fi`), ואחר כך חזרה לבד ל-Ready, בלי Reset | ✅ |
-| 10 | hotspot בלי אינטרנט (או מפתח API שגוי) | אחרי 5 ניסיונות: נורית OpenAI אדומה `offline - retrying every 30 s`, Offline. **לא** HALTED | ✅ |
-| 11 | כרטיס Wi-Fi network: hotspot אחר | `@@WIFI_NET saved <name>`, הלוח מתחבר לרשת החדשה, ונשאר בה אחרי Reset. בלוג הסיסמה מופיעה ככוכביות | ✅ |
-| 12 | Back to default | חוזר לרשת מ-`SECRETS.h` (`@@WIFI_NET default ...`) | ✅ |
-| 13 | סיסמה שגויה ברשת שמורה | נורית Wi-Fi אדומה `check the password`, Offline, ניסיון חוזר כל דקה. Back to default מתקן (זה מה שנבדק על הלוח. מאז נוספה החלפה אוטומטית לרשת מ-`SECRETS.h` אחרי שני ניסיונות כושלים, והיא עוד לא נבדקה על הלוח) | ✅ |
-| 14 | `Unit Tests/08_boot_button`, כמו שהוא | 0 שינויים גולמיים כשלא נוגעים, ו-PASSED אחרי 5 לחיצות | ✅ |
-| 15 | אותה בדיקה עם `kStartI2sWithMclkOnGpio0 = true` | ניסוי הפוך, להשוואה: אם החשד נכון (שעון ה-MCLK יוצא ל-GPIO0), יהיו הרבה שינויים גולמיים בלי לגעת | ✅ |
-| 16 | בקושחה: On the board itself ← BOOT button, ואז לוחצים BOOT | מתחילה הקלטה של 3 שניות. לחיצה נוספת באמצע מבטלת. בלי לגעת: אף הקלטה לא מתחילה לבד במשך 5 דקות | ✅ |
-| 17 | Status sounds דלוק, ואז מכבים את ה-hotspot | שני צלילים יורדים כשעובר ל-Offline, ושני צלילים עולים כשחוזר. Hands-free לא מתחיל להקליט מהצלילים | ✅ |
-| 18 | `Set the volume to 0 percent` בקול | העוצמה נקבעת ל-10%, והעוזר מאשר בקול | ✅ |
-| 19 | הלוח רץ שעה או יותר בלי לגעת | לא עובר ל-HALTED גם אחרי ניתוקים של השרת (קודם: אחרי 5 ניתוקים מפוזרים) | ✅ |
-| 20 | `Unit Tests/06_sd_card` ו-`07_led_pwm` (‏08 נבדקה בבדיקה 14) | PASSED / מה שכתוב בכל אחת | ✅ |
+| 7 | Reset **without** an SD card | A red SD light with `running without recordings`, the assistant answers questions, LIST returns `no SD card`. **No** HALTED | ✅ |
+| 8 | Reset when the hotspot is **off**, and turn it on after 30 seconds | After 20 seconds the boot continues, the circle shows Offline, the controls work. When the hotspot comes up, OpenAI connects on its own and it goes back to Ready | ✅ |
+| 9 | Turn off the hotspot in the middle of work for a minute, and turn it back on | Offline (`no Wi-Fi`), and then back to Ready on its own, without a Reset | ✅ |
+| 10 | A hotspot with no internet (or a wrong API key) | After 5 attempts: a red OpenAI light `offline - retrying every 30 s`, Offline. **Not** HALTED | ✅ |
+| 11 | Wi-Fi network card: a different hotspot | `@@WIFI_NET saved <name>`, the board connects to the new network, and stays on it after a Reset. In the log the password appears as asterisks | ✅ |
+| 12 | Back to default | Returns to the network from `SECRETS.h` (`@@WIFI_NET default ...`) | ✅ |
+| 13 | A wrong password on a saved network | A red Wi-Fi light `check the password`, Offline, a retry every minute. Back to default fixes it (this is what was tested on the board. Since then an automatic switch to the network from `SECRETS.h` after two failed attempts was added, and it has not been tested on the board yet) | ✅ |
+| 14 | `Unit Tests/08_boot_button`, as is | 0 raw changes when not touched, and PASSED after 5 presses | ✅ |
+| 15 | The same test with `kStartI2sWithMclkOnGpio0 = true` | A reverse experiment, for comparison: if the suspicion is right (the MCLK clock goes out on GPIO0), there will be many raw changes without touching | ✅ |
+| 16 | In the firmware: On the board itself → BOOT button, then press BOOT | A 3-second recording starts. Another press in the middle cancels it. Without touching: no recording starts on its own for 5 minutes | ✅ |
+| 17 | Status sounds on, then turn off the hotspot | Two falling tones when it goes Offline, and two rising tones when it comes back. Hands-free does not start recording from the tones | ✅ |
+| 18 | `Set the volume to 0 percent` by voice | The volume is set to 10%, and the assistant confirms out loud | ✅ |
+| 19 | The board runs for an hour or more without being touched | It does not go to HALTED even after server disconnects (before: after 5 scattered disconnects) | ✅ |
+| 20 | `Unit Tests/06_sd_card` and `07_led_pwm` (08 was checked in test 14) | PASSED / what each one says | ✅ |
 
-**בדיקת היחידה 09 (חיישן האור) לא הורצה:** ה-LDR לא מחובר ללוח. לפי הנחיית מדריך הקורס, ערך החיישן מדומה ממרכז הבקרה (סליידר Light sensor). הקוד לחיישן האמיתי והוראות החיבור והכיול קיימים ב-[calibration.md](calibration.md), לשימוש עתידי כשהחיישן יחובר.
-
-</div>
+**Unit test 09 (the light sensor) was not run:** the LDR is not connected to the board. As the course guide instructs, the sensor value is simulated from the control center (the Light sensor slider). The code for the real sensor and the wiring and calibration instructions are in [calibration.md](calibration.md), for future use once the sensor is connected.

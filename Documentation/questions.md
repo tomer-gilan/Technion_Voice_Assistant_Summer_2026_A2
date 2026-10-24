@@ -1,102 +1,99 @@
-<div dir="rtl">
+# Questions the Examiners May Ask - and Short Answers
 
-# שאלות שבוחנים עשויים לשאול - ותשובות קצרות
+Group A2, IoT course, Summer 2026. A preparation page for the team before the demo. All the numbers are from the [README](../README.md) and from [How the code is built](architecture.md).
 
-קבוצה A2, קורס IoT, קיץ 2026. דף הכנה לצוות לפני ההדגמה. כל המספרים מה-[README](../README.md) ומ-[איך הקוד בנוי](architecture.md).
+## Hardware and memory
 
-## חומרה וזיכרון
+**Why not record the whole question and then send it?**
 
-**למה לא מקליטים את כל השאלה ואז שולחים?**
+Our ESP32 does not have much RAM. We checked, and 3 seconds of audio at 24kHz and 16 bits is about 144KB, and when the connection to OpenAI is open only about 45KB stay free. So each 100ms chunk is sent right away.
 
-ל-ESP32 שלנו אין הרבה זכרון RAM . בדקנו ו3 שניות של אודיו ב-24kHz ו-16 ביט הן כ-144KB, וכשהחיבור ל-OpenAI פתוח נשארים פנויים רק כ-45KB. לכן כל חתיכה של 100ms נשלחת מיד.
+**Why does the answer arrive as mu-law at 8kHz?**
 
-**למה התשובה מגיעה ב-mu-law ב-8kHz?**
+It is 6 times smaller than PCM at 24kHz (64 kbps instead of 384), so the answer fits in the 32KB playback buffer. The quality is enough for speech.
 
-זה קטן פי 6 מ-PCM ב-24kHz (64 kbps במקום 384), אז התשובה נכנסת במאגר הניגון של 32KB. האיכות מספיקה לדיבור.
+**What takes up the most memory?**
 
-**מה תופס הכי הרבה זיכרון?**
+The encrypted connection and the WebSocket, about 51KB. During a conversation about 45KB stay free, stable over 26 questions, which means there is no leak.
 
-החיבור המוצפן וה-WebSocket, כ-51KB. בזמן שיחה נשארים כ-45KB פנויים, יציב לאורך 26 שאלות, כלומר אין דליפה.
+**How do the microphone and the speaker work together?**
 
-**איך המיקרופון והרמקול עובדים ביחד?**
+Both are on the same I2S clocks (BCLK and LRC are connected to both), with one I2S port in full-duplex mode. See the [wiring diagram](images/wiring.png).
 
-שניהם על אותם שעוני I2S (BCLK ו-LRC מחוברים לשניהם), עם פורט I2S אחד במצב full-duplex. ראו את [דיאגרמת החיבורים](images/wiring.png).
+## Software
 
-## תוכנה
+**What happens when the network is slow?**
 
-**מה קורה כשהרשת איטית?**
+A separate FreeRTOS task reads the microphone every 20ms into a queue of about 1.36 seconds. A slow send only delays the audio and does not lose it. We found this in the measurements: before the fix, samples were lost in 21 of 26 questions.
 
-משימת FreeRTOS נפרדת קוראת את המיקרופון כל 20ms לתור של כ-1.36 שניות. שליחה איטית רק מעכבת את האודיו ולא מאבדת אותו. את זה מצאנו במדידות: לפני התיקון אבדו דגימות ב-21 מתוך 26 שאלות.
+**How does the model turn on the LED?**
 
-**איך המודל מדליק את ה-LED?**
+In the session configuration message we defined 6 "tools" with a JSON schema. The model decides to call a tool, the ESP32 carries it out and returns a result, and the model says out loud what was done. The code does not try to understand text on its own.
 
-בהודעת ההגדרות לסשן הגדרנו 6 "כלים" עם סכמת JSON. המודל מחליט לקרוא לכלי, ה-ESP32 מבצע ומחזיר תשובה, והמודל אומר בקול מה נעשה. הקוד לא מנסה להבין טקסט בעצמו.
+**How does Hands-free know that it is speech and not a knock?**
 
-**איך Hands-free יודע שזה דיבור ולא דפיקה?**
+The voice detector compares the energy in the speech frequency band with the room noise, checks whether the sound is "voiced", and whether it has a syllable rhythm. Knocks, claps and footsteps never started a recording in the test on 112 noise clips.
 
-גלאי הקול בודק עוצמה בתחום התדרים של דיבור לעומת רעש החדר, אם הקול "קולי", ואם יש בו קצב של הברות. דפיקות, מחיאות כפיים וצעדים אף פעם לא התחילו הקלטה בבדיקה על 112 קטעי רעש.
+**Why doesn't the assistant answer itself?**
 
-**למה העוזר לא עונה לעצמו?**
+During an answer and for 0.6 seconds after it the microphone does not listen (half-duplex). Talk is also rejected as long as the assistant is speaking (the button shows Busy): wait for it to finish, or click Cancel.
 
-בזמן תשובה ועוד 0.6 שניות אחריה המיקרופון לא מקשיב (half-duplex). גם Talk נדחה כל עוד העוזר מדבר (הכפתור כתוב Busy): מחכים שיסיים, או לוחצים Cancel.
+**What is kept after a Reset?**
 
-**מה נשמר אחרי Reset?**
+Volume, mute, LED brightness, the light thresholds, the Hands-free settings, the Wi-Fi network saved from the control center, the BOOT button and the status sounds, in flash (NVS, through `Preferences`).
 
-עוצמה, השתקה, בהירות LED, ספי האור, הגדרות Hands-free, רשת ה-Wi-Fi שנשמרה ממרכז הבקרה, כפתור BOOT וצלילי המצב, ב-flash (NVS, דרך `Preferences`).
+**How do you switch Wi-Fi networks without compiling?**
 
-**איך מחליפים רשת Wi-Fi בלי לקמפל?**
+In the Wi-Fi network card in the control center. It sends `WIFI_SSID` and then `WIFI_PASSWORD`, the board saves both in flash and connects right away. The password is not printed in the log, and it is saved exactly as typed (including spaces at the ends). `SECRETS.h` is only the default: a saved network that fails twice in a row (for example a wrong password) is temporarily replaced by the network from `SECRETS.h`, and the saved network stays in flash.
 
-בכרטיס Wi-Fi network במרכז הבקרה. הוא שולח `WIFI_SSID` ואז `WIFI_PASSWORD`, הלוח שומר את שניהם ב-flash ומתחבר מיד. הסיסמה לא מודפסת בלוג, והיא נשמרת בדיוק כפי שהוקלדה (גם עם רווחים בקצוות). `SECRETS.h` הוא רק ברירת המחדל: רשת שנשמרה ונכשלת פעמיים ברצף (למשל סיסמה שגויה) מוחלפת זמנית ברשת מ-`SECRETS.h`, והרשת השמורה נשארת ב-flash.
+**What happens without an SD card?**
 
-**מה קורה בלי כרטיס SD?**
+The board works normally, just without recordings: a red SD light, and the recordings tab says there is no card. Before, the whole board stopped, and we changed that because the recordings are a feature and not a requirement.
 
-הלוח עובד רגיל, רק בלי הקלטות: נורית SD אדומה, ולשונית ההקלטות כותבת שאין כרטיס. קודם הלוח נעצר כולו, ושינינו את זה כי ההקלטות הן פיצ'ר ולא תנאי.
+**What happens if OpenAI stops answering in the middle?**
 
-**מה קורה אם OpenAI מפסיק לענות באמצע?**
+If there is no message at all from the server for 15 seconds during a question, the question fails and the board closes the connection and reopens it (the conversation context is lost). In addition, a heartbeat (a ping every 15 seconds) detects a "stuck" connection even with no open question: if 2 answers in a row do not come back within 10 seconds, the connection is closed and reopened.
 
-אם אין מהשרת שום הודעה 15 שניות בזמן שאלה, השאלה נכשלת והלוח סוגר את החיבור ופותח אותו מחדש (ההקשר של השיחה אובד). בנוסף, פעימת לב (ping כל 15 שניות) מגלה חיבור "תקוע" גם בלי שאלה פתוחה: אם 2 תשובות ברצף לא חוזרות תוך 10 שניות, החיבור נסגר ונפתח מחדש.
+**How is the assistant's state managed in the code?**
 
-**איך המצב של העוזר מנוהל בקוד?**
+A few flags, one for each source of events (recording, a server answer, playback, a tool), and one function (`updatePipelineState()`) that computes a single state from them by a fixed order of priority. The table is in [architecture.md](architecture.md), and the reason for the choice is in [decisions.md](decisions.md).
 
-כמה דגלים, אחד לכל מקור אירועים (הקלטה, תשובה בשרת, ניגון, כלי), ופונקציה אחת (`updatePipelineState()`) שמחשבת מהם מצב אחד לפי סדר עדיפויות קבוע. הטבלה ב-[architecture.md](architecture.md), והסיבה לבחירה ב-[decisions.md](decisions.md).
+**How do you transfer files from the SD card to the computer without an extra Wi-Fi connection?**
 
-**איך מעבירים קבצים מה-SD למחשב בלי Wi-Fi נוסף?**
+Over the same USB cable. The board sends the bytes between `@@GET_BEGIN` and `@@GET_END`, and the control center checks a CRC-32 to know that the file arrived complete.
 
-באותו כבל USB. הלוח שולח את הבייטים בין `@@GET_BEGIN` ל-`@@GET_END`, ומרכז הבקרה בודק CRC-32 כדי לדעת שהקובץ הגיע שלם.
+## Performance
 
-## ביצועים
+**How fast does it answer?**
 
-**כמה מהר הוא עונה?**
+A median of about 1.1 seconds from the end of the recording to the first sound. 23 of 26 questions started answering in under 2 seconds. The slow ones were quiet speech or speech from far away.
 
-חציון של כ-1.1 שניות מסוף ההקלטה עד הצליל הראשון. 23 מתוך 26 שאלות התחילו לענות תוך פחות מ-2 שניות. האיטיות היו בדיבור שקט או מרחוק.
+**How long does a boot take?**
 
-**כמה זמן לוקחת הדלקה?**
+6.8 to 10.8 seconds until it is ready to talk. The long part is the encrypted connection to OpenAI, 3.9 to 5.1 seconds.
 
-6.8 עד 10.8 שניות עד שמוכן לשיחה. החלק הארוך הוא החיבור המוצפן ל-OpenAI, 3.9 עד 5.1 שניות.
+## Limitations
 
-## מגבלות
+**Why is the light sensor simulated?**
 
-**למה חיישן האור מדומה?**
+The light sensor (LDR) is not connected to the board, and as the course lecturer instructed, the value comes from the Light sensor slider in the control center (like the `LIGHT <value>` command). Everything else is real: the `get_time_of_day` tool, the evening and day thresholds that are saved in flash, and the spoken answer. Connecting a real sensor only requires wiring the voltage divider to pin 34 and uncommenting one line in `parameters.h`.
 
-חיישן האור (LDR) לא מחובר ללוח, ולפי הנחיית מרצה הקורס הערך מגיע מסליידר Light sensor במרכז הבקרה (בדומה לפקודה `LIGHT <ערך>`). כל השאר אמיתי: הכלי `get_time_of_day`, הספים של ערב ויום שנשמרים ב-flash, והתשובה בקול. חיבור חיישן אמיתי דורש רק לחבר את המחלק מתח לפין 34 ולהוריד הערה אחת ב-`parameters.h`.
+**Does it work in Hebrew?**
 
-**הוא עובד בעברית?**
+Yes, but less well than in English. You can speak Hebrew and it answers in Hebrew, but the answers are less accurate, and the transcript shown in the control center (what the user said) is often garbled. The transcription is done by a separate model (`gpt-4o-mini-transcribe`) that is not told the language. Setting the transcription language in the session configuration is the next improvement we would test.
 
-כן, אבל פחות טוב מאשר באנגלית. אפשר לדבר בעברית והוא עונה בעברית, אבל התשובות פחות מדויקות, והתמלול שמוצג במרכז הבקרה (מה שהמשתמש אמר) משתבש הרבה פעמים. התמלול נעשה במודל נפרד (`gpt-4o-mini-transcribe`) שלא נאמרה לו השפה. קביעת שפה לתמלול בהגדרות הסשן היא השיפור הבא שהיינו בודקים.
+**What happens without internet?**
 
-**מה קורה בלי אינטרנט?**
+The assistant goes to Offline mode: the circle in the control center is red, and with the status sounds you hear two falling tones. It keeps trying to connect every 30 seconds, and never stops (the OpenAI light is red during this time, also when there is Wi-Fi without internet). Meanwhile the timer, the controls (volume, LED, Hands-free) and the recordings work, because they run on the board. When the Wi-Fi comes back, the connection to OpenAI reopens within a few seconds (the OpenAI light is orange until then), and if it still does not answer after 10 seconds the board goes back to retrying every 30 seconds. All of this without a Reset, and it is usually back to Ready within about 15 seconds.
 
-העוזר עובר למצב Offline: העיגול במרכז הבקרה אדום, ועם צלילי המצב שומעים שני צלילים יורדים. הוא ממשיך לנסות להתחבר כל 30 שניות, ולעולם לא נעצר (נורית OpenAI אדומה בזמן הזה, גם כשיש Wi-Fi בלי אינטרנט). בינתיים הטיימר, הפקדים (עוצמה, LED, Hands-free) וההקלטות עובדים, כי הם רצים על הלוח. כשה-Wi-Fi חוזר, החיבור ל-OpenAI נפתח מחדש תוך כמה שניות (נורית OpenAI כתומה עד אז), ואם הוא עדיין לא עונה אחרי 10 שניות הלוח חוזר לנסות כל 30 שניות. הכל בלי Reset, ובדרך כלל תוך כ-15 שניות חוזר ל-Ready.
+**Can you use it without the computer?**
 
-**אפשר להשתמש בו בלי המחשב?**
+Yes. Hands-free, the BOOT button (as the Talk button) and the status sounds are saved on the board, and a power bank is enough. Disconnect the USB cable from the computer and only then connect a power bank (not both together, so as not to damage the computer). The board restarts and reaches the opening greeting within about 10 seconds, and the settings are kept. The computer provides the screen and the settings.
 
-כן. Hands-free, כפתור BOOT (ככפתור Talk) וצלילי המצב נשמרים בלוח, ו-power bank מספיק. מנתקים את ה-USB מהמחשב ורק אז מחברים power bank (לא שניהם יחד, כדי לא לפגוע במחשב). הלוח עולה מחדש תוך כ-10 שניות עד ברכת הפתיחה, וההגדרות נשמרות. המחשב נותן את המסך ואת ההגדרות.
+**Why did the BOOT button come back, after you gave up on it?**
 
-**למה כפתור BOOT חזר, אחרי שוויתרתם עליו?**
+In step 19 it gave false readings. During the submission stage we found a likely cause: in the I2S configuration the MCLK pin field was not initialized, meaning it was 0, and the driver outputs that clock on GPIO0, the button's pin. We removed the MCLK pin (none of our components need it). The unit test `08_boot_button` checks this directly, and it passed on the board. The button is off by default, and you turn it on in the On the board itself card.
 
-בשלב 19 הוא נתן קריאות שווא. בשלב ההגשה מצאנו סיבה סבירה: בהגדרת ה-I2S השדה של פין ה-MCLK לא היה מאותחל, כלומר 0, ומנהל ההתקן מוציא את השעון הזה ל-GPIO0, הפין של הכפתור. הסרנו את פין ה-MCLK (אף רכיב שלנו לא צריך אותו). בדיקת היחידה `08_boot_button` בודקת את זה ישירות, והיא עברה על הלוח. הכפתור כבוי כברירת מחדל, ומדליקים אותו בכרטיס On the board itself.
+**What would you improve?**
 
-**מה הייתם משפרים?**
-חשבנו על להעביר את הGUI לאפליקציה לטלפון במקום במחשב.
-
-</div>
+We thought about moving the GUI to a phone app instead of the computer.

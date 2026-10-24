@@ -1,103 +1,99 @@
-<div dir="rtl">
+# Project Versions - How We Built the Assistant, Step by Step
 
-# גרסאות הפרויקט - איך בנינו את העוזר, שלב אחר שלב
+Group A2, IoT course, Summer 2026. We built the project in small steps. Each step was a complete sketch that worked on its own, and the top of each file says what it adds and how to check that it passed. The old steps are kept in the `Documentation/development_steps/` folder as `NN_*.ino.inactive` (the hardware tests 02-05 are in `Unit Tests/`). They were written against the shared modules as they were at that step, so they document the process and are not code that compiles today as is. The current version is `ESP32/ESP32.ino` (step 30 and the improvements after it).
 
-קבוצה A2, קורס IoT, קיץ 2026. בנינו את הפרויקט בצעדים קטנים. כל שלב היה sketch שלם שעבד לבד, ובראש כל קובץ כתוב מה הוא מוסיף ואיך בודקים שהוא עבר. השלבים הישנים נשמרו בתיקייה `Documentation/development_steps/` בשם `NN_*.ino.inactive` (בדיקות החומרה 02-05 נמצאות ב-`Unit Tests/`). הם נכתבו מול המודולים המשותפים כפי שהיו באותו שלב, ולכן הם תיעוד של התהליך ולא קוד שמתקמפל היום כמו שהוא. הגרסה הנוכחית היא `ESP32/ESP32.ino` (שלב 30 והשיפורים שאחריו).
+## 1. The hardware (steps 2-5)
 
-## 1. החומרה (שלבים 2-5)
-
-| שלב | מה נבדק |
+| Step | What was tested |
 |---|---|
-| 02 | צליל 440Hz ברמקול דרך המגבר MAX98357A. בודק את החיבורים של הרמקול |
-| 03 | המיקרופון INMP441: מדפיס מינימום, מקסימום ו-RMS כל חצי שנייה |
-| 04 | הקלטה ואז השמעה (loopback). שני הרכיבים חולקים את אותם שעוני I2S |
-| 05 | חיבור ל-Wi-Fi, עם חיבור מחדש אוטומטי |
+| 02 | A 440Hz tone on the speaker through the MAX98357A amplifier. Checks the speaker wiring |
+| 03 | The INMP441 microphone: prints the minimum, maximum and RMS every half second |
+| 04 | Recording and then playback (loopback). The two components share the same I2S clocks |
+| 05 | Connecting to Wi-Fi, with automatic reconnection |
 
-השלבים האלה הם עכשיו בדיקות היחידה ב-[Unit Tests](../Unit%20Tests/README.md), יחד עם בדיקות ל-SD, ל-LED, לכפתור ול-LDR.
+These steps are now the unit tests in [Unit Tests](../Unit%20Tests/README.md), together with tests for the SD card, the LED, the button and the LDR.
 
-## 2. ניסיון ראשון עם Gemini Live (שלבים 6-8)
+## 2. A first attempt with Gemini Live (steps 6-8)
 
-| שלב | מה נבדק |
+| Step | What was tested |
 |---|---|
-| 06 | חיבור מוצפן (TLS + WebSocket) לשרת של Gemini |
-| 07a / 07b | הודעת הגדרה מינימלית, ואחר כך מלאה עם הוראות וכלי ל-LED |
-| 08a | שאלה בטקסט ותשובה. למדנו שמודלי האודיו של Gemini עונים רק באודיו, לא בטקסט |
-| 08b | שליחת אודיו אמיתי מהמיקרופון בחתיכות של 100ms, בלי לשמור את כל ההקלטה ב-RAM |
+| 06 | An encrypted connection (TLS + WebSocket) to the Gemini server |
+| 07a / 07b | A minimal setup message, and then a full one with instructions and an LED tool |
+| 08a | A text question and answer. We learned that Gemini's audio models answer only in audio, not in text |
+| 08b | Sending real audio from the microphone in 100ms chunks, without keeping the whole recording in RAM |
 
-## 3. מעבר ל-OpenAI Realtime (שלבים 9-16)
+## 3. Moving to OpenAI Realtime (steps 9-16)
 
-| שלב | מה נוסף |
+| Step | What was added |
 |---|---|
-| 09 | חיבור מוצפן ל-OpenAI עם אימות בכותרת `Authorization` |
-| 10 | הודעת `session.update` (מודל, הוראות, פורמט אודיו) ואישור מהשרת |
-| 11 | שאלה בטקסט ותשובה |
-| 12 | אודיו מהמיקרופון לשרת, בחתיכות קטנות |
-| 13 | השמעת התשובה ברמקול, חתיכה אחרי חתיכה |
-| 14 | תמלול של שני הצדדים, ושיחה שזוכרת את השאלות הקודמות |
-| 15 | הכלי הראשון: `set_board_state` מדליק ומכבה את ה-LED |
-| 16 | הרבה שאלות ברצף וחיבור מחדש ברור כשהרשת נופלת |
+| 09 | An encrypted connection to OpenAI with authentication in the `Authorization` header |
+| 10 | A `session.update` message (model, instructions, audio format) and a confirmation from the server |
+| 11 | A text question and answer |
+| 12 | Audio from the microphone to the server, in small chunks |
+| 13 | Playing the answer on the speaker, chunk by chunk |
+| 14 | Transcription of both sides, and a conversation that remembers the previous questions |
+| 15 | The first tool: `set_board_state` turns the LED on and off |
+| 16 | Many questions in a row and a clean reconnection when the network drops |
 
-## 4. סדר בקוד והתנהגות (שלבים 17-22)
+## 4. Tidying the code and behavior (steps 17-22)
 
-| שלב | מה נוסף |
+| Step | What was added |
 |---|---|
-| 17 | פקודות לוג (`LOG_ERROR` / `LOG_INFO` / `LOG_DEBUG`) במקום הדפסות מפוזרות |
-| 18 | תשובות קצרות: משפט אחד |
-| 19 | לחיצה על כפתור BOOT מתחילה הקלטה, כמו הפקודה `LISTEN`. בשלב 20 ויתרנו עליו בגלל קריאות שווא (ההסבר הסביר נמצא בשלב ההגשה - ראו [decisions.md](decisions.md)) |
-| 20a | פירוק הקוד למודולים (`*_utils.cpp/.h`) |
-| 21 | תיקון באג: שקט חוזר הדליק וכיבה את ה-LED בלי שביקשו |
-| 22 | ברכת פתיחה אקראית כשהלוח מוכן |
+| 17 | Log macros (`LOG_ERROR` / `LOG_INFO` / `LOG_DEBUG`) instead of scattered prints |
+| 18 | Short answers: one sentence |
+| 19 | Pressing the BOOT button starts a recording, like the `LISTEN` command. In step 20 we gave it up because of false readings (the likely explanation was found in the submission stage - see [decisions.md](decisions.md)) |
+| 20a | Splitting the code into modules (`*_utils.cpp/.h`) |
+| 21 | A bug fix: repeated silence turned the LED on and off without being asked |
+| 22 | A random opening greeting when the board is ready |
 
-## 5. יכולות (שלבים 23-29)
+## 5. Features (steps 23-29)
 
-| שלב | מה נוסף |
+| Step | What was added |
 |---|---|
-| 23 | הכלי `get_time_of_day`: יום, ערב או לילה לפי חיישן אור (מדומה ממרכז הבקרה) |
-| 24 | כרטיס SD לצד החיבור ל-OpenAI, ומדידת זיכרון בכל שלב בהדלקה |
-| 25 | שמירת התשובות ב-SD, והעברת קבצים למחשב (`LIST` / `GET` / `DELETE`) |
-| 27 | שמירת ההקלטה מהמיקרופון ב-SD, כדי לשמוע מה הלוח שמע |
-| 28 | מרכז הבקרה בדפדפן: שורות `@@` עם מצב הלוח, וכפתורים ל-LED, עוצמה וצפצוף |
-| 29 | מדידות זמן וזיכרון בכל שאלה, וסקריפט שמסכם אותן (ראו "מדידות ביצועים" ב-README) |
+| 23 | The `get_time_of_day` tool: day, evening or night according to a light sensor (simulated from the control center) |
+| 24 | An SD card alongside the connection to OpenAI, and memory measurement at each stage of the boot |
+| 25 | Saving the answers on the SD card, and transferring files to the computer (`LIST` / `GET` / `DELETE`) |
+| 27 | Saving the microphone recording on the SD card, to hear what the board heard |
+| 28 | The control center in the browser: `@@` lines with the board's state, and buttons for the LED, volume and a beep |
+| 29 | Time and memory measurements for every question, and a script that summarizes them (see "Performance measurements" in the README) |
 
-אין קובץ לשלב 26. הקוד של שלב 28 נמצא בתוך שלב 29, שבנוי ישירות עליו.
+There is no file for step 26. The code of step 28 is inside step 29, which is built directly on it.
 
-## 6. הגרסה הנוכחית (שלב 30, `ESP32/ESP32.ino`)
+## 6. The current version (step 30, `ESP32/ESP32.ino`)
 
-| מה | איפה |
+| What | Where |
 |---|---|
-| Hands-free: גלאי קול (VAD) שמתחיל ועוצר את ההקלטה לבד | `vad_utils`, `hands_free_utils` |
-| משימה נפרדת שקוראת את המיקרופון כל 20ms, עם 500ms לפני תחילת הדיבור | `mic_capture_utils` |
-| כלי לבדיקת הגלאי על קבצי WAV במחשב | `tools/vad_replay.cpp` |
-| מרכז הבקרה: Hands-free, מד עוצמת קול, סליידרים, סטטיסטיקה | `control_center/control_center.html` |
+| Hands-free: a voice activity detector (VAD) that starts and stops the recording on its own | `vad_utils`, `hands_free_utils` |
+| A separate task that reads the microphone every 20ms, with 500ms before the start of speech | `mic_capture_utils` |
+| A tool for testing the detector on WAV files on the computer | `tools/vad_replay.cpp` |
+| The control center: Hands-free, a sound level meter, sliders, statistics | `control_center/control_center.html` |
 
-### השיפורים לקראת ההגשה
+### The improvements toward the submission
 
-| תחום | מה נוסף |
+| Area | What was added |
 |---|---|
-| כלים קוליים | עוצמה באחוזים (`set_volume`), עמעום, שעה ותאריך, טיימר ותזכורת, `How are you doing?` (`get_board_status`), `What can you do?` |
-| קושחה | הטיימר מצלצל גם בלי אינטרנט, שאלה בכתב לחדר רועש (`ASK`), תמיכה ב-LDR אמיתי (בהגשה הערך מדומה ממרכז הבקרה) |
-| מרכז הבקרה | Tour לבוחנים, Self-test, Demo checklist שמסמן לבד, שעון הדגמה, Stage view, Summary, Save report, ניגון לוג שמור |
-| מסמכים | README ויזואלי, סיפורי משתמש ומקרי קצה להדפסה, מדריך מהיר, תוכנית הדגמה, מבנה הקוד, דיאגרמת חיבורים, והמסמך הזה |
+| Voice tools | Volume in percent (`set_volume`), dimming, time and date, a timer and a reminder, `How are you doing?` (`get_board_status`), `What can you do?` |
+| Firmware | The timer rings even without internet, a typed question for a noisy room (`ASK`), support for a real LDR (in the submission the value is simulated from the control center) |
+| Control center | A Tour for the examiners, Self-test, a Demo checklist that checks itself off, a demo clock, Stage view, Summary, Save report, replaying a saved log |
+| Documents | A visual README, user stories and edge cases for printing, a quick start guide, a demo plan, the code structure, a wiring diagram, and this document |
 
-## 7. גרסת ההגשה
+## 7. The submission version
 
-שינויים לפי הקריטריונים של הקורס (רובסטיות, הגדרות בלי קימפול, מבנה הגיט). כל שינוי בקושחה הוא commit נפרד.
+Changes according to the course's criteria (robustness, settings without compiling, the git structure). Each firmware change is a separate commit.
 
-| תחום | מה השתנה |
+| Area | What changed |
 |---|---|
-| מבנה הריפו | לפי התבנית של הקורס: `ESP32/`, `Unit Tests/`, `Documentation/`, `Parameters/`, `control_center/`. ‏קובץ ההגדרות הישן (`config.h`) התפצל ל-`parameters.h` (כל הפרמטרים) ול-`SECRETS.h` (לא בגיט, עם תבנית) |
-| רובסטיות | בלי SD הלוח לא נעצר; אין ויתור על החיבור ל-OpenAI (מצב Offline, ניסיון כל 30 שניות, וניסיון מיידי כש-Wi-Fi חוזר); פעימת לב ושרת ששותק 15 שניות סוגרים חיבור תקוע; רשת שנשמרה ונכשלת פעמיים מוחלפת זמנית ברשת מ-`SECRETS.h`; Talk נדחה בזמן ברכה, הודעת טיימר ותשובה לשאלה בכתב; `setup()` לא נתקע בלי Wi-Fi; תיקון באג שבו 5 ניתוקים מפוזרים לאורך זמן עצרו את הלוח |
-| הגדרות | רשת Wi-Fi נשמרת ב-flash ממרכז הבקרה (`WIFI_SSID` / `WIFI_PASSWORD`, הסיסמה עם הרווחים שבקצוות), וכך גם מפתח ה-API (`OPENAI_KEY`: מתחבר מחדש מיד, ומפתח שנשמר ונדחה פעמיים מוחלף זמנית במפתח מ-`SECRETS.h`). השעון לפי אזור הזמן של ישראל עם מעבר אוטומטי לשעון קיץ |
-| Hands-free | נדלק וכבה גם בקול, בכלי שביעי (`set_hands_free`), רק על בקשה מפורשת ורק בזמן תשובה לשאלה. המיקרופון לא מקשיב בזמן שמרכז הבקרה מנגן הקלטה מה-SD (`LAPTOP_PLAYBACK`), כדי שההקלטה לא תיחשב לשאלה |
-| מרכז הבקרה | כרטיס OpenAI API key (המפתח לא נכנס ללוג), והדוגמאות ב-Try saying הן רשימה לקריאה ולא כפתורים |
-| ממשק פיזי | כפתור BOOT ככפתור Talk וצלילי מצב, שניהם כבויים כברירת מחדל |
-| I2S | בלי פין MCLK (קודם הוא יצא ל-GPIO0, הפין של כפתור BOOT) |
-| קוד | כל מודול ב-namespace משלו, אפס אזהרות קומפילציה בקוד שלנו, תיקונים קטנים בכלים |
-| בדיקות יחידה | 02-05 עצמאיות, ובדיקות חדשות ל-SD, ל-LED, לכפתור BOOT ול-LDR (בדיקת ה-LDR נכתבה אך לא הורצה, כי החיישן לא מחובר) |
-| תיעוד | החלטות משמעותיות, מצבים והודעות שגיאה, כיול, פרמטרים, מקרי קצה בפורמט של הקורס, מכונת המצבים וזרימת השימוש |
+| Repository structure | Following the course template: `ESP32/`, `Unit Tests/`, `Documentation/`, `Parameters/`, `control_center/`. The old configuration file (`config.h`) was split into `parameters.h` (all the parameters) and `SECRETS.h` (not in git, with a template) |
+| Robustness | Without an SD card the board does not stop; it never gives up on the connection to OpenAI (Offline mode, an attempt every 30 seconds, and an immediate attempt when the Wi-Fi comes back); a heartbeat and a server that stays silent for 15 seconds close a stuck connection; a saved network that fails twice is temporarily replaced by the network from `SECRETS.h`; Talk is rejected during a greeting, a timer message and an answer to a typed question; `setup()` does not get stuck without Wi-Fi; a fix for a bug where 5 disconnects scattered over time stopped the board |
+| Settings | A Wi-Fi network is saved in flash from the control center (`WIFI_SSID` / `WIFI_PASSWORD`, the password with the spaces at its ends), and so is the API key (`OPENAI_KEY`: reconnects right away, and a saved key that is refused twice is temporarily replaced by the key from `SECRETS.h`). The clock follows Israel's time zone with an automatic switch to daylight saving time |
+| Hands-free | Turns on and off by voice too, with a seventh tool (`set_hands_free`), only on an explicit request and only while answering a question. The microphone does not listen while the control center plays a recording from the SD card (`LAPTOP_PLAYBACK`), so the recording is not taken as a question |
+| Control center | An OpenAI API key card (the key does not go into the log), and the examples in Try saying are a list to read and not buttons |
+| Physical interface | The BOOT button as the Talk button and status sounds, both off by default |
+| I2S | No MCLK pin (before, it went out on GPIO0, the BOOT button's pin) |
+| Code | Each module in its own namespace, zero compiler warnings in our code, small fixes in the tools |
+| Unit tests | 02-05 are standalone, and new tests for the SD card, the LED, the BOOT button and the LDR (the LDR test was written but not run, because the sensor is not connected) |
+| Documentation | Significant decisions, states and error messages, calibration, parameters, edge cases in the course format, the state machine and the usage flow |
 
-## גרסאות התוכנה
+## Software versions
 
-גרסאות ה-IDE, ה-ESP32 core, הספריות והמודל: בטבלה "תוכנה וגרסאות" ב-[README](../README.md).
-
-</div>
+The versions of the IDE, the ESP32 core, the libraries and the model: in the "Software and versions" table in the [README](../README.md).

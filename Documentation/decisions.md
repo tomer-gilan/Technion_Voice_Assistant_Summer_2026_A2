@@ -1,393 +1,389 @@
-<div dir="rtl">
+# Significant Decisions and Discoveries Along the Way
 
-# החלטות משמעותיות ותגליות בדרך
+Group A2, IoT course, Summer 2026. This document records the significant decisions in the project: what we decided, why, which alternatives we considered, and what the decision rests on (a measurement, an experiment or official documentation). Comments in the code refer to this document by section name.
 
-קבוצה A2, קורס IoT, קיץ 2026. כאן מתועדות ההחלטות המשמעותיות בפרויקט: מה החלטנו, למה, אילו חלופות שקלנו, ועל מה ההחלטה נשענת (מדידה, ניסוי או תיעוד רשמי). הערות בקוד מפנות לכאן לפי שם הסעיף.
+Legend for "Rests on": **measured** (there are numbers in the log), **tried** (we tried it on the board and saw the result), **documentation** (according to the manufacturer's documentation), **estimate** (a reasonable assumption that was not fully verified).
 
-מקרא לעמודת "נשען על": **נמדד** (יש מספרים בלוג), **נוסה** (ניסינו על הלוח וראינו), **תיעוד** (לפי התיעוד של היצרן), **הערכה** (הנחה סבירה שלא אומתה עד הסוף).
+Decisions that rest on documentation also have a **Sources:** line with links to the pages they rest on (checked on 23.10.2026).
 
-בהחלטות שנשענות על תיעוד יש גם שורת **מקורות:** עם הקישורים לדפים שעליהם נשענו (נבדקו ב-23.10.2026).
+## Architecture
 
-## ארכיטקטורה
+### Speech understanding in the cloud, everything else on the microcontroller
 
-### הבנת הדיבור בענן, כל השאר על הבקר
+**The decision:** speech recognition, understanding and the voice of the answer run in the OpenAI Realtime API. The ESP32 records, streams, plays, runs the tools, and decides by itself when someone is speaking (the voice detector).
 
-**ההחלטה:** זיהוי הדיבור, ההבנה והקול של התשובה רצים ב-OpenAI Realtime API. ה-ESP32 מקליט, מזרים, מנגן, מריץ את הכלים, ומחליט בעצמו מתי מישהו מדבר (גלאי הקול).
+**Why:** an ESP32 without PSRAM (520KB) cannot run a language model or general speech recognition. Whatever can be done on the microcontroller, we did on it: the voice detector, the timer, the clock, the light sensor (whose value is simulated from the control center, as the course guide instructs), the recordings and the hardware control. That way the timer and the controls keep working even without internet.
 
-**למה:** אין ל-ESP32 בלי PSRAM (‏520KB) יכולת להריץ מודל שפה או זיהוי דיבור כללי. מה שכן אפשר לעשות על הבקר, עשינו עליו: גלאי הקול, הטיימר, השעון, חיישן האור (שערכו מדומה ממרכז הבקרה, לפי הנחיית מדריך הקורס), ההקלטות והשליטה בחומרה. כך הטיימר והפקדים ממשיכים לעבוד גם בלי אינטרנט.
+**Rests on:** documentation (the ESP32's limitations), measured (the free memory during a conversation is about 45KB).
 
-**נשען על:** תיעוד (מגבלות ה-ESP32), נמדד (הזיכרון הפנוי בזמן שיחה הוא כ-45KB).
+**Sources:** [ESP32-WROOM-32 datasheet](https://www.espressif.com/sites/default/files/documentation/esp32-wroom-32_datasheet_en.pdf) (520KB SRAM, and no PSRAM in the module's feature list); [OpenAI, Realtime API: conversations](https://developers.openai.com/api/docs/guides/realtime-conversations).
 
-**מקורות:** [גיליון הנתונים של ESP32-WROOM-32](https://www.espressif.com/sites/default/files/documentation/esp32-wroom-32_datasheet_en.pdf) (‏520KB SRAM, ובלי PSRAM ברשימת התכונות של המודול); [OpenAI, Realtime API: שיחות](https://developers.openai.com/api/docs/guides/realtime-conversations).
+### From Gemini Live to OpenAI Realtime (steps 6-9)
 
-### מ-Gemini Live ל-OpenAI Realtime (שלבים 6-9)
+**The decision:** we started with Gemini Live (steps 6-8b; the connection, the setup and sending audio worked) and moved to OpenAI Realtime in step 9.
 
-**ההחלטה:** התחלנו עם Gemini Live (שלבים 6-8b, החיבור, ההגדרה ושליחת אודיו עבדו) ועברנו ל-OpenAI Realtime בשלב 9.
+**Why:** in step 8a we found that the Gemini audio models that were available answer only in audio and do not return the text of the answer, while OpenAI returns both audio and a transcript of both sides. We use the transcript for the control center and for checking the results. OpenAI also has a well-documented tool mechanism (function calling) on the same connection. *(The team's other considerations, such as cost and availability, were not written down at the time.)*
 
-**למה:** בשלב 8a גילינו שמודלי האודיו של Gemini שהיו זמינים עונים רק באודיו ולא מחזירים טקסט של התשובה, בזמן ש-OpenAI מחזיר גם אודיו וגם תמלול של שני הצדדים. התמלול משמש אותנו למרכז הבקרה ולבדיקת התוצאות. ל-OpenAI יש גם מנגנון כלים (function calling) מתועד היטב באותו חיבור. *(השיקולים הנוספים שהיו לצוות, כמו עלות וזמינות, לא תועדו אז בכתב.)*
+**Rests on:** tried (step 8a).
 
-**נשען על:** נוסה (שלב 8a).
+**Sources:** [Gemini Live API](https://ai.google.dev/gemini-api/docs/live-guide) (the native audio models support answering in audio only; the current documentation also mentions a transcript of the audio output, `output_audio_transcription`, and we did not check whether it was available at step 8a); [OpenAI, function calling in the Realtime API](https://developers.openai.com/api/docs/guides/realtime-function-calling).
 
-**מקורות:** [Gemini Live API](https://ai.google.dev/gemini-api/docs/live-guide) (מודלי ה-native audio תומכים בתשובה באודיו בלבד; התיעוד הנוכחי מציין גם תמלול של פלט האודיו, `output_audio_transcription`, ולא בדקנו אם הוא היה זמין בשלב 8a); [OpenAI, function calling ב-Realtime API](https://developers.openai.com/api/docs/guides/realtime-function-calling).
+### One encrypted WebSocket connection, and sending in 100ms chunks
 
-### חיבור WebSocket מוצפן אחד, ושליחה בחתיכות של 100ms
+**The decision:** all the microphone audio is sent right away, in 100ms chunks (2400 samples), on the same connection. A whole recording is never kept in memory.
 
-**ההחלטה:** כל אודיו המיקרופון נשלח מיד, בחתיכות של 100ms (‏2400 דגימות), על אותו חיבור. אף פעם לא שומרים הקלטה שלמה בזיכרון.
+**Why:** 3 seconds of PCM at 24kHz are about 144KB, and when the encrypted connection is open about 45KB are left. Sending in chunks is the only way it fits. 24kHz is the lowest input rate that OpenAI accepts for PCM (step 10).
 
-**למה:** 3 שניות של PCM ב-24kHz הן כ-144KB, וכשהחיבור המוצפן פתוח נשארים כ-45KB. שליחה בחתיכות היא הדרך היחידה שזה נכנס. 24kHz הוא קצב הקלט הנמוך ביותר ש-OpenAI מקבל ל-PCM (שלב 10).
+**Rests on:** measured (`@@HEAP`), documentation.
 
-**נשען על:** נמדד (`@@HEAP`), תיעוד.
+**Sources:** [OpenAI, Realtime API: conversations](https://developers.openai.com/api/docs/guides/realtime-conversations) (the `audio/pcm` input is defined at 24kHz).
 
-**מקורות:** [OpenAI, Realtime API: שיחות](https://developers.openai.com/api/docs/guides/realtime-conversations) (הקלט `audio/pcm` מוגדר ב-24kHz).
+### The answer in 8kHz mu-law
 
-### תשובה ב-mu-law ‏8kHz
+**The decision:** we asked OpenAI for the answer in G.711 mu-law at 8kHz, and not PCM at 24kHz.
 
-**ההחלטה:** ביקשנו מ-OpenAI את התשובה ב-G.711 mu-law ב-8kHz, ולא PCM ב-24kHz.
+**Why:** one byte per sample and 8000 samples per second, 6 times less than PCM at 24kHz (64 instead of 384 kbps). That way a 32KB buffer holds about 4 seconds of answer. The quality is enough for speech. Decoding to PCM and upsampling to 24kHz happen only at playback time.
 
-**למה:** בית אחד לדגימה ו-8000 דגימות בשנייה, פי 6 פחות מ-PCM ב-24kHz (‏64 במקום 384 kbps). כך מאגר של 32KB מחזיק כ-4 שניות של תשובה. האיכות מספיקה לדיבור. הפענוח ל-PCM וההעלאה ל-24kHz קורים רק ברגע הניגון.
+**Rests on:** measured (the buffer size, the memory), tried (the sound quality).
 
-**נשען על:** נמדד (גודל המאגר, הזיכרון), נוסה (איכות השמע).
+**Sources:** [OpenAI, Realtime API: conversations](https://developers.openai.com/api/docs/guides/realtime-conversations) (the `audio/pcmu` format appears as an output format in the `session.update` example).
 
-**מקורות:** [OpenAI, Realtime API: שיחות](https://developers.openai.com/api/docs/guides/realtime-conversations) (הפורמט `audio/pcmu` מופיע כפורמט פלט בדוגמת `session.update`).
+### Shared I2S port, not two independent ones
 
-### פורט I2S אחד משותף למיקרופון ולמגבר
+**The decision:** the microphone (INMP441) and the amplifier (MAX98357A) are connected to the same clock lines (BCLK on pin 26, WS/LRC on pin 25), and one I2S port works in full duplex mode.
 
-**ההחלטה:** המיקרופון (INMP441) והמגבר (MAX98357A) מחוברים לאותם קווי שעון (BCLK בפין 26, WS/LRC בפין 25), ופורט I2S אחד עובד במצב full duplex.
+**Why:** two ports that are each a master would compete for the same pins. One port with RX and TX together saves pins and guarantees that the clocks are identical. Tested in step 4 (loopback).
 
-**למה:** שני פורטים שכל אחד מהם master היו מתחרים על אותם פינים. פורט אחד עם RX ו-TX יחד חוסך פינים ומבטיח שהשעונים זהים. נבדק בשלב 4 (loopback).
+**Rests on:** tried (step 4).
 
-**נשען על:** נוסה (שלב 4).
+### No MCLK pin (submission stage)
 
-### בלי פין MCLK (שלב ההגשה)
+**The decision:** in `i2s_pin_config_t` we explicitly set `mck_io_num = I2S_PIN_NO_CHANGE`.
 
-**ההחלטה:** ב-`i2s_pin_config_t` קבענו במפורש `mck_io_num = I2S_PIN_NO_CHANGE`.
+**Why:** the field was not initialized, meaning it was 0. The ESP32 driver outputs the MCLK clock on one of pins 0, 1 or 3, and 0 is GPIO0, the BOOT button's pin. None of our components need MCLK. This is probably also the explanation for the unexplained readings from the BOOT button in steps 19-20.
 
-**למה:** השדה לא היה מאותחל, כלומר 0. מנהל ההתקן של ה-ESP32 מוציא את שעון ה-MCLK לאחד מהפינים 0, 1 או 3, ו-0 הוא GPIO0, הפין של כפתור BOOT. אף אחד מהרכיבים שלנו לא צריך MCLK. זה כנראה גם ההסבר לקריאות הלא מוסברות מכפתור BOOT בשלבים 19-20.
+**Rests on:** documentation (`driver/i2s.h`, the error message in the driver library), and tried on the board: the unit test `Unit Tests/08_boot_button` passed (0 raw changes when the button is not touched, and PASSED after 5 presses). With `kStartI2sWithMclkOnGpio0 = true` it imitates the old configuration for comparison (see [board-tests-toSubmit.md](board-tests-toSubmit.md)).
 
-**נשען על:** תיעוד (`driver/i2s.h`, הודעת השגיאה בספריית ה-driver), ונוסה על הלוח: בדיקת היחידה `Unit Tests/08_boot_button` עברה (0 שינויים גולמיים כשלא נוגעים בכפתור, ו-PASSED אחרי 5 לחיצות). עם `kStartI2sWithMclkOnGpio0 = true` היא מחקה את ההגדרה הישנה לצורך השוואה (ראו [board-tests-toSubmit.md](board-tests-toSubmit.md)).
+**Sources:** [`driver/i2s.h` in ESP-IDF 4.4](https://github.com/espressif/esp-idf/blob/release/v4.4/components/driver/include/driver/i2s.h) (the comment on `mck_io_num`: on the ESP32, MCK can be output only on GPIO0, GPIO1 or GPIO3); [ESP-IDF 4.4 I2S documentation](https://docs.espressif.com/projects/esp-idf/en/v4.4/esp32/api-reference/peripherals/i2s.html) (`i2s_pin_config_t` and `I2S_PIN_NO_CHANGE`); [ESP32-WROOM-32 datasheet](https://www.espressif.com/sites/default/files/documentation/esp32-wroom-32_datasheet_en.pdf) (GPIO0 is also the strapping pin that sets the boot mode).
 
-**מקורות:** [`driver/i2s.h` ב-ESP-IDF 4.4](https://github.com/espressif/esp-idf/blob/release/v4.4/components/driver/include/driver/i2s.h) (ההערה על `mck_io_num`: ב-ESP32 אפשר להוציא MCK רק על GPIO0, GPIO1 או GPIO3); [תיעוד ה-I2S של ESP-IDF 4.4](https://docs.espressif.com/projects/esp-idf/en/v4.4/esp32/api-reference/peripherals/i2s.html) (`i2s_pin_config_t` ו-`I2S_PIN_NO_CHANGE`); [גיליון הנתונים של ESP32-WROOM-32](https://www.espressif.com/sites/default/files/documentation/esp32-wroom-32_datasheet_en.pdf) (GPIO0 הוא גם פין ה-strapping שקובע את מצב האתחול).
+## Memory
 
-## זיכרון
+### Ring buffer is heap-allocated, not static
 
-### מאגר הניגון מוקצה ב-heap ולא סטטית
+**The decision:** the answer's buffer (ring buffer) is allocated once in `setup()`, before the Wi-Fi and TLS, and not as a static array.
 
-**ההחלטה:** המאגר של התשובה (ring buffer) מוקצה פעם אחת ב-`setup()`, לפני ה-Wi-Fi וה-TLS, ולא כמערך סטטי.
+**Why:** when we enlarged it to 64KB as a static array, the linker failed: the ESP32's static budget is much smaller than the heap. Allocating early also guarantees a contiguous block, before TLS fragments the memory.
 
-**למה:** כשהגדלנו אותו ל-64KB כמערך סטטי, הקישור (linker) נכשל: התקציב הסטטי של ה-ESP32 קטן בהרבה מה-heap. הקצאה מוקדמת גם מבטיחה בלוק רציף, לפני שה-TLS מפצל את הזיכרון.
+**Rests on:** tried.
 
-**נשען על:** נוסה.
+### A 32KB buffer, not 64KB (step 24)
 
-### מאגר של 32KB ולא 64KB (שלב 24)
+**The decision:** we shrank the playback buffer from 64KB to 32KB when we added the SD card.
 
-**ההחלטה:** הקטנו את מאגר הניגון מ-64KB ל-32KB כשהוספנו את כרטיס ה-SD.
+**Why:** with the SD card and 64KB, only about 9KB were left free when the session was ready, and the first question used up the heap. We also tried 48KB. We chose 32KB to leave room for the next features, and it turned out to be enough, because what paces the answer is the backpressure (the next section) and not the buffer size.
 
-**למה:** עם ה-SD ו-64KB נשארו רק כ-9KB פנויים כשהסשן מוכן, והשאלה הראשונה גמרה את ה-heap. ניסינו גם 48KB. בחרנו 32KB כדי להשאיר מקום לפיצ'רים הבאים, והתברר שזה הספיק, כי מה שמכתיב את קצב התשובה הוא הלחץ החוזר (הסעיף הבא) ולא גודל המאגר.
+**Rests on:** measured (`@@HEAP` in step 24).
 
-**נשען על:** נמדד (`@@HEAP` בשלב 24).
+### Backpressure, not a bigger buffer
 
-### לחץ חוזר (backpressure), לא מאגר גדול יותר
+**The decision:** when the playback buffer is almost full, the board stops reading from the WebSocket, and continues when it empties (two different thresholds, so it does not flicker).
 
-**ההחלטה:** כשמאגר הניגון כמעט מלא, הלוח מפסיק לקרוא מה-WebSocket, וממשיך כשהוא מתרוקן (שני ספים שונים, כדי לא להבהב).
+**Why:** a long answer arrives from the server faster than the rate at which it plays. When the socket is not read, TCP flow control stops the server. That way an answer of any length plays with a small buffer.
 
-**למה:** תשובה ארוכה מגיעה מהשרת מהר יותר מהקצב שבו היא מתנגנת. כשלא קוראים מה-socket, בקרת הזרימה של TCP עוצרת את השרת. כך תשובה בכל אורך מתנגנת עם מאגר קטן.
+**Rests on:** tried (steps 13-14).
 
-**נשען על:** נוסה (שלבים 13-14).
+### "Audio blew the heap, again"
 
-### "האודיו פוצץ את ה-heap, שוב"
+**The decision:** decoding the audio's base64 is done in fixed slices of 1024 characters straight into the buffer. There is no allocation whose size depends on the message length. Audio events are scanned without full JSON parsing (`realtime_json_utils`).
 
-**ההחלטה:** פענוח ה-base64 של האודיו נעשה בפרוסות קבועות של 1024 תווים ישר לתוך המאגר. אין אף הקצאה שגודלה תלוי באורך ההודעה. אירועי אודיו נסרקים בלי פענוח JSON מלא (`realtime_json_utils`).
+**Why:** an audio message from the server can be tens of KB. Full JSON parsing or a buffer the size of the message failed twice on out of memory.
 
-**למה:** הודעת אודיו מהשרת יכולה להיות עשרות KB. פענוח JSON מלא או buffer בגודל ההודעה נכשלו פעמיים על חוסר זיכרון.
+**Rests on:** tried.
 
-**נשען על:** נוסה.
+### Not parsing `session.created` / `session.updated`
 
-### לא מפענחים את `session.created` / `session.updated`
+**The decision:** these events are identified by name only, without JSON parsing.
 
-**ההחלטה:** האירועים האלה מזוהים לפי השם בלבד, בלי פענוח JSON.
+**Why:** in them the server returns all the settings, about 6KB. Full parsing needed a few more KB, and once it failed on out of memory and left the OpenAI light stuck on "connecting". We do not need any field from them.
 
-**למה:** השרת מחזיר בהם את כל ההגדרות, כ-6KB. פענוח מלא דרש עוד כמה KB, ופעם אחת זה נכשל על חוסר זיכרון והשאיר את נורית OpenAI תקועה על "connecting". אנחנו לא צריכים שום שדה מהם.
+**Rests on:** tried on the board (18.10).
 
-**נשען על:** נוסה על הלוח (18.10).
+### "X509 - Certificate verification failed" (step 24)
 
-### "X509 - Certificate verification failed" (שלב 24)
+In step 24 we saw a certificate verification error when the heap was tight. **The hypothesis** (not verified): an allocation that fails inside the TLS handshake comes out as an error that looks unrelated. So `heap_diagnostics_utils` counts every failed allocation.
 
-בשלב 24 ראינו שגיאת אימות תעודה כשה-heap היה צפוף. **ההשערה** (לא אומתה): הקצאה שנכשלה בתוך לחיצת היד של TLS יוצאת כשגיאה שנראית לא קשורה. לכן `heap_diagnostics_utils` סופר כל הקצאה שנכשלת.
+## The protocol with OpenAI
 
-## פרוטוקול מול OpenAI
+### Not sending from inside the WebSocket callback ("Discoveries", step 7)
 
-### לא שולחים מתוך ה-callback של ה-WebSocket ("Discoveries", שלב 7)
+**What we saw:** in step 7, sending `session.update` directly from inside the `CONNECTED` event froze the WebSockets library.
 
-**מה ראינו:** בשלב 7, שליחת `session.update` ישירות מתוך אירוע `CONNECTED` תקעה את ספריית ה-WebSockets.
+**The decision:** messages that are sent in response to the connection (the session setup, the opening greeting) are sent from the next iteration of `loop()`.
 
-**ההחלטה:** הודעות שנשלחות כתגובה לחיבור (הגדרת הסשן, ברכת הפתיחה) נשלחות מהסיבוב הבא של `loop()`.
+**An honest note:** the tool answers (`function_call_output`) and the `response.create` after them are sent from inside the `TEXT` event, and that worked in all the documented runs (including the 26 questions of the measurement). So the problem was probably specific to sending during the connection itself. Moving these sends to `loop()` as well is a safer change, but it touches the core that was tested, so it stayed as it is.
 
-**הערה כנה:** התשובות של הכלים (`function_call_output`) וה-`response.create` שאחריהן כן נשלחות מתוך אירוע `TEXT`, וזה עבד בכל הריצות המתועדות (כולל 26 השאלות של המדידה). כלומר הבעיה הייתה כנראה ספציפית לשליחה בזמן החיבור עצמו. העברת גם השליחות האלה ל-`loop()` היא שינוי בטוח יותר, אבל הוא נוגע בליבה שנבדקה, ולכן נשאר כמו שהוא.
+**Rests on:** tried.
 
-**נשען על:** נוסה.
+### A silence timeout, not a length timeout (step 16)
 
-### Timeout של שקט ולא של אורך (שלב 16)
+**What we saw:** a limit on the total length of an answer ("15 seconds from the start of the question") cut long answers off in the middle, while the audio was still arriving. This is the "reply timeout fired mid-reply" discovery.
 
-**מה ראינו:** הגבלה על האורך הכולל של תשובה ("15 שניות מתחילת השאלה") הפילה תשובות ארוכות באמצע, בזמן שהאודיו עוד הגיע. זה הגילוי "reply timeout fired mid-reply".
+**The decision:** the question fails only after 15 seconds without *any* message from the server. Every message resets the clock. When it fails, the board also closes the connection and reopens it, because a server that is silent for so long may be behind a dead connection (Wi-Fi without internet). The price: the conversation context is lost.
 
-**ההחלטה:** השאלה נכשלת רק אחרי 15 שניות בלי *אף* הודעה מהשרת. כל הודעה מאפסת את השעון. כשהיא נכשלת, הלוח סוגר גם את החיבור ופותח אותו מחדש, כי שרת ששותק כל כך עלול להיות מאחורי חיבור שמת (Wi-Fi בלי אינטרנט). המחיר: ההקשר של השיחה אובד.
+**Rests on:** tried (step 16).
 
-**נשען על:** נוסה (שלב 16).
+### An opening greeting without a tool (step 22)
 
-### ברכת פתיחה בלי כלי (שלב 22)
+**The decision:** the opening greeting is a `response.create` with one-time instructions ("say exactly this"), not a tool. The same mechanism is used for the message when the timer ends.
 
-**ההחלטה:** ברכת הפתיחה היא `response.create` עם הוראות חד-פעמיות ("תגיד בדיוק את זה"), לא כלי. אותו מנגנון משמש להודעה כשהטיימר נגמר.
+**Rests on:** documentation (OpenAI, verified against the documentation on 21.9.2026).
 
-**נשען על:** תיעוד (OpenAI, אומת מול התיעוד ב-21.9.2026).
+**Sources:** [OpenAI, Realtime API: conversations](https://developers.openai.com/api/docs/guides/realtime-conversations) (`response.create` starts a response from the model).
 
-**מקורות:** [OpenAI, Realtime API: שיחות](https://developers.openai.com/api/docs/guides/realtime-conversations) (`response.create` מתחיל תשובה של המודל).
+### `turn_detection: null`: the voice detector on the microcontroller and not on the server
 
-### `turn_detection: null`: גלאי הקול על הבקר ולא בשרת
+**The decision:** we turned off the server's end-of-speech detection, and the board decides when to start and stop recording (`vad_utils`), and sends `commit` by itself.
 
-**ההחלטה:** כיבינו את זיהוי סוף הדיבור של השרת, והלוח מחליט מתי להתחיל ולהפסיק להקליט (`vad_utils`), ושולח `commit` בעצמו.
+**Why:** with server-side detection we would have had to stream audio all the time, including silence and noise. That wastes network and money, and the board would have been limited in its ability to discard noises. On the microcontroller we also know exactly when the recording started, and keep 0.5 seconds before it (pre-roll) so the first word is not cut off.
 
-**למה:** עם זיהוי בצד השרת היינו צריכים להזרים אודיו כל הזמן, גם שקט ורעש. זה בזבוז של רשת ושל עלות, והלוח היה מוגבל ביכולת לזרוק רעשים. על הבקר אנחנו גם יודעים בדיוק מתי ההקלטה התחילה, ושומרים 0.5 שניות לפני (pre-roll) כדי שהמילה הראשונה לא תיחתך.
+**Rests on:** measured (112 noise clips and 100 speech clips with `tools/vad_replay.cpp`). **Not measured** with our microphone in the room.
 
-**נשען על:** נמדד (112 קטעי רעש ו-100 קטעי דיבור עם `tools/vad_replay.cpp`). **לא נמדד** עם המיקרופון שלנו בחדר.
+**Sources:** [OpenAI, Realtime API: conversations](https://developers.openai.com/api/docs/guides/realtime-conversations) (turning off the server VAD with `turn_detection: null`, and then the client sends `input_audio_buffer.commit` and `response.create` by itself).
 
-**מקורות:** [OpenAI, Realtime API: שיחות](https://developers.openai.com/api/docs/guides/realtime-conversations) (כיבוי ה-VAD של השרת עם `turn_detection: null`, ואז הלקוח שולח בעצמו `input_audio_buffer.commit` ו-`response.create`).
+### Hands-free and not only push-to-talk, and what happens in a noisy room
 
-### Hands-free ולא רק לחיצה, ומה קורה בחדר רועש
+**The decision:** Hands-free (the voice detector on the microcontroller) is an option and is off by default. Talk, the BOOT button (when turned on) and a typed question (Ask) always remain, so you never have to speak "freely".
 
-**ההחלטה:** Hands-free (גלאי הקול על הבקר) הוא אופציה וכבוי כברירת מחדל. Talk, כפתור BOOT (כשמדליקים אותו) ושאלה בכתב (Ask) נשארים תמיד, כך שאף פעם לא חייבים לדבר "חופשי".
+**The assumption:** that Hands-free works best in a relatively quiet room. In a noisy room the detector may take noise for speech, and miss quiet speech.
 
-**ההנחה:** ש-Hands-free עובד הכי טוב בחדר שקט יחסית. בחדר רועש הגלאי עלול לשמוע רעש כדיבור, ולפספס דיבור שקט.
+**What we tested:** on the computer, with `tools/vad_replay.cpp` on 100 speech clips and 112 noise clips ([README](../README.md), "The voice detector of Hands-free mode"): in all 100 speech clips the recording started and the first word was not cut off; in very quiet speech against background noise, 7 of 27 clips (26%) lost 20 to 200ms from the start; 20 of 112 noise clips (17.9%) started a recording (coughing, laughter, a creaking door, bells and running water); knocks, claps, footsteps, rain and a vacuum cleaner never started one. On the board: 5 questions by voice and knocks on the table, which did not start a recording (`HANDS-FREE PASSED`, see [board-tests-toSubmit.md](board-tests-toSubmit.md)).
 
-**מה בדקנו:** במחשב, עם `tools/vad_replay.cpp` על 100 קטעי דיבור ו-112 קטעי רעש ([README](../README.md), "גלאי הקול של מצב Hands-free"): בכל 100 קטעי הדיבור ההקלטה התחילה והמילה הראשונה לא נחתכה; בדיבור שקט מאוד מול רעש רקע, 7 מתוך 27 קטעים (26%) איבדו 20 עד 200ms מההתחלה; 20 מתוך 112 קטעי רעש (17.9%) הפעילו הקלטה (שיעול, צחוק, דלת חורקת, פעמונים ומים זורמים); דפיקות, מחיאות כפיים, צעדים, גשם ושואב אבק לא הפעילו אף פעם. על הלוח: 5 שאלות בקול ודפיקות על השולחן, שלא הפעילו הקלטה (`HANDS-FREE PASSED`, ראו [board-tests-toSubmit.md](board-tests-toSubmit.md)).
+**What we did not test:** speech in the background (a TV, other people), and the demo room with our microphone. Such speech counts as speech, so it also appears in the known limitations in the README.
 
-**מה לא בדקנו:** דיבור ברקע (טלוויזיה, אנשים אחרים), ואת חדר ההדגמה עם המיקרופון שלנו. דיבור כזה נחשב לדיבור, ולכן הוא מופיע גם במגבלות הידועות ב-README.
+**If the room is noisy:** (1) Lower the Sensitivity. (2) Turn off Hands-free and switch to Talk (3 seconds of recording). (3) Type the question in the Ask field and the assistant answers out loud as usual. After 3 noises in a row that were not speech, the detector also stops listening for 5 seconds. This order also appears in the [demo plan](demo-plan.md) and in the [calibration](calibration.md).
 
-**אם החדר רועש:** (1) מורידים את Sensitivity. (2) מכבים את Hands-free ועוברים ל-Talk (3 שניות הקלטה). (3) כותבים את השאלה בשדה Ask והעוזר עונה בקול כרגיל. אחרי 3 רעשים ברצף שלא היו דיבור הגלאי גם עוצר להקשיב ל-5 שניות. הסדר הזה מופיע גם ב[תוכנית ההדגמה](demo-plan.md) וב[כיול](calibration.md).
+**Rests on:** measured (on the computer), tried (on the board), estimate (the demo room).
 
-**נשען על:** נמדד (במחשב), נוסה (על הלוח), הערכה (חדר ההדגמה).
+### Switching between Hands-free and push-to-talk by voice too, and only on an explicit request
 
-### מעבר בין Hands-free ללחיצה גם בקול, ורק בבקשה מפורשת
+**The decision:** a seventh tool, `set_hands_free`, does exactly what the Hands-free switch in the control center does: the same function (`setHandsFree()`) that runs `VAD on|off`, it is saved in flash, and the switch in the control center moves with it (`@@VAD`). The tool takes the requested state (`on: true|false`) and not "toggle", so a request heard twice does not go back to the previous state.
 
-**ההחלטה:** כלי שביעי, `set_hands_free`, עושה בדיוק מה שעושה המתג Hands-free במרכז הבקרה: אותה פונקציה (`setHandsFree()`) שמפעילה `VAD on|off`, נשמר ב-flash, והמתג במרכז הבקרה זז איתו (`@@VAD`). הכלי מקבל את המצב המבוקש (`on: true|false`) ולא "החלף", כך שבקשה שנשמעה פעמיים לא מחזירה למצב הקודם.
+**Why this way, and why carefully:** a switch nobody asked for is confusing: Hands-free that turns on by itself starts listening to the room, and Hands-free that turns off by itself stops answering whoever is talking to it. So there are three layers: (1) The instructions for the model: call the tool only when this message explicitly asks to change the listening mode, with examples ("Switch to hands-free mode", "I want to talk without pressing a button", "Disable VAD"), and never on a question about the mode ("What is hands-free?"), a passing mention of hands, a button or voice, unclear audio, or an earlier request. If the model is not completely sure, it does not call the tool and asks. (2) The tool's description repeats the rule. (3) In the firmware: the tool is accepted only while answering a user's request (a spoken or typed question), not during the opening greeting or a timer message, and a request for the mode that is already active changes nothing.
 
-**למה ככה, ולמה בזהירות:** מעבר שלא ביקשו מבלבל: Hands-free שנדלק לבד מתחיל להקשיב לחדר, ושנכבה לבד מפסיק לענות למי שמדבר אליו. לכן שלוש שכבות: (1) ההוראות למודל: לקרוא לכלי רק כשההודעה הזו מבקשת במפורש לשנות את מצב ההקשבה, עם דוגמאות ("Switch to hands-free mode", "I want to talk without pressing a button", "Disable VAD"), ולעולם לא על שאלה על המצב ("What is hands-free?"), אזכור אגבי של ידיים, כפתור או קול, אודיו לא ברור, או בקשה קודמת. אם המודל לא בטוח לגמרי, הוא לא קורא לכלי ושואל. (2) תיאור הכלי חוזר על הכלל. (3) בקושחה: הכלי מתקבל רק בזמן תשובה לבקשה של המשתמש (שאלה בקול או בכתב), לא בזמן ברכת הפתיחה או הודעת טיימר, ובקשה למצב שכבר פעיל לא משנה כלום.
+**Rests on:** estimate. The instructions are built like the `set_board_state` rule against tool calls nobody asked for (step 21). It has not yet been tested on the board how often the model calls the tool without being asked.
 
-**נשען על:** הערכה. ההוראות בנויות כמו הכלל של `set_board_state` נגד קריאות לכלי בלי בקשה (שלב 21). עוד לא נבדק על הלוח כמה פעמים המודל קורא לכלי בלי שביקשו.
+### The microphone does not listen while the control center plays a recording
 
-### המיקרופון לא מקשיב בזמן שמרכז הבקרה מנגן הקלטה
+**The problem:** the recordings player plays on the computer's speakers. With Hands-free on, the board's microphone heard the recording (an answer or a voice command from the SD card) and treated it as a question.
 
-**הבעיה:** הנגן של ההקלטות מנגן ברמקולים של המחשב. עם Hands-free דלוק, המיקרופון של הלוח שמע את ההקלטה (תשובה או פקודה קולית מה-SD) והתייחס אליה כאל שאלה.
+**The decision:** the control center sends `LAPTOP_PLAYBACK on <ms>` when the player starts, resumes, seeks or changes speed (ms is the time left, plus 1.5 seconds), and `LAPTOP_PLAYBACK off` when it stops, ends or is replaced. During this time Hands-free does not start listening, and the wait afterwards (600ms, as after the board itself speaks) is counted from the end of the playback. A Hands-free sentence that was already being recorded when the playback started is canceled, like Cancel, before it becomes a question. A question the user asked for (Talk, BOOT, `LISTEN`) is allowed: the control center stops the player when it starts, and does not let the player start while it is being recorded.
 
-**ההחלטה:** מרכז הבקרה שולח `LAPTOP_PLAYBACK on <ms>` כשהנגן מתחיל, ממשיך, קופץ או משנה מהירות (ms הוא הזמן שנשאר, ועוד 1.5 שניות), ו-`LAPTOP_PLAYBACK off` כשהוא נעצר, נגמר או מוחלף. בזמן הזה ה-Hands-free לא מתחיל להקשיב, וההמתנה שאחרי (600ms, כמו אחרי שהלוח עצמו מדבר) נספרת מסוף הניגון. משפט של Hands-free שכבר הוקלט כשהניגון התחיל מבוטל, כמו Cancel, לפני שהוא נהיה שאלה. שאלה שהמשתמש ביקש (Talk, BOOT, `LISTEN`) כן מותרת: מרכז הבקרה עוצר את הנגן כשהיא מתחילה, ולא נותן לנגן להתחיל בזמן שהיא מוקלטת.
+**Why this way:** the board does not know how much of the recording is left, so the time comes from the page. If the page is closed in the middle of playback the `off` will not arrive, so the pause ends on its own at the end of that time (5 minutes at most), and Hands-free does not get stuck off. A board that restarted in the middle of playback gets the `on` again with its first `@@ALIVE`.
 
-**למה ככה:** הלוח לא יודע כמה זמן נשאר להקלטה, ולכן הזמן מגיע מהדף. אם הדף נסגר באמצע ניגון ה-`off` לא יגיע, ולכן העצירה נגמרת לבד בסוף הזמן הזה (5 דקות לכל היותר), ו-Hands-free לא נתקע כבוי. לוח שהופעל מחדש באמצע ניגון מקבל את ה-`on` שוב עם ה-`@@ALIVE` הראשון שלו.
+**Rests on:** estimate. Not yet tested on the board.
 
-**נשען על:** הערכה. עוד לא נבדק על הלוח.
+## Code
 
-## קוד
+### Log levels, and a namespace for everything (step 17)
 
-### רמות לוג, ו-namespace לכל דבר (שלב 17)
+**What we saw:** a global variable named `g_log_level` changed by itself while connecting to Wi-Fi, without any of our code writing to it. **The likely explanation:** a name collision with an internal variable in one of the closed-source libraries (WiFi, lwIP or ESP-IDF). When a namespace gave the variable a different name at the linker level, the problem disappeared.
 
-**מה ראינו:** משתנה גלובלי בשם `g_log_level` השתנה מעצמו בזמן החיבור ל-Wi-Fi, בלי שום קוד שלנו שכותב אליו. **ההסבר הסביר:** התנגשות בשם עם משתנה פנימי באחת הספריות הסגורות (WiFi, lwIP או ESP-IDF). כש-namespace נותן למשתנה שם אחר ברמת ה-linker, הבעיה נעלמה.
+**The decision:** every symbol in the project is inside a namespace, except `setup()` and `loop()`, which Arduino calls. In the submission stage we closed the last modules that were still outside (`esp32va_audio`, `esp32va_json`, `esp32va_board`).
 
-**ההחלטה:** כל סמל בפרויקט נמצא בתוך namespace, חוץ מ-`setup()` ו-`loop()` ש-Arduino קורא להם. בשלב ההגשה סגרנו את המודולים האחרונים שעוד נשארו בחוץ (`esp32va_audio`, `esp32va_json`, `esp32va_board`).
+**Rests on:** tried (step 17, a full bisection).
 
-**נשען על:** נוסה (שלב 17, bisection מלא).
+### Each module is a single object (a namespace), not a class
 
-### כל מודול הוא אובייקט יחיד (namespace), ולא class
+**The decision:** each hardware component and code area is an `esp32va_*` module that is a single object: its internal state (variables, buffers, flags) is in an anonymous `namespace` in the `.cpp` file, meaning "private members", and the `.h` file is the public interface, meaning the "class". There is no `class` in the board's code (there are only `enum class`es).
 
-**ההחלטה:** כל רכיב חומרה ותחום בקוד הוא מודול `esp32va_*` שהוא אובייקט יחיד: המצב הפנימי שלו (משתנים, מאגרים, הדגלים) נמצא ב-`namespace` אנונימי בקובץ ה-`.cpp`, כלומר "חברים פרטיים", וקובץ ה-`.h` הוא הממשק הציבורי, כלומר ה"class". אין בקוד של הלוח אף `class` (יש רק `enum class`).
+**Why not a C++ class:**
+- Each component has one instance on the board (one LED, one I2S port, one SD card, one button). A class that can be instantiated many times would not have added anything.
+- No dynamic allocation: a module is static, and there are no objects created and destroyed on the heap. On a board without PSRAM we avoid such allocations (see "Audio blew the heap, again").
+- Timer, task or interrupt callbacks need a plain function: the `esp_timer` callback in `button_utils` and the FreeRTOS task of `mic_capture_utils` take a function pointer, and a class method would have needed a static wrapper anyway.
+- The ESP-IDF and Arduino APIs (`i2s_*`, `ledc*`, `analogRead`, FreeRTOS) are C, and free functions fit into them without an extra layer.
+- The namespace is what solved the real bug we ran into, the `g_log_level` collision at the linker level (see "Log levels, and a namespace for everything").
 
-**למה לא class של C++:**
-- לכל רכיב יש בלוח מופע אחד (LED אחד, פורט I2S אחד, כרטיס SD אחד, כפתור אחד). class שאפשר ליצור ממנו הרבה מופעים לא היה נותן כלום.
-- בלי הקצאה דינמית: מודול הוא סטטי, ואין אובייקטים שנוצרים ונהרסים על ה-heap. על לוח בלי PSRAM אנחנו מונעים הקצאות כאלה (ראו "האודיו פוצץ את ה-heap, שוב").
-- callbacks של timer, משימה או interrupt צריכים פונקציה רגילה: ה-callback של `esp_timer` ב-`button_utils` ומשימת ה-FreeRTOS של `mic_capture_utils` מקבלים מצביע לפונקציה, ומתודה של class הייתה צריכה עטיפה סטטית בכל מקרה.
-- ה-API של ESP-IDF ושל Arduino (`i2s_*`, `ledc*`, `analogRead`, FreeRTOS) הוא C, ופונקציות חופשיות משתלבות בו בלי שכבה נוספת.
-- ה-namespace הוא מה שפתר את הבאג האמיתי שפגשנו, ההתנגשות של `g_log_level` ברמת ה-linker (ראו "רמות לוג, ו-namespace לכל דבר").
+The rule is not perfect: a few variables are declared in a header on purpose (`g_light_sensor_value` in `light_sensor_utils.h`, and `g_log_level` in `log_utils.h`). The others are internal.
 
-הכלל לא מושלם: מעט משתנים מוצהרים בכותרת במכוון (`g_light_sensor_value` ב-`light_sensor_utils.h`, ו-`g_log_level` ב-`log_utils.h`). האחרים פנימיים.
+**Which hardware belongs to which module:**
 
-**איזו חומרה שייכת לאיזה מודול:**
-
-| חומרה | המודול | ה-namespace |
+| Hardware | The module | The namespace |
 |---|---|---|
-| ה-LED שעל הלוח (GPIO 2, בהירות ב-PWM) | `board_state_utils` | `esp32va_board` |
-| רמקול + מגבר MAX98357A ומיקרופון INMP441 (פורט I2S אחד) | `i2s_audio_utils`. קריאת המיקרופון במשימה נפרדת: `mic_capture_utils`. גלאי הקול: `vad_utils` | `esp32va_audio`, `esp32va_mic_capture`, `esp32va_vad` |
-| עוצמה, השתקה וצפצוף | `device_controls_utils` | `esp32va_controls` |
-| כפתור BOOT (GPIO 0) | `button_utils` | `esp32va_button` |
-| חיישן אור LDR (מדומה ממרכז הבקרה; קריאת ה-ADC מוכנה) | `light_sensor_utils` | `esp32va_light_sensor` |
-| כרטיס SD (SPI) | `sd_card_utils`. שמירת ההקלטות והעברתן: `reply_recorder_utils`, `voice_command_recorder_utils`, `sd_file_transfer_utils` | `esp32va_sd_card`, `esp32va_reply_recorder`, `esp32va_command_recorder`, `esp32va_sd_transfer` |
-| Wi-Fi והשעון | `wifi_utils` | `esp32va_wifi` |
-| זיכרון קבוע (NVS) | `settings_store_utils` | `esp32va_settings` |
+| The LED on the board (GPIO 2, brightness via PWM) | `board_state_utils` | `esp32va_board` |
+| Speaker + MAX98357A amplifier and INMP441 microphone (one I2S port) | `i2s_audio_utils`. Reading the microphone in a separate task: `mic_capture_utils`. The voice detector: `vad_utils` | `esp32va_audio`, `esp32va_mic_capture`, `esp32va_vad` |
+| Volume, mute and beep | `device_controls_utils` | `esp32va_controls` |
+| BOOT button (GPIO 0) | `button_utils` | `esp32va_button` |
+| LDR light sensor (simulated from the control center; the ADC reading is ready) | `light_sensor_utils` | `esp32va_light_sensor` |
+| SD card (SPI) | `sd_card_utils`. Saving and transferring the recordings: `reply_recorder_utils`, `voice_command_recorder_utils`, `sd_file_transfer_utils` | `esp32va_sd_card`, `esp32va_reply_recorder`, `esp32va_command_recorder`, `esp32va_sd_transfer` |
+| Wi-Fi and the clock | `wifi_utils` | `esp32va_wifi` |
+| Non-volatile memory (NVS) | `settings_store_utils` | `esp32va_settings` |
 
-**נשען על:** נוסה (ההתנגשות ב-linker, שלב 17), והערכה (שאר הנימוקים הם שיקולי תכנון ולא נמדדו).
+**Rests on:** tried (the linker collision, step 17), and estimate (the other reasons are design considerations and were not measured).
 
-### מכונת המצבים: דגלים, ומצב אחד מחושב
+### The state machine: flags, and one computed state
 
-**ההחלטה:** הלוגיקה של השיחה מחזיקה כמה דגלים (`is_capturing`, `awaiting_reply`, `response_in_flight`, `speech_in_progress` ועוד), ו-`updatePipelineState()` מחשבת מהם, בכל סיבוב, מצב אחד מוגדר (`@@STATE`). המעברים מתוארים ב-[architecture.md](architecture.md).
+**The decision:** the conversation logic keeps a few flags (`is_capturing`, `awaiting_reply`, `response_in_flight`, `speech_in_progress` and more), and `updatePipelineState()` computes from them, on every iteration, one defined state (`@@STATE`). The transitions are described in [architecture.md](architecture.md).
 
-**למה ולא enum עם מעברים:** האירועים מגיעים משלושה מקורות במקביל (השרת, משימת המיקרופון, הניגון), ותשובה יכולה להיות באמצע ניגון כשכבר מגיע אירוע חדש. דגלים נפרדים לכל מקור התאימו לזה יותר. בשלב ההגשה **לא** כתבנו את זה מחדש, כי זו הליבה שנבדקה על הלוח בהרבה ריצות. במקום זה תיעדנו את הטבלה שממפה דגלים למצבים.
+**Why, and not an enum with transitions:** the events arrive from three sources in parallel (the server, the microphone task, the playback), and an answer can be in the middle of playback when a new event already arrives. Separate flags for each source fit this better. In the submission stage we did **not** rewrite it, because this is the core that was tested on the board in many runs. Instead we documented the table that maps flags to states.
 
-### משימה נפרדת למיקרופון (שלב 30)
+### A separate task for the microphone (step 30)
 
-**מה מדדנו:** ב-21 מתוך 26 שאלות אבדו דגימות מהמיקרופון. מאגר ה-DMA מחזיק 150ms, ושליחה אחת ב-Wi-Fi לקחה עד 465ms. כמות הקול שאבדה התאימה לשליחה האיטית ביותר באותה שאלה (מקדם מתאם 0.93).
+**What we measured:** in 21 of 26 questions, microphone samples were lost. The DMA buffer holds 150ms, and a single send over Wi-Fi took up to 465ms. The amount of lost audio matched the slowest send in that question (correlation coefficient 0.93).
 
-**ההחלטה:** משימת FreeRTOS בעדיפות גבוהה יותר קוראת את המיקרופון כל 20ms לתוך מאגר הניגון, שמושאל לה כל עוד אין מה לנגן. שליחה איטית רק מעכבת את האודיו.
+**The decision:** a FreeRTOS task at a higher priority reads the microphone every 20ms into the playback buffer, which is lent to it as long as there is nothing to play. A slow send only delays the audio.
 
-**נשען על:** נמדד (לפני התיקון). **מדידה חוזרת אחרי התיקון עוד חסרה.**
+**Rests on:** measured (before the fix). **A repeat measurement after the fix is still missing.**
 
-## חומרה ורשת
+## Hardware and network
 
-### כפתור BOOT: ויתור (שלבים 19-20), וחזרה כאופציה (שלב ההגשה)
+### The BOOT button: given up (steps 19-20), and back as an option (submission stage)
 
-בשלב 19 כפתור BOOT התחיל הקלטה, אבל הוא נתן קריאות שווא. ה-debounce הוחלף ב-saturating counter (שלב 20b), והחקירה לא הסתיימה, וויתרנו על הכפתור. בשלב ההגשה מצאנו סיבה סבירה: שעון ה-MCLK יצא לפין הזה (ראו "בלי פין MCLK"). הכפתור חזר, **כבוי כברירת מחדל**, עם אותו debounce, ומדליקים אותו ממרכז הבקרה רק אחרי בדיקה על הלוח (`Unit Tests/08_boot_button`).
+In step 19 the BOOT button started a recording, but it gave false readings. The debounce was replaced with a saturating counter (step 20b), the investigation did not finish, and we gave up on the button. In the submission stage we found a likely cause: the MCLK clock went out on this pin (see "No MCLK pin"). The button came back, **off by default**, with the same debounce, and it is turned on from the control center only after a test on the board (`Unit Tests/08_boot_button`).
 
-### חיישן האור מדומה ממרכז הבקרה
+### The light sensor is simulated from the control center
 
-**ההחלטה:** ה-LDR לא מחובר ללוח. ערך האור מגיע ממרכז הבקרה (הפקודה `LIGHT <0-6142>`), לפי הנחיית מדריך הקורס.
+**The decision:** the LDR is not connected to the board. The light value comes from the control center (the `LIGHT <0-6142>` command), as the course guide instructs.
 
-**מה אמיתי:** הכלי `get_time_of_day` שהמודל קורא לו, הספים (`LIGHT_BANDS`) שנשמרים ב-NVS, והמיפוי של הערך ליום, ערב או לילה. גם הקוד ל-LDR אמיתי כבר כתוב: מגדירים `#define LIGHT_SENSOR_PIN 34` ב-`parameters.h`, והלוח קורא את החיישן ב-ADC כל שנייה (ממוצע של כמה דגימות, כפול 1.5) ומתעלם מהפקודה `LIGHT`. בדיקת היחידה `Unit Tests/09_light_sensor` מוכנה לחיבור החיישן (ראו [calibration.md](calibration.md)).
+**What is real:** the `get_time_of_day` tool that the model calls, the thresholds (`LIGHT_BANDS`) that are saved in NVS, and the mapping of the value to day, evening or night. The code for a real LDR is also already written: define `#define LIGHT_SENSOR_PIN 34` in `parameters.h`, and the board reads the sensor through the ADC every second (an average of several samples, times 1.5) and ignores the `LIGHT` command. The unit test `Unit Tests/09_light_sensor` is ready for when the sensor is connected (see [calibration.md](calibration.md)).
 
-**איך מדגימים:** במרכז הבקרה יש סליידר ידני, כדי לשנות את האור במקום ולראות מיד איך העוזר עונה. לצידו מצב Auto day-cycle: יום שלם מדומה (לילה, זריחה, יום, שקיעה) בשתי דקות, ערך `LIGHT` חדש כל 1.5 שניות, על עקומה חלקה עם רעש קטן דמוי ADC, כך שהנתונים דומים לקריאות של LDR אמיתי. נגיעה בסליידר מחזירה למצב ידני. המצב הזה הוא במרכז הבקרה בלבד, בלי שינוי בקושחה.
+**How we demo it:** the control center has a manual slider, to change the light on the spot and see right away how the assistant answers. Next to it is an Auto day-cycle mode: a whole simulated day (night, sunrise, day, sunset) in two minutes, a new `LIGHT` value every 1.5 seconds, on a smooth curve with a small ADC-like noise, so the data resembles readings from a real LDR. Touching the slider returns to manual mode. This mode is in the control center only, with no change to the firmware.
 
-### Hotspot ולא ה-Wi-Fi של הטכניון
+### A hotspot and not the Technion Wi-Fi
 
-**ההחלטה:** מדגימים דרך hotspot מהטלפון ולא ברשת של הטכניון. בשלב ההגשה אפשר לשנות את הרשת ממרכז הבקרה בלי לקמפל מחדש (`WIFI_SSID` / `WIFI_PASSWORD`, נשמר ב-flash).
+**The decision:** we demo through a hotspot from a phone and not on the Technion network. In the submission stage the network can be changed from the control center without recompiling (`WIFI_SSID` / `WIFI_PASSWORD`, saved in flash).
 
-**מה ידוע ומה הנחה:** הלוח לא הצליח להתחבר לרשת של הטכניון. את הסיבה לא בדקנו עד הסוף, והיא **הערכה ולא עובדה**: כנראה הרשת דורשת התחברות ארגונית (WPA2-Enterprise) או דף כניסה (captive portal), ו-`WiFi.begin()` עם שם וסיסמה לא מטפל באף אחד מהם. לפי התיעוד, ה-ESP32 עצמו כן מסוגל ל-WPA2-Enterprise, כלומר זו לא בהכרח מגבלה של החומרה.
+**What is known and what is an assumption:** the board could not connect to the Technion network. We did not fully investigate the reason, and it is **an estimate and not a fact**: the network probably requires enterprise login (WPA2-Enterprise) or a sign-in page (captive portal), and `WiFi.begin()` with a name and password handles neither of them. According to the documentation, the ESP32 itself is capable of WPA2-Enterprise, so this is not necessarily a hardware limitation.
 
-**נשען על:** נוסה (ההתחברות נכשלה), הערכה (הסיבה).
+**Rests on:** tried (the connection failed), estimate (the reason).
 
-**מקורות:** [מדריך ה-Wi-Fi של ESP-IDF 4.4](https://docs.espressif.com/projects/esp-idf/en/v4.4/esp32/api-guides/wifi.html) (מציין תמיכה ב-WPA2-Enterprise, שמאמת מול שרת RADIUS).
+**Sources:** [ESP-IDF 4.4 Wi-Fi guide](https://docs.espressif.com/projects/esp-idf/en/v4.4/esp32/api-guides/wifi.html) (mentions support for WPA2-Enterprise, which authenticates against a RADIUS server).
 
-### מרכז בקרה דרך USB (Web Serial) ולא שרת על הבקר
+### A control center over USB (Web Serial) and not a server on the microcontroller
 
-**ההחלטה:** מרכז הבקרה הוא דף HTML אחד שמדבר עם הלוח דרך כבל USB (Web Serial), ולא שרת HTTP על ה-ESP32 או אפליקציה.
+**The decision:** the control center is a single HTML page that talks to the board over a USB cable (Web Serial), and not an HTTP server on the ESP32 or an app.
 
-**למה:** שרת web על הבקר דורש עוד זיכרון בזמן שהחיבור המוצפן פתוח, ושם נשארים כ-45KB. Web Serial לא דורש שום דבר מהלוח חוץ מהדפסת שורות `@@`. הלוח עצמו עובד גם בלי המחשב: Hands-free נשמר ב-flash, ויש כפתור BOOT ו-צלילי מצב כאופציה.
+**Why:** a web server on the microcontroller needs more memory while the encrypted connection is open, and only about 45KB are left then. Web Serial needs nothing from the board except printing `@@` lines. The board itself also works without the computer: Hands-free is saved in flash, and there are the BOOT button and status sounds as options.
 
-**החיסרון:** בלי כבל אין מסך. "Debug mode בלי מחשב" נשאר חלקי (צלילי המצב).
+**The downside:** without a cable there is no screen. "Debug mode without a computer" remains partial (the status sounds).
 
-**מקורות:** [Chrome, Web Serial API](https://developer.chrome.com/docs/capabilities/serial) (דף ביכולת לקרוא ולכתוב להתקן טורי).
+**Sources:** [Chrome, Web Serial API](https://developer.chrome.com/docs/capabilities/serial) (a page that can read from and write to a serial device).
 
-## רובסטיות (שלב ההגשה)
+## Robustness (submission stage)
 
-| ההחלטה | למה |
+| The decision | Why |
 |---|---|
-| בלי כרטיס SD הלוח ממשיך, בלי הקלטות | ההקלטות הן פיצ'ר ולא תנאי. קודם הלוח נעצר כולו |
-| החיבור ל-OpenAI לא ננטש לעולם: אחרי 5 ניסיונות "offline", וניסיון כל 30 שניות | קודם הלוח נעצר עד Reset |
-| כש-Wi-Fi חוזר (או שהרשת הוחלפה), ההמתנה בין הניסיונות מתאפסת וה-OpenAI מתחבר מחדש תוך שניות. אחרי 10 שניות בלי הצלחה חוזרים לקצב של 30 שניות | המתנה של עד 30 שניות אחרי שהרשת כבר חזרה נראתה כמו תקלה |
-| פעימת לב: ping כל 15 שניות, וחיבור נסגר אחרי 2 תשובות (pong) שלא חזרו תוך 10 שניות | ב-Wi-Fi בלי אינטרנט החיבור נראה פתוח, ושאלה רק נכשלה בלי שהלוח יבין שהוא offline |
-| רשת שנשמרה ממרכז הבקרה ונכשלת פעמיים ברצף מוחלפת (בזיכרון בלבד) ברשת מ-`SECRETS.h`, ובחזרה באותו אופן | סיסמה שגויה השאירה את הלוח offline עד שמישהו שם לב. הרשת השמורה נשארת ב-flash, כך שהחלפה זמנית לא מוחקת אותה |
-| מונה הניסיונות מתאפס בכל חיבור מוצלח | באג: 5 ניתוקים מפוזרים לאורך שעות (כל אחד מהם התחבר מחדש) עצרו את הלוח |
-| `setup()` לא מחכה לנצח ל-Wi-Fi או לשעון (20 / 15 שניות) | קודם, בלי רשת, הלוח לא הגיע ל-`loop()` ולא ענה לשום פקודה |
-| רשת Wi-Fi נשמרת ב-flash מתוך מרכז הבקרה | דרישה של הקורס: הגדרות בלי קימפול מחדש |
-| כפתור BOOT וצלילי מצב כבויים כברירת מחדל | הם פיצ'רים חדשים ואופציונליים. לוח שלא הודלקו בו מתנהג בדיוק כמו קודם |
+| Without an SD card the board continues, without recordings | The recordings are a feature and not a requirement. Before, the whole board stopped |
+| The connection to OpenAI is never abandoned: after 5 attempts it is "offline", with an attempt every 30 seconds | Before, the board stopped until a Reset |
+| When the Wi-Fi comes back (or the network was changed), the wait between attempts resets and OpenAI reconnects within seconds. After 10 seconds without success it goes back to the 30-second pace | A wait of up to 30 seconds after the network was already back looked like a fault |
+| A heartbeat: a ping every 15 seconds, and the connection is closed after 2 answers (pongs) that did not come back within 10 seconds | On Wi-Fi without internet the connection looked open, and a question just failed without the board realizing it was offline |
+| A network saved from the control center that fails twice in a row is replaced (in memory only) by the network from `SECRETS.h`, and back the same way | A wrong password left the board offline until someone noticed. The saved network stays in flash, so a temporary switch does not delete it |
+| The attempt counter resets on every successful connection | A bug: 5 disconnects scattered over hours (each of which reconnected) stopped the board |
+| `setup()` does not wait forever for the Wi-Fi or the clock (20 / 15 seconds) | Before, without a network, the board did not reach `loop()` and did not answer any command |
+| A Wi-Fi network is saved in flash from the control center | A course requirement: settings without recompiling |
+| The BOOT button and status sounds are off by default | They are new, optional features. A board where they were not turned on behaves exactly as before |
 
-כל אחד מהשינויים האלה הוא commit נפרד בהיסטוריית הגיט, כך שאפשר לבטל כל אחד לבד.
+Each of these changes is a separate commit in the git history, so each one can be reverted on its own.
 
-### הורדת הקלטה עוצרת את `loop()` בכוונה
+### Downloading a recording stops `loop()` on purpose
 
-**ההחלטה:** הפקודה `GET <name>` שולחת את כל הקובץ ב-Serial בתוך סיבוב אחד של `loop()`, והלוח לא עושה שום דבר אחר עד שההעברה נגמרת.
+**The decision:** the `GET <name>` command sends the whole file over Serial within one iteration of `loop()`, and the board does nothing else until the transfer ends.
 
-**למה:** הבייטים של הקובץ עוברים באותו ערוץ כמו שורות הלוג וה-`@@`. כל הדפסה באמצע ההעברה הייתה משחיתה את הקובץ (וה-CRC היה נכשל), ולכן שום דבר לא מתערבב בה.
+**Why:** the file's bytes go over the same channel as the log lines and the `@@` lines. Any print in the middle of the transfer would corrupt the file (and the CRC would fail), so nothing gets mixed into it.
 
-**כמה זמן:** ב-115200 baud עוברים כ-11.5KB בשנייה: כ-3 שניות לתשובה של העוזר, ועד כ-40 שניות לפקודה קולית של Hands-free באורך 10 שניות (כ-480KB של PCM ב-24kHz).
+**How long:** at 115200 baud about 11.5KB pass per second: about 3 seconds for an answer from the assistant, and up to about 40 seconds for a 10-second Hands-free voice command (about 480KB of PCM at 24kHz).
 
-**מה עושים בגלל זה:** Hands-free מושהה לפני שההורדה מתחילה, ומרכז הבקרה נועל את Talk ו-Ask ומציג "Downloading…" עד שהיא נגמרת, כדי שלחיצה לא תחכה בתור ותתחיל הקלטה רק אחרי עשרות שניות.
+**What we do because of it:** Hands-free is paused before the download starts, and the control center locks Talk and Ask and shows "Downloading…" until it ends, so a click does not wait in a queue and start a recording only tens of seconds later.
 
-**שקלנו ולא עשינו:** העברה לא חוסמת, כמה בייטים בכל סיבוב של `loop()`, שבה כל שאר ההדפסות נחסמות כל עוד ההעברה פתוחה. זה שינוי בליבה שנבדקה על הלוח, ולכן בחרנו בנעילת הממשק ובתיעוד.
+**Considered and not done:** a non-blocking transfer, a few bytes per iteration of `loop()`, in which all the other prints are blocked as long as the transfer is open. That is a change to the core that was tested on the board, so we chose locking the interface and documenting it.
 
-**נשען על:** הערכה (חישוב לפי קצב ה-baud וגודלי הקבצים, לא מדדנו את זמן ההורדה בפועל).
+**Rests on:** estimate (a calculation from the baud rate and the file sizes; we did not measure the actual download time).
 
-### בלי תור של שאלות שנשלחות אחר כך (offline)
+### No queue of questions to send later (offline)
 
-**ההחלטה:** שאלה ששואלים כשאין חיבור (offline) לא נשמרת כדי להישלח אחר כך. הלוח דוחה אותה מיד ואומר למה (`LISTEN ignored - offline`), ובמרכז הבקרה רואים `offline` ונורית OpenAI אדומה.
+**The decision:** a question asked when there is no connection (offline) is not saved to be sent later. The board rejects it right away and says why (`LISTEN ignored - offline`), and the control center shows `offline` and a red OpenAI light.
 
-**למה:** תשובה בקול שמגיעה דקות אחרי השאלה, בלי הקשר, תבלבל יותר ממה שתעזור. סירוב מיידי וגלוי ברור למשתמש.
+**Why:** a spoken answer that arrives minutes after the question, out of context, would confuse more than it helps. An immediate, visible refusal is clear to the user.
 
-**מה כן נשמר, גם כשאין רשת:** התשובות והפקודות הקוליות ב-SD (5 האחרונות מכל סוג, אפשר להוריד אחר כך), ההגדרות ב-flash (`Preferences`, שמור ב-NVS), והלוג והסטטיסטיקה במרכז הבקרה (קובץ לוג ו-CSV במחשב). הטיימר והפקדים ממשיכים לעבוד offline.
+**What is saved, even when there is no network:** the answers and the voice commands on the SD card (the last 5 of each kind, which can be downloaded later), the settings in flash (`Preferences`, stored in NVS), and the log and the statistics in the control center (a log file and a CSV on the computer). The timer and the controls keep working offline.
 
-**נשען על:** הערכה (החלטת תכנון); ההתנהגות עצמה נבדקה על הלוח במקרי הקצה של ה-offline ([edge-cases-extended.md](edge-cases-extended.md)).
+**Rests on:** estimate (a design decision); the behavior itself was tested on the board in the offline edge cases ([edge-cases-extended.md](edge-cases-extended.md)).
 
-**מקורות:** [Arduino-ESP32, Preferences](https://docs.espressif.com/projects/arduino-esp32/en/latest/api/preferences.html) (שמירת זוגות מפתח-ערך ב-NVS).
+**Sources:** [Arduino-ESP32, Preferences](https://docs.espressif.com/projects/arduino-esp32/en/latest/api/preferences.html) (storing key-value pairs in NVS).
 
-## הגדרות: מי מגדיר מה
+## Settings: who sets what
 
-### מפתח ה-OpenAI מוגדר גם ממרכז הבקרה, כמו רשת ה-Wi-Fi
+### The OpenAI key is also set from the control center, like the Wi-Fi network
 
-**ההחלטה:** המפתח ב-`ESP32/SECRETS.h` הוא ברירת המחדל, ואפשר לשמור מפתח אחר מהכרטיס OpenAI API key במרכז הבקרה (`OPENAI_KEY <key>`), בלי קימפול. הוא נשמר ב-flash (NVS) ונשאר אחרי Reset, והלוח מתחבר איתו מחדש מיד. בדיוק כמו ברשת ה-Wi-Fi: אם OpenAI דוחים את המפתח השמור פעמיים ברצף (HTTP 401 או 403 בפתיחת ה-WebSocket), הלוח עובר למפתח של `SECRETS.h`, ובחזרה באותו אופן, רק בזיכרון. `OPENAI_KEY_FORGET` (Back to default) מחזיר את המפתח של `SECRETS.h`.
+**The decision:** the key in `ESP32/SECRETS.h` is the default, and a different key can be saved from the OpenAI API key card in the control center (`OPENAI_KEY <key>`), without compiling. It is saved in flash (NVS) and stays after a Reset, and the board reconnects with it right away. Exactly as with the Wi-Fi network: if OpenAI refuses the saved key twice in a row (HTTP 401 or 403 when opening the WebSocket), the board switches to the key from `SECRETS.h`, and back the same way, in memory only. `OPENAI_KEY_FORGET` (Back to default) restores the key from `SECRETS.h`.
 
-**למה:** קודם החלטנו שהמפתח שייך ליצרן ולא למשתמש, ולכן הוא מתקמפל לתוך הקושחה בלבד. המחיר התברר כגבוה: מפתח שפג תוקפו או שבוטל, או החלפה לחשבון אחר, דרשו קימפול וצריבה, ולוח בלי מפתח תקין נראה רק "offline". עכשיו הלוח גם מבחין בין מפתח שנדחה לבין רשת שלא עונה: נורית OpenAI אומרת `API key refused (HTTP 401)`. המפתח לא מודפס אף פעם, לא בלוג של הלוח ולא בלוג של מרכז הבקרה: רק `sk-...` ו-4 התווים האחרונים (`@@OPENAI_KEY`). הלוח בודק את הצורה (`sk-`, רק אותיות, ספרות, `-` ו-`_`, באורך 20-200) לפני ששומר, כך שהדבקה עם רווח או ירידת שורה לא מגיעה לכותרת ה-HTTP.
+**Why:** we had first decided that the key belongs to the manufacturer and not to the user, so it was compiled into the firmware only. The price turned out to be high: a key that expired or was revoked, or a switch to another account, required compiling and uploading, and a board without a valid key just looked "offline". Now the board also tells a refused key apart from a network that does not answer: the OpenAI light says `API key refused (HTTP 401)`. The key is never printed, neither in the board's log nor in the control center's log: only `sk-...` and the last 4 characters (`@@OPENAI_KEY`). The board checks the format (`sk-`, only letters, digits, `-` and `_`, 20-200 long) before saving, so a paste with a space or a line break does not reach the HTTP header.
 
-**שקלנו ולא עשינו:** לבדוק את המפתח מול OpenAI לפני השמירה. זה דורש חיבור TLS שני במקביל, ואין לזה זיכרון בלוח בלי PSRAM (ראו "בלי Bluetooth ובלי נקודת גישה"). במקום זה מתחברים איתו, ואם הוא נדחה פעמיים חוזרים למפתח הקודם שעבד.
+**Considered and not done:** checking the key against OpenAI before saving. That requires a second TLS connection in parallel, and there is no memory for it on a board without PSRAM (see "No Bluetooth and no access point"). Instead we connect with it, and if it is refused twice we go back to the previous key that worked.
 
-**נשען על:** הערכה (החלטת תכנון), תיעוד (ספריית ה-WebSockets ‏2.7.2 מוסרת את קוד ה-HTTP של חיבור שנדחה באירוע `WStype_DISCONNECTED`). עוד לא נבדק על הלוח.
+**Rests on:** estimate (a design decision), documentation (the WebSockets library 2.7.2 passes the HTTP code of a refused connection in the `WStype_DISCONNECTED` event). Not yet tested on the board.
 
-### בלי Bluetooth ובלי נקודת גישה (AP) להגדרת הלוח
+### No Bluetooth and no access point (AP) for setting up the board
 
-**ההחלטה:** את ההגדרות, בעיקר רשת ה-Wi-Fi, שולחים מהמחשב בכבל USB (Web Serial), ולא דרך Bluetooth או דרך נקודת גישה של הלוח עם דף הגדרה.
+**The decision:** the settings, mainly the Wi-Fi network, are sent from the computer over a USB cable (Web Serial), and not through Bluetooth or through an access point on the board with a setup page.
 
-**למה:** מחסנית ה-Bluetooth ושרת דף בנקודת גישה צורכים זיכרון (heap), והחיבור המוצפן ל-OpenAI כבר לוקח את רוב מה שיש בלוח בלי PSRAM: בזמן שיחה נשארים כ-45KB, והמינימום שנמדד היה 27KB. כמה בדיוק הם היו עולים לא מדדנו, ולא ניסינו להוסיף אותם. Web Serial לא דורש מהלוח שום דבר חוץ מהדפסת שורות `@@` (ראו "מרכז בקרה דרך USB").
+**Why:** the Bluetooth stack and a page server on an access point consume memory (heap), and the encrypted connection to OpenAI already takes most of what there is on a board without PSRAM: during a conversation about 45KB are left, and the measured minimum was 27KB. We did not measure exactly how much they would cost, and we did not try to add them. Web Serial needs nothing from the board except printing `@@` lines (see "A control center over USB").
 
-**נשען על:** נמדד (הזיכרון הפנוי בזמן שיחה), הערכה (העלות של ה-Bluetooth וה-AP).
+**Rests on:** measured (the free memory during a conversation), estimate (the cost of the Bluetooth and the AP).
 
-### בלי הפרדה בין משתמש למנהל (User / Admin)
+### No separation between User and Admin
 
-**ההחלטה:** אין מסכים נפרדים למשתמש ולמנהל. יש לקוח אחד, והוא מגדיר הכול באתר, כלומר במרכז הבקרה. מי ש"מנהל" את המערכת משנה דברים בקימפול מחדש (`ESP32/parameters.h`, `ESP32/SECRETS.h`).
+**The decision:** there are no separate screens for a user and an admin. There is one customer, and they set everything on the website, meaning in the control center. Whoever "administers" the system changes things by recompiling (`ESP32/parameters.h`, `ESP32/SECRETS.h`).
 
-**למה:** מנהל כזה הוא לא לקוח, ולכן איננו מציעים ואיננו תומכים בהתאמה אישית בשבילו דרך ממשק. כל מה שלקוח צריך (Wi-Fi, מפתח ה-API, עוצמה, Hands-free ורגישותו, ספי האור, כפתור BOOT) נמצא במרכז הבקרה. הפרמטרים של המפתח מרוכזים ב-`parameters.h` ומתועדים ב-[Parameters/parameters.md](../Parameters/parameters.md).
+**Why:** such an admin is not a customer, so we neither offer nor support customization for them through an interface. Everything a customer needs (Wi-Fi, the API key, volume, Hands-free and its sensitivity, the light thresholds, the BOOT button) is in the control center. The developer's parameters are concentrated in `parameters.h` and documented in [Parameters/parameters.md](../Parameters/parameters.md).
 
-**נשען על:** הערכה (החלטת תכנון).
+**Rests on:** estimate (a design decision).
 
-### הגברת המיקרופון, הקול ואורך ההקלטה קבועים בקוד
+### The microphone gain, the voice and the recording length are fixed in the code
 
-**ההחלטה:** `kMicSoftwareGain`, `OPENAI_VOICE` ו-`kManualRecordDurationSec` נשארו קבועים ב-`parameters.h` ולא נחשפו כהגדרה במרכז הבקרה.
+**The decision:** `kMicSoftwareGain`, `OPENAI_VOICE` and `kManualRecordDurationSec` stayed fixed in `parameters.h` and were not exposed as a setting in the control center.
 
-**למה:** בהגדרות שקשורות להקלטה העדפנו ערכים קבועים, שנבדקו ויציבים, על פני ערכים שאפשר לשנות. ההגברה ‎×2 נבדקה (חציון ‎-19 dBFS, קיטום בשאלה אחת מתוך 26), ו-‎×4 גרמה לקיטום בדיבור רגיל. כל המדידות נעשו עם הקלטה של 3 שניות. מה שכן אפשר לכוונן ממרכז הבקרה הוא רגישות ה-Hands-free והשקט שמסיים משפט, בטווח שהקושחה מאפשרת. לגבי הקול: לפי התיעוד אי אפשר לשנות אותו אחרי שהמודל כבר השמיע אודיו באותו סשן.
+**Why:** for settings related to recording, we preferred fixed values that were tested and are stable over values that can be changed. The ×2 gain was tested (a median of -19 dBFS, clipping in 1 question of 26), and ×4 caused clipping in normal speech. All the measurements were made with a 3-second recording. What can be tuned from the control center is the Hands-free sensitivity and the silence that ends a sentence, within the range the firmware allows. As for the voice: according to the documentation it cannot be changed after the model has already played audio in the same session.
 
-**נשען על:** נמדד (רמת המיקרופון והקיטום), נוסה (הגברה ‎×4), תיעוד (הקול). ראו גם [calibration.md](calibration.md).
+**Rests on:** measured (the microphone level and the clipping), tried (×4 gain), documentation (the voice). See also [calibration.md](calibration.md).
 
-**מקורות:** [OpenAI, Realtime API: שיחות](https://developers.openai.com/api/docs/guides/realtime-conversations) (בחירת `voice`, ושאי אפשר לשנות אותו אחרי שהמודל השמיע אודיו בסשן).
+**Sources:** [OpenAI, Realtime API: conversations](https://developers.openai.com/api/docs/guides/realtime-conversations) (choosing the `voice`, and that it cannot be changed after the model has played audio in the session).
 
-## מגבלות מכוונות
+## Deliberate limitations
 
-### בלי OTA, בלי דיבוג אלחוטי ובלי Home Assistant / MQTT
+### No OTA, no wireless debugging and no Home Assistant / MQTT
 
-**ההחלטה:** לא מימשנו עדכון קושחה אלחוטי (OTA), דיבוג אלחוטי, או חיבור ל-Home Assistant / MQTT. אלה מגבלות מכוונות ולא דברים ששכחנו.
+**The decision:** we did not implement wireless firmware updates (OTA), wireless debugging, or a connection to Home Assistant / MQTT. These are deliberate limitations and not things we forgot.
 
-**למה:** כל אחד מהם דורש עוד socket או שירות פתוח (מאזין OTA, פורט לוג ברשת, חיבור לברוקר MQTT) ועוד זיכרון, בנוסף לחיבור המוצפן ל-OpenAI, על לוח בלי PSRAM שנשארים בו כ-45KB בזמן שיחה. לא ניסינו להוסיף אותם, ולכן הסיבה היא הערכה ולא מדידה.
+**Why:** each of them needs another socket or open service (an OTA listener, a network log port, a connection to an MQTT broker) and more memory, on top of the encrypted connection to OpenAI, on a board without PSRAM that has about 45KB left during a conversation. We did not try to add them, so the reason is an estimate and not a measurement.
 
-**מה יש במקום:** הלוח עובד בלי מחשב ובלי אינטרנט (הטיימר והפקדים ממשיכים לעבוד, ראו "רובסטיות"). אפשר לנתח ריצה אחרי המעשה: מרכז הבקרה שומר לוג, ו-**Replay a log** מנגן אותו מחדש בלי הלוח. ההקלטות של התשובות והפקודות נשמרות ב-SD ומורידים אותן אחר כך. עדכון קושחה וניפוי שגיאות נעשים בכבל.
+**What there is instead:** the board works without a computer and without internet (the timer and the controls keep working, see "Robustness"). A run can be analyzed after the fact: the control center saves a log, and **Replay a log** plays it again without the board. The recordings of the answers and the commands are saved on the SD card and downloaded later. Firmware updates and debugging are done over the cable.
 
-**נשען על:** הערכה.
+**Rests on:** estimate.
 
-## עלות ושימוש ב-API בתשלום
+## Cost and use of a paid API
 
-### העלות של OpenAI Realtime API
+### The cost of the OpenAI Realtime API
 
-**ההחלטה:** העוזר רץ על `gpt-realtime-2.1-mini` (הקבוע `OPENAI_MODEL` ב-`ESP32/parameters.h`), הקו הזול מבין שני המודלים של הסדרה (השני הוא `gpt-realtime-2.1`). את התמלול שמוצג במרכז הבקרה עושה מודל נפרד, `gpt-4o-mini-transcribe`, והוא מחויב בנפרד. ה-API בתשלום לפי טוקנים.
+**The decision:** the assistant runs on `gpt-realtime-2.1-mini` (the `OPENAI_MODEL` constant in `ESP32/parameters.h`), the cheaper of the two models in the series (the other is `gpt-realtime-2.1`). The transcript shown in the control center is made by a separate model, `gpt-4o-mini-transcribe`, which is billed separately. The API is paid per token.
 
-**מה קובע את העלות:** כמה אודיו נכנס ויוצא בכל שאלה. אודיו שהמשתמש אומר נספר כטוקן אחד לכל 100ms (כ-10 בשנייה), ואודיו שהמודל עונה כטוקן אחד לכל 50ms (כ-20 בשנייה). בכל תשובה נשלחת למודל כל השיחה עד כה, ולכן שאלות מאוחרות בשיחה יקרות יותר (חלק מהקלט נספר כ-cached input, זול יותר). כל שאלה שלנו שולחת כ-193KB של PCM ב-24kHz (כ-4 שניות אודיו, ראו [README](../README.md), "מדידות ביצועים"), והתשובה חוזרת כ-mu-law ב-8kHz, 64 kbps (ההוראות למודל דורשות משפט קצר אחד).
+**What sets the cost:** how much audio goes in and out in each question. Audio that the user says is counted as one token per 100ms (about 10 per second), and audio that the model answers as one token per 50ms (about 20 per second). With every answer the whole conversation so far is sent to the model, so later questions in a conversation cost more (part of the input is counted as cached input, which is cheaper). Each of our questions sends about 193KB of PCM at 24kHz (about 4 seconds of audio, see [README](../README.md), "Performance measurements"), and the answer comes back as mu-law at 8kHz, 64 kbps (the instructions for the model ask for one short sentence).
 
-**המחירים** (מדף המחירים הרשמי, נכון ל-23.10.2026, לכל מיליון טוקנים): `gpt-realtime-2.1-mini`, אודיו: קלט $10, פלט $20, קלט cached $0.30; טקסט: קלט $0.60, פלט $2.40. `gpt-4o-mini-transcribe`: קלט $1.25, פלט $5 (כ-$0.003 לדקה לפי הדף).
+**The prices** (from the official pricing page, as of 23.10.2026, per million tokens): `gpt-realtime-2.1-mini`, audio: input $10, output $20, cached input $0.30; text: input $0.60, output $2.40. `gpt-4o-mini-transcribe`: input $1.25, output $5 (about $0.003 per minute according to the page).
 
-**איך מחשבים שאלה:** (טוקני קלט × מחיר הקלט + טוקני פלט × מחיר הפלט) / 1,000,000, כשטוקני הקלט כוללים את האודיו, את ההוראות והכלים ואת השיחה עד כה, ועוד עלות התמלול. את המספרים המדויקים מחזיר השרת בשדה `usage` של האירוע `response.done`. הלוח לא קורא אותו כיום, ואורך התשובה בטוקנים לא תועד, ולכן **לא כתבנו כאן מחיר לשאלה**: כל מספר היה ניחוש.
+**How to compute a question:** (input tokens × input price + output tokens × output price) / 1,000,000, where the input tokens include the audio, the instructions and the tools and the conversation so far, plus the cost of the transcription. The server returns the exact numbers in the `usage` field of the `response.done` event. The board does not read it today, and the length of the answer in tokens was not recorded, so **we did not write a price per question here**: any number would be a guess.
 
-**נשען על:** תיעוד (המחירים וספירת הטוקנים), נמדד (נפח האודיו שנשלח בשאלה).
+**Rests on:** documentation (the prices and the token counting), measured (the volume of audio sent per question).
 
-**מקורות:** [OpenAI, מחירים](https://developers.openai.com/api/docs/pricing); [OpenAI, עלויות ב-Realtime API](https://developers.openai.com/api/docs/guides/realtime-costs) (ספירת הטוקנים של אודיו, ושהשיחה כולה נשלחת בכל תשובה).
+**Sources:** [OpenAI, pricing](https://developers.openai.com/api/docs/pricing); [OpenAI, costs in the Realtime API](https://developers.openai.com/api/docs/guides/realtime-costs) (the token counting for audio, and that the whole conversation is sent with every answer).
 
-## אבטחה
+## Security
 
-מפתח ה-API נשמר בקושחה (`SECRETS.h`, לא בגיט), ואם שמרו מפתח ממרכז הבקרה גם ב-NVS, ונשלח בכותרת החיבור. מי שמחזיק את הלוח יכול לקרוא אותו מה-flash. בלוג הוא לא מופיע: הלוח מדפיס רק `sk-...` ו-4 תווים אחרונים, ומרכז הבקרה רושם `OPENAI_KEY ********` (וכך גם סיסמת Wi-Fi שהוקלדה בשורת הפקודה). בפרויקט אמיתי הלוח היה מקבל מפתח זמני (ephemeral token) משרת שלנו. לפי הנחיות הקורס אבטחה אינה בעדיפות, ולכן זה מתועד כמגבלה ידועה. הלוח מאמת את התעודה של `api.openai.com` מול תעודת שורש אחת (GTS Root R4). אם OpenAI יחליפו שרשרת, צריך לעדכן אותה ב-`openai_realtime_utils.cpp`.
+The API key is stored in the firmware (`SECRETS.h`, not in git), and if a key was saved from the control center, also in NVS, and it is sent in the connection header. Anyone who holds the board can read it from the flash. It does not appear in the log: the board prints only `sk-...` and the last 4 characters, and the control center records `OPENAI_KEY ********` (and the same for a Wi-Fi password typed on the command line). In a real product the board would get a temporary key (ephemeral token) from our own server. According to the course guidelines security is not a priority, so this is documented as a known limitation. The board verifies the certificate of `api.openai.com` against a single root certificate (GTS Root R4). If OpenAI changes its chain, it needs to be updated in `openai_realtime_utils.cpp`.
 
-## שפה
+## Language
 
-**מה נוסה:** אפשר לדבר עם העוזר בעברית, והוא עונה בעברית, אבל איכות התשובות נמוכה יותר מאשר באנגלית. התמלול שמוצג במרכז הבקרה משתבש הרבה פעמים בעברית.
+**What was tried:** you can talk to the assistant in Hebrew, and it answers in Hebrew, but the quality of the answers is lower than in English. The transcript shown in the control center is often garbled in Hebrew.
 
-**ההחלטה:** ההוראות למודל והדוגמאות כתובות באנגלית, ובהדגמה מדברים באנגלית. לא נעלנו את השפה, כך שעברית עדיין עובדת.
+**The decision:** the instructions for the model and the examples are written in English, and in the demo we speak English. We did not lock the language, so Hebrew still works.
 
-**מה לא נבדק (שיפור אפשרי):** קביעת שפה (`language: "he"`) למודל התמלול בהגדרות הסשן, והוראה למודל לענות בשפה שבה פנו אליו. שני השינויים קטנים, אבל דורשים בדיקה על הלוח.
-
-</div>
+**What was not tested (a possible improvement):** setting a language (`language: "he"`) for the transcription model in the session configuration, and an instruction to the model to answer in the language it was addressed in. Both changes are small, but they need testing on the board.
