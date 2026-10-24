@@ -1,13 +1,5 @@
 ## Performance measurements
 
-### How we measured
-
-We added measurement points to the firmware (`measurement_utils`). Every question prints a `@@TIMING` line, and every boot prints a `@@BOOT_TIMING` line, with times from `millis()`, sizes, microphone levels and free memory. We saved the log from the control center and ran `tools/measurements_report.py` on it.
-
-Test conditions (15.10.2026): a hotspot from a phone, RSSI at boot between -37 and -45 dBm and a median of -48 during the questions (range -38 to -62), a quiet room, 26 questions and 3 boots. Questions 1-19 were normal speech from about half a meter, 20-22 quiet, 23-24 from far away (about 2 meters), 25 close, 26 a whisper. Push-to-talk mode (3 seconds). All the times in a question are measured from the end of the recording. **The firmware in this measurement is step 29's, before the microphone task of step 30.** The full log: `Documentation/measurements/esp32_log_2026-10-15.txt`.
-
-### Results
-
 ![Response time](../images/response-time.png)
 
 | What | Result |
