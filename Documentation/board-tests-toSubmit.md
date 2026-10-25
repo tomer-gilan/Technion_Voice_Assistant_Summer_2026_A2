@@ -6,14 +6,14 @@ All the tests below were run on the board with the submission firmware, **and th
 
 ## A. What worked before still works
 
-| # | Test | What should happen | Commit tested | Result |
-|---|---|---|---|---|
-| 1 | Normal boot (hotspot on, card inserted) | All the lights green, an opening greeting, boot within about 7-11 seconds as before | All | ✅ |
-| 2 | Test beep and Talk with a question | A clean beep, a recording, an answer heard with no new noises | `I2S: no master clock pin` | ✅ |
-| 3 | 10 questions in a row, some with tools (LED, volume, timer) | Everything as before, `LISTEN #N PASSED` | All | ✅ |
-| 4 | Hands-free: 5 questions by voice, and knocks on the table | Starts on speech, not on knocks, `HANDS-FREE PASSED` | All | ✅ |
-| 5 | The recordings: Play, Download, Delete | Works as before | `Robustness...` | ✅ |
-| 6 | The settings are kept after a Reset | Volume, brightness, Hands-free | | ✅ |
+| #   | Test                                                        | What should happen                                                                  | Commit tested              | Result |
+| --- | ----------------------------------------------------------- | ----------------------------------------------------------------------------------- | -------------------------- | ------ |
+| 1   | Normal boot (hotspot on, card inserted)                     | All the lights green, an opening greeting, boot within about 7-11 seconds as before | All                        | ✅      |
+| 2   | Test beep and Talk with a question                          | A clean beep, a recording, an answer heard with no new noises                       | `I2S: no master clock pin` | ✅      |
+| 3   | 10 questions in a row, some with tools (LED, volume, timer) | Everything as before, `LISTEN #N PASSED`                                            | All                        | ✅      |
+| 4   | Hands-free: 5 questions by voice, and knocks on the table   | Starts on speech, not on knocks, `HANDS-FREE PASSED`                                | All                        | ✅      |
+| 5   | The recordings: Play, Download, Delete                      | Works as before                                                                     | `Robustness...`            | ✅      |
+| 6   | The settings are kept after a Reset                         | Volume, brightness, Hands-free                                                      |                            | ✅      |
 
 ## B. The new changes
 
