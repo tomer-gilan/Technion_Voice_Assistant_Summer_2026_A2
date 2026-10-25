@@ -291,4 +291,4 @@ This is how we added `set_volume`, `get_current_time`, `set_timer`, `get_board_s
 
 ## Memory
 
-Our ESP32-WROOM-32 has no PSRAM. At boot about 215KB are free, and when the session is ready only about 38KB are left, because the encrypted connection and the WebSocket alone take about 51KB. So we do not keep a whole recording in memory but send every 100ms right away, ask OpenAI for an answer in 8kHz mu-law (6 times smaller), and measure the memory after each stage (`@@HEAP`). The details and the numbers are in the in the [measurements section](measurements/latency-vad-analysis.md).
+Our ESP32-WROOM-32 has no PSRAM. At boot about 215KB are free, and when the session is ready only about 38KB are left, because the encrypted connection and the WebSocket alone take about 51KB. So we do not keep a whole recording in memory but send every 100ms right away, ask OpenAI for an answer in 8kHz mu-law (6 times smaller), and measure the memory after each stage (`@@HEAP`). The details and the numbers are in the [measurements section](measurements/latency-vad-analysis.md).

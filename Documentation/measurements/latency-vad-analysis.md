@@ -51,3 +51,17 @@ the experiment consisted of:
 
 **7 tries with background knocking noise, from 1m**: https://drive.google.com/file/d/1ZO0dkavtI3zt9yy6JgWnE4jvzhyE8G6y/view?usp=sharing
 
+#### Results
+
+| Condition | Distance | Background noise | Tries | Successful | Video |
+|---|---|---|---|---|---|
+| Quiet | 30 cm | None | 7 | **7/7** | [link](https://drive.google.com/file/d/15XqPF-qTp5h3Js5RfgU-yO7ZWNuI14x2/view?usp=sharing) |
+| Quiet | 1 m | None | 7 | **7/7** | [link](https://drive.google.com/file/d/1_J4KRvmbBdHWHWzz8-GxnjN1snCDVA2i/view?usp=sharing) |
+| Quiet | 3 m | None | 7 | **7/7** | [link](https://drive.google.com/file/d/1bafFgYCVepoukUZTQFGe9seul2shS6F6/view?usp=sharing) |
+| Noisy | 1 m | Knocking on the table | 7 | **6/7** | [link](https://drive.google.com/file/d/1ZO0dkavtI3zt9yy6JgWnE4jvzhyE8G6y/view?usp=sharing) |
+| **Total** | | | **28** | **27/28 (96%)** | |
+
+A try counts as successful when the detector started recording on its own, ended it when the speaker stopped, and the assistant carried out the command.
+
+**Conclusion:** in a quiet room the detector caught every sentence, even from 3 m. With knocking in the background it missed one try out of 7 - the noise raises the room's background level, so the speech stands out less above it. This matches our assumption in [decisions.md](../development_steps/decisions.md): Hands-free works best in a relatively quiet room, which is why Talk and the BOOT button always stay available.
+
