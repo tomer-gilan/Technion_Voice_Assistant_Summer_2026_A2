@@ -323,9 +323,14 @@ void handleServerMessage(uint8_t* payload, size_t length) {
 }
 
 /** Shows the OpenAI startup check as failed (red in the laptop app):
-    offline, retrying every offlineRetryIntervalMs() - and that OpenAI
-    refused the API key, if that's why. */
+    waiting for Wi-Fi, or offline, retrying every offlineRetryIntervalMs() -
+    and that OpenAI refused the API key, if that's why. */
 void reportOpenAiStageOffline() {
+  if (!esp32va_wifi::isWifiConnected()) {
+    esp32va_status::reportStage(esp32va_status::Stage::kOpenAi, esp32va_status::StageState::kFail,
+                                "waiting for Wi-Fi");
+    return;
+  }
   char stage_detail[kStateDetailBufferSize];
   int refused_http_code = esp32va_openai::lastKeyRefusalHttpCode();
   if (refused_http_code != 0) {
@@ -360,8 +365,11 @@ void onWebSocketEvent(WStype_t type, uint8_t* payload, size_t length) {
       // Distinguishing why matters: mid-turn is a real, visible failure
       // (that LISTEN cycle's reply is lost); idle is expected/benign, most
       // likely the server's own idle timeout.
+      bool wifi_up = esp32va_wifi::isWifiConnected();
       if (is_capturing || awaiting_reply) {
         LOG_ERROR("Disconnected mid-turn (LISTEN #%u lost).\n", listen_cycle);
+      } else if (!wifi_up) {
+        LOG_INFO("Disconnected - reconnecting once Wi-Fi is back.\n");
       } else {
         LOG_INFO("Disconnected (idle) - reconnecting.\n");
         LOG_DEBUG("Disconnected while idle between LISTEN cycles - likely a server idle timeout.\n");
@@ -374,6 +382,13 @@ void onWebSocketEvent(WStype_t type, uint8_t* payload, size_t length) {
       esp32va_audio::resetRingBuffer();  // any partial reply audio is now stale - don't play it
       markReplyFailed("disconnected before a reply arrived");
       session_not_ready_since_ms = millis();
+      if (!wifi_up) {
+        // Not OpenAI's doing, so not counted as a failed attempt - and no
+        // attempt is made until Wi-Fi is back (loop() stops polling the
+        // library; dropDeadSocketOnWifiLoss() reconnects at once then).
+        reportOpenAiStageOffline();
+        break;
+      }
       // A handshake OpenAI refused (HTTP 401/403): the API key - counted,
       // and the saved key may give way to SECRETS.h's (or back).
       int refused_http_code = esp32va_openai::noteDisconnectReason(payload, length, webSocket);

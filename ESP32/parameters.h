@@ -110,15 +110,15 @@ constexpr unsigned long kStalledReplyRecordingTimeoutMs = 20000;
 // ----- Connection -----
 constexpr unsigned long kWifiBootWaitMs = 20000;  // setup() waits this long for Wi-Fi, then goes on without it
 constexpr unsigned long kTimeSyncBootWaitMs = 15000;  // and this long for the clock (NTP)
-// Wi-Fi down this long since the last attempt started: start over on the
-// network (the ESP32 core retries by itself after most failures, but not a
-// failed password) - a slow backstop, well apart from the core's retries.
-constexpr unsigned long kWifiRestartConnectAfterMs = 60000;
+// Wi-Fi down this long on one network counts as one failed attempt toward
+// kWifiAttemptsBeforeFallback (below). Meanwhile the board starts a new
+// connection attempt every few seconds (wifi_utils.cpp).
+constexpr unsigned long kWifiFailedAttemptAfterMs = 60000;
 // The time servers (SNTP) - the clock TLS needs, and the board's local time.
 constexpr char kNtpServer1[] = "pool.ntp.org";
 constexpr char kNtpServer2[] = "time.nist.gov";
 // Failed attempts in a row (the boot wait, then one every
-// kWifiRestartConnectAfterMs) on a Wi-Fi network saved from the control
+// kWifiFailedAttemptAfterMs) on a Wi-Fi network saved from the control
 // center before the board tries SECRETS.h's network instead - and back the
 // same way. In RAM only: the saved network stays in flash for the next boot.
 constexpr uint32_t kWifiAttemptsBeforeFallback = 2;

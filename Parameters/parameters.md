@@ -54,9 +54,9 @@
 | `kReplyTimeoutMs` | 15000 | שקט מהשרת שאחריו שאלה נכשלת, והחיבור ל-OpenAI נסגר ונפתח מחדש |
 | `kStalledReplyRecordingTimeoutMs` | 20000 | הקלטת תשובה ב-SD שהאודיו שלה נעצר ולא הסתיימה נסגרת אחרי הזמן הזה |
 | `kWifiBootWaitMs` / `kTimeSyncBootWaitMs` | 20000 / 15000 | כמה זמן ההדלקה מחכה ל-Wi-Fi ולשעון לפני שממשיכה בלעדיהם |
-| `kWifiRestartConnectAfterMs` | 60000 | אם ה-Wi-Fi לא מתחבר, מתחילים את החיבור מחדש כל דקה |
+| `kWifiFailedAttemptAfterMs` | 60000 | דקה בלי Wi-Fi באותה רשת נספרת כניסיון חיבור כושל אחד (בשביל `kWifiAttemptsBeforeFallback`). בינתיים הלוח מנסה להתחבר שוב כל כמה שניות |
 | `kNtpServer1`, `kNtpServer2` | `pool.ntp.org`, `time.nist.gov` | שרתי השעה (SNTP) |
-| `kWifiAttemptsBeforeFallback` | 2 | כמה ניסיונות חיבור כושלים ברצף לרשת ששמרו ממרכז הבקרה (ההמתנה בהדלקה, ואז ניסיון בדקה) עד שהלוח עובר לרשת מ-`SECRETS.h`, ובחזרה באותו אופן. רק בזיכרון: הרשת השמורה נשארת ב-flash להדלקה הבאה |
+| `kWifiAttemptsBeforeFallback` | 2 | כמה ניסיונות חיבור כושלים ברצף לרשת ששמרו ממרכז הבקרה (ההמתנה בהדלקה, ואז כל דקה בלי חיבור) עד שהלוח עובר לרשת מ-`SECRETS.h`, ובחזרה באותו אופן. רק בזיכרון: הרשת השמורה נשארת ב-flash להדלקה הבאה |
 | `kOpenAiKeyRefusalsBeforeFallback` | 2 | אותו דבר למפתח ה-API ששמרו ממרכז הבקרה: כמה פעמים ברצף OpenAI דוחים אותו (HTTP 401 או 403 בפתיחת החיבור) עד שהלוח עובר למפתח מ-`SECRETS.h`, ובחזרה באותו אופן. רק בזיכרון: המפתח השמור נשאר ב-flash. הניסיונות ממשיכים בקצב הרגיל (1, 2, 4... שניות, ואז כל 30 שניות) |
 | `kOpenAiAttemptsBeforeOffline` | 5 | ניסיונות חיבור ברצף עד מצב offline |
 | `kInitialReconnectBackoffMs` | 1000 | ההמתנה לפני הניסיון הראשון להתחבר מחדש ל-OpenAI (מוכפלת בכל ניסיון: 1, 2, 4, 8 שניות) |
@@ -95,6 +95,7 @@
 | `kMaxLabelLength` | `clock_timer_utils.cpp` | 48 | אורך מקסימלי לתיאור של תזכורת ("check the oven") |
 | `kTimePrefixChancePercent` | `greeting_utils.cpp` | 20 | הסיכוי שהברכה בהדלקה תתחיל ב-"Good morning/afternoon/evening" |
 | `kSignalReportIntervalMs`, `kStillWaitingReportMs` | `wifi_utils.cpp` | 10000, 15000 | כל כמה זמן מדווחים את עוצמת ה-Wi-Fi, ו"עדיין מחכה" בזמן התחברות |
+| `kRetryIntervalMs`, `kAttemptTimeoutMs` | `wifi_utils.cpp` | 5000, 15000 | כשה-Wi-Fi למטה הלוח מתחיל ניסיון חיבור חדש בעצמו (החיבור מחדש האוטומטי של ליבת ה-ESP32 כבוי): 5 שניות אחרי שהניסיון הקודם התחיל, אם הוא נכשל, או אחרי 15 שניות בלי תוצאה |
 | `kMaxSsidLength`, `kMinPasswordLength`, `kMaxPasswordLength` | `wifi_utils.h` | 32, 8, 64 | גבולות שם רשת ה-Wi-Fi והסיסמה, בבתים (מגבלות 802.11 ו-WPA2). הלוח שולח אותם למרכז הבקרה בשורת `@@LIMITS`, יחד עם שאר הגבולות שהדף בודק |
 | `kMinApiKeyLength`, `kMaxApiKeyLength` | `openai_realtime_utils.h` | 20, 200 | גבולות האורך של מפתח API שאפשר לשמור ממרכז הבקרה (מפתח `sk-proj-` הוא 164 תווים). גם הם נשלחים ב-`@@LIMITS`. מפתח ארוך יותר ב-`SECRETS.h` עוצר את הקומפילציה עם הסבר |
 | `kWifiReturnFastRetryMs` | `ESP32.ino` | 10000 | כשה-Wi-Fi חוזר, או כששומרים מפתח API חדש, מנסים להתחבר ל-OpenAI כל שנייה במשך 10 שניות, ואז חוזרים לקצב ה-offline |

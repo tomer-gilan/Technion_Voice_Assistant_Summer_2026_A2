@@ -33,8 +33,8 @@ constexpr size_t kMaxPasswordLength = 64;
 
 /** Starts connecting to the network in use and waits up to wait_ms for it,
     printing progress. Returns true once connected; false if it isn't yet -
-    the ESP32 keeps trying in the background, and monitorWifiConnection()
-    takes it from there. Call once from setup(). */
+    monitorWifiConnection() keeps trying from there. Call once from
+    setup(). */
 bool connectToWifi(unsigned long wait_ms);
 
 /** Starts SNTP (once) and waits up to wait_ms for a plausible clock, which
@@ -42,7 +42,9 @@ bool connectToWifi(unsigned long wait_ms);
     false if not yet (monitorWifiConnection() reports it when it is). */
 bool syncSystemTime(unsigned long wait_ms);
 
-/** True while Wi-Fi is connected. */
+/** True while Wi-Fi is connected: it has an IP, and the ESP32 reported no
+    disconnect since - WiFi.status() alone can still say connected after
+    one (wifi_utils.cpp). */
 bool isWifiConnected();
 
 /** True once the clock has been set by SNTP (it then stays set). */
@@ -63,10 +65,10 @@ void announceWifiNetwork();
 bool handleWifiCommand(const char* command, const char* raw_line);
 
 /** Call every loop() pass: reports the signal strength every 10 s and a
-    lost / regained connection as a @@STAGE wifi line, starts over on the
-    network if it has been down for a while (the ESP32's own reconnect
-    gives up on some errors), and starts / reports the time sync once
-    connected if setup() couldn't. */
+    lost / regained connection as a @@STAGE wifi line, starts a new
+    connection attempt every few seconds while Wi-Fi is down (the ESP32
+    core's own reconnect is off - it stopped retrying on the board), and
+    starts / reports the time sync once connected if setup() couldn't. */
 void monitorWifiConnection();
 
 }  // namespace esp32va_wifi

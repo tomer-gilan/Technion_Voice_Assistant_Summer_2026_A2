@@ -223,15 +223,21 @@ bool isAssistantOffline() {
 /** When Wi-Fi goes down (or the network is switched), the open socket to
     OpenAI is dead, but the library only notices on its next failed send.
     Closing it right away runs the usual disconnect path: a LISTEN in
-    progress fails, the state shows reconnecting / offline, and the
-    connection is retried once Wi-Fi is back. When Wi-Fi comes back (or a
-    new network connects), the reconnect backoff starts over, so OpenAI is
-    retried at once instead of after the offline pace's ~30 s. */
+    progress fails, the state shows offline, and the connection is retried
+    once Wi-Fi is back - not before (loop() stops polling the library
+    meanwhile). Closing also clears away a connection attempt that has just
+    failed: the library reports one only on its next pass, which would come
+    once Wi-Fi is back - and count as a failed attempt there. When Wi-Fi
+    comes back (or a new network connects), the reconnect backoff starts
+    over, so OpenAI is retried at once instead of after the offline pace's
+    ~30 s. */
 void dropDeadSocketOnWifiLoss() {
   bool wifi_up = esp32va_wifi::isWifiConnected();
-  if (wifi_was_up && !wifi_up && webSocket.isConnected()) {
-    LOG_INFO("Wi-Fi is down - closing the OpenAI connection, it can't be alive.\n");
-    webSocket.disconnect();
+  if (wifi_was_up && !wifi_up && openai_connection_started) {
+    if (webSocket.isConnected()) {
+      LOG_INFO("Wi-Fi is down - closing the OpenAI connection, it can't be alive.\n");
+    }
+    webSocket.disconnect();  // with nothing open, only clears away a failed attempt
   }
   if (!wifi_was_up && wifi_up && openai_connection_started && !webSocket.isConnected()) {
     LOG_INFO("Wi-Fi is back - reconnecting to OpenAI now.\n");
@@ -282,12 +288,13 @@ void updatePipelineState() {
     offline_announced = true;
     esp32va_controls::requestStatusSound(esp32va_controls::StatusSound::kOffline);
     if (openai_connection_started) {
-      // A failed connect raises no disconnect event, so the backoff in
-      // registerDisconnect() may never have reached the offline pace - set
-      // it here, so a dead network isn't retried (and loop() held up by a
-      // connect attempt) every second.
+      // Offline can come before registerDisconnect() has counted enough
+      // failed attempts to reach the offline pace: the session down longer
+      // than the offline interval, each attempt holding loop() up for
+      // seconds. Set it here, so a dead network isn't retried (and loop()
+      // held up by a connect attempt) every few seconds.
       webSocket.setReconnectInterval(esp32va_openai::addJitter(esp32va_openai::offlineRetryIntervalMs()));
-      // For the same reason the OpenAI check may still say "connecting" -
+      // For the same reason the OpenAI check may still say "reconnecting" -
       // with Wi-Fi up but no internet it must turn red, like any offline.
       reportOpenAiStageOffline();
     }
@@ -307,6 +314,15 @@ void updatePipelineState() {
   if (session_ready) {
     wifi_return_fast_retry = false;
   }
+  // Speech is over once nothing is left to play and either the server said
+  // the response is done or no LISTEN is waiting on it (the opening greeting,
+  // or a cycle that already failed). Before the offline / reconnecting
+  // states below: a connection lost mid-reply empties the ring and fails
+  // the LISTEN, and the speech must end with it - else the board stays busy
+  // for the whole outage (a due timer doesn't ring, no offline sound).
+  if (speech_in_progress && esp32va_audio::ringUsedBytes() == 0 && (response_fully_received || !awaiting_reply)) {
+    speech_in_progress = false;
+  }
   if (!session_ready) {
     if (setup_finished && !esp32va_wifi::isWifiConnected()) {
       esp32va_status::reportPipelineState(PipelineState::kOffline, "no Wi-Fi");
@@ -323,17 +339,16 @@ void updatePipelineState() {
       esp32va_status::reportPipelineState(PipelineState::kBooting, nullptr);
       return;
     }
+    if (esp32va_openai::reconnectAttemptCount() == 0) {
+      // Wi-Fi just came back (or a new API key): no attempt has failed yet.
+      esp32va_status::reportPipelineState(PipelineState::kReconnecting, nullptr);
+      return;
+    }
     char reconnect_detail[kStateDetailBufferSize];
     snprintf(reconnect_detail, sizeof(reconnect_detail), "attempt %u of %u",
              (unsigned)esp32va_openai::reconnectAttemptCount(), (unsigned)esp32va_openai::attemptsBeforeOffline());
     esp32va_status::reportPipelineState(PipelineState::kReconnecting, reconnect_detail);
     return;
-  }
-  // Speech is over once nothing is left to play and either the server said
-  // the response is done or no LISTEN is waiting on it (the opening greeting,
-  // or a cycle that already failed).
-  if (speech_in_progress && esp32va_audio::ringUsedBytes() == 0 && (response_fully_received || !awaiting_reply)) {
-    speech_in_progress = false;
   }
   if (function_call_turn_pending) {
     esp32va_status::reportPipelineState(PipelineState::kTool, active_tool_name);

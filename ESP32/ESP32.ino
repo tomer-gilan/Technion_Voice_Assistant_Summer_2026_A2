@@ -347,7 +347,8 @@ void setup() {
 }
 
 /** Services the WebSocket connection (unless paused for backpressure - see
-    i2s_audio_utils.h's esp32va_audio::ringShouldPauseReads()), sends session.update once
+    i2s_audio_utils.h's esp32va_audio::ringShouldPauseReads() - or Wi-Fi is
+    down), sends session.update once
     flagged ready, sends the one-time opening greeting once flagged ready,
     watches for a typed command, moves a capture along (its events, its
     chunks, its commit), drains playback audio to the speaker, saves reply
@@ -382,7 +383,11 @@ void loop() {
     }
     ws_reads_paused_for_backpressure = should_pause;
   }
-  if (!ws_reads_paused_for_backpressure) {
+  // Not while Wi-Fi is down: the library would keep trying to reconnect to
+  // OpenAI, and every try that fails raises a disconnect event - counted as
+  // one more failed attempt. dropDeadSocketOnWifiLoss() closes the socket
+  // when Wi-Fi goes, and reconnects at once when it's back.
+  if (!ws_reads_paused_for_backpressure && esp32va_wifi::isWifiConnected()) {
     webSocket.loop();
   }
 
@@ -394,6 +399,16 @@ void loop() {
 
   if (should_send_opening_greeting) {
     should_send_opening_greeting = false;
+    if (offline_announced) {
+      // Booted offline: the "back online" sound goes before the greeting -
+      // updatePipelineState() would only ask for it after this, and it would
+      // wait for the greeting to end.
+      offline_announced = false;
+      esp32va_controls::requestStatusSound(esp32va_controls::StatusSound::kOnline);
+      esp32va_hands_free::holdOff();  // as below: the mic mustn't take it for speech
+      esp32va_controls::playPendingStatusSound();
+      esp32va_hands_free::holdOff();
+    }
     esp32va_greeting::sendOpeningGreeting(webSocket);
     noteResponseRequested();  // hands-free waits for the greeting to be heard
   }

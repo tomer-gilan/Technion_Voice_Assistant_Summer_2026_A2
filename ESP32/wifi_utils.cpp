@@ -17,12 +17,14 @@ namespace esp32va_wifi {
 namespace {
 constexpr unsigned long kStillWaitingReportMs = 15000;
 constexpr unsigned long kSignalReportIntervalMs = 10000;
-// Down this long since the last attempt started: start over on the network
-// (WiFi.begin again). The ESP32 core retries by itself after most failures
-// (network not found, beacon or handshake timeouts) but not after a failed
-// authentication - so this is only a slow backstop, well apart from the
-// core's own retries.
-constexpr unsigned long kRestartConnectAfterMs = esp32va_params::kWifiRestartConnectAfterMs;
+// While Wi-Fi is down the board starts each new attempt itself (see
+// retryConnectingIfDue()): this long after the last one started, once it
+// failed - or once it has gone on this long with no outcome at all.
+constexpr unsigned long kRetryIntervalMs = 5000;
+constexpr unsigned long kAttemptTimeoutMs = 15000;
+// Down this long on the active network: one failed attempt toward the
+// fallback to the other network (noteFailedAttempt()).
+constexpr unsigned long kFailedAttemptAfterMs = esp32va_params::kWifiFailedAttemptAfterMs;
 constexpr size_t kStageDetailBufferSize = 64;
 constexpr time_t kPlausibleEpochSeconds = 8 * 3600 * 2;  // still near 1970 means not synced yet
 const char kSsidSettingKey[] = "wifi_ssid";
@@ -36,6 +38,14 @@ bool pending_ssid_set = false;
 
 unsigned long last_signal_report_ms = 0;
 unsigned long last_connect_start_ms = 0;
+unsigned long down_on_network_since_ms = 0;  // toward the next noteFailedAttempt()
+// From onWifiEvent(), on the core's event task. WiFi.status() alone isn't
+// trusted: core 2.0.17 leaves it at WL_CONNECTED after a disconnect for
+// reason AUTH_EXPIRE - on the board, Wi-Fi looked connected for 2 minutes
+// after the hotspot was gone, until the core's IP-lost timer changed it.
+volatile bool link_up = false;                // got an IP, and no disconnect since
+volatile bool attempt_failed = false;         // the attempt under way ended without connecting
+volatile uint8_t last_disconnect_reason = 0;  // the ESP-IDF reason code, for the log
 bool wifi_was_connected = false;
 bool time_sync_started = false;
 bool time_synced = false;
@@ -68,15 +78,65 @@ void loadActiveNetwork() {
   }
 }
 
-/** Starts connecting to the active network - dropping the current attempt
-    first when restarting. */
-void startConnecting(bool restart) {
-  WiFi.mode(WIFI_STA);
-  if (restart) {
-    WiFi.disconnect();
+/** Keeps link_up and attempt_failed from the core's Wi-Fi events - on its
+    event task, so flag writes only. ASSOC_LEAVE is the board's own doing
+    (startConnecting() drops the attempt under way): it doesn't end the new
+    attempt. */
+void onWifiEvent(arduino_event_id_t event, arduino_event_info_t info) {
+  switch (event) {
+    case ARDUINO_EVENT_WIFI_STA_GOT_IP:
+      link_up = true;
+      break;
+    case ARDUINO_EVENT_WIFI_STA_DISCONNECTED:
+      link_up = false;
+      last_disconnect_reason = info.wifi_sta_disconnected.reason;
+      if (info.wifi_sta_disconnected.reason != WIFI_REASON_ASSOC_LEAVE) {
+        attempt_failed = true;
+      }
+      break;
+    case ARDUINO_EVENT_WIFI_STA_LOST_IP:
+    case ARDUINO_EVENT_WIFI_STA_STOP:
+      link_up = false;
+      break;
+    default:
+      break;
   }
-  WiFi.begin(active_ssid, active_password[0] != '\0' ? active_password : nullptr);
+}
+
+/** Sets the active network up for the next attempt: begin() without its
+    own connect, which does nothing while WiFi.status() still says
+    WL_CONNECTED (see link_up). */
+void configureActiveNetwork() {
+  WiFi.mode(WIFI_STA);
+  WiFi.begin(active_ssid, active_password[0] != '\0' ? active_password : nullptr, 0, nullptr, false);
+}
+
+/** Starts an attempt on the configured network, dropping the one under way
+    (reconnect() always connects, whatever WiFi.status() says). */
+void startConnecting() {
+  link_up = false;
+  attempt_failed = false;
+  if (!WiFi.reconnect()) {
+    LOG_ERROR("Couldn't start connecting to Wi-Fi \"%s\" - trying again shortly.\n", active_ssid);
+    attempt_failed = true;
+  }
   last_connect_start_ms = millis();
+}
+
+/** While Wi-Fi is down: starts the next attempt once the last one failed
+    and kRetryIntervalMs has passed since it started, or once it has gone on
+    for kAttemptTimeoutMs with no outcome. The board does this itself, with
+    the core's auto-reconnect off: on the board, the core's retries stopped
+    (or never started) while the hotspot was off, and nothing reconnected
+    until the next restart up to a minute later. */
+void retryConnectingIfDue() {
+  unsigned long attempt_ms = millis() - last_connect_start_ms;
+  if (attempt_ms < kRetryIntervalMs || (!attempt_failed && attempt_ms < kAttemptTimeoutMs)) {
+    return;
+  }
+  LOG_DEBUG("Wi-Fi still down (last disconnect reason %u) - trying \"%s\" again.\n",
+            (unsigned)last_disconnect_reason, active_ssid);
+  startConnecting();
 }
 
 /** Reports "connecting to <ssid>" as the Wi-Fi stage. */
@@ -166,8 +226,10 @@ void switchNetwork() {
   Serial.printf("Connecting to Wi-Fi \"%s\"...\n", active_ssid);
   wifi_was_connected = false;
   failed_attempts_in_a_row = 0;
+  down_on_network_since_ms = millis();
   reportConnecting();
-  startConnecting(true);
+  configureActiveNetwork();
+  startConnecting();
 }
 
 /** Counts a connection attempt on the active network that ran out of time.
@@ -202,15 +264,19 @@ bool connectToWifi(unsigned long wait_ms) {
   // Progress is printed directly (not via LOG_INFO) so it stays visible at
   // LOG_LEVEL_ERROR - otherwise a Wi-Fi that never connects looks like an
   // endless line of dots with no explanation.
+  WiFi.onEvent(onWifiEvent);
+  WiFi.setAutoReconnect(false);  // the board retries by itself - see retryConnectingIfDue()
   loadActiveNetwork();
   announceWifiNetwork();
   Serial.printf("Connecting to Wi-Fi \"%s\"...\n", active_ssid);
   reportConnecting();
-  startConnecting(false);
+  down_on_network_since_ms = millis();
+  configureActiveNetwork();
+  startConnecting();
 
   unsigned long started_ms = millis();
   unsigned long last_report_ms = started_ms;
-  while (WiFi.status() != WL_CONNECTED) {
+  while (!isWifiConnected()) {
     if (millis() - started_ms >= wait_ms) {
       Serial.println();
       wl_status_t status = WiFi.status();
@@ -221,11 +287,13 @@ bool connectToWifi(unsigned long wait_ms) {
       char stage_detail[kStageDetailBufferSize];
       snprintf(stage_detail, sizeof(stage_detail), "%s - still trying", notConnectedReason(status));
       esp32va_status::reportStage(esp32va_status::Stage::kWifi, esp32va_status::StageState::kFail, stage_detail);
+      down_on_network_since_ms = millis();  // the boot wait counts as the first failed attempt
       noteFailedAttempt();
       return false;
     }
     delay(300);
     Serial.print(".");  // raw progress indicator, not a log message - always visible
+    retryConnectingIfDue();
     if (millis() - last_report_ms >= kStillWaitingReportMs) {
       last_report_ms = millis();
       wl_status_t status = WiFi.status();
@@ -263,7 +331,7 @@ bool syncSystemTime(unsigned long wait_ms) {
 }
 
 bool isWifiConnected() {
-  return WiFi.status() == WL_CONNECTED;
+  return link_up && WiFi.status() == WL_CONNECTED;
 }
 
 bool isTimeSynced() {
@@ -271,7 +339,7 @@ bool isTimeSynced() {
 }
 
 void reportWifiSignal() {
-  if (WiFi.status() != WL_CONNECTED) {
+  if (!isWifiConnected()) {
     return;
   }
   esp32va_status::printProtocolLine("@@WIFI %d", (int)WiFi.RSSI());
@@ -339,7 +407,7 @@ bool handleWifiCommand(const char* command, const char* raw_line) {
 }
 
 void monitorWifiConnection() {
-  bool connected = WiFi.status() == WL_CONNECTED;
+  bool connected = isWifiConnected();
   if (connected != wifi_was_connected) {
     if (connected) {
       LOG_INFO("Wi-Fi is back. IP address: %s\n", WiFi.localIP().toString().c_str());
@@ -347,18 +415,23 @@ void monitorWifiConnection() {
       reportConnected();
     } else {
       wifi_was_connected = false;
-      last_connect_start_ms = millis();  // the ESP32 starts reconnecting by itself now
-      LOG_ERROR("Wi-Fi connection lost - reconnecting.\n");
+      down_on_network_since_ms = millis();
+      LOG_ERROR("Wi-Fi connection lost (reason %u) - reconnecting.\n", (unsigned)last_disconnect_reason);
       esp32va_status::reportStage(esp32va_status::Stage::kWifi, esp32va_status::StageState::kFail,
                                   "connection lost - reconnecting");
     }
   }
-  if (!connected && millis() - last_connect_start_ms >= kRestartConnectAfterMs && !noteFailedAttempt()) {
-    LOG_INFO("Wi-Fi still down %lu s after the last attempt - starting over on \"%s\".\n", kRestartConnectAfterMs / 1000,
-             active_ssid);
-    startConnecting(true);
-    esp32va_status::reportStage(esp32va_status::Stage::kWifi, esp32va_status::StageState::kFail,
-                                notConnectedReason(WiFi.status()));
+  if (!connected && millis() - down_on_network_since_ms >= kFailedAttemptAfterMs) {
+    down_on_network_since_ms = millis();
+    if (!noteFailedAttempt()) {
+      LOG_INFO("Wi-Fi still down after %lu s on \"%s\" - still trying.\n", kFailedAttemptAfterMs / 1000,
+               active_ssid);
+      esp32va_status::reportStage(esp32va_status::Stage::kWifi, esp32va_status::StageState::kFail,
+                                  notConnectedReason(WiFi.status()));
+    }
+  }
+  if (!connected) {
+    retryConnectingIfDue();
   }
   if (connected && !time_synced) {
     startTimeSync();

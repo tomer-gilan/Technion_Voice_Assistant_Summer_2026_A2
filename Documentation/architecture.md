@@ -106,7 +106,7 @@ The `loop()` function runs all the time and does not get stuck at any stage, exc
 4. Checks whether the playback has finished, and whether too much time has passed without an answer.
 5. Lets Hands-free decide whether to start recording, and the timer whether to ring.
 6. Checks the BOOT button (if turned on) and plays a pending status sound (if turned on), only when the board is quiet.
-7. Keeps the Wi-Fi up (and starts over if it is down a minute after the last attempt), and opens the connection to OpenAI as soon as there is a network and a clock. When the Wi-Fi comes back after an outage (or the network was changed), the wait between attempts resets and OpenAI reconnects within seconds (about 1-3), without waiting the 30 seconds of offline mode. If it still does not answer after 10 seconds, it goes back to retrying every 30 seconds. During this time the OpenAI light is orange (`Wi-Fi is back - reconnecting`), and red when the board is offline (`offline - retrying every 30 s`).
+7. Keeps the Wi-Fi up (a new connection attempt every few seconds while it is down - the board does this itself, not the ESP32 core), and opens the connection to OpenAI as soon as there is a network and a clock. When the Wi-Fi comes back after an outage (or the network was changed), the wait between attempts resets and OpenAI reconnects within seconds (about 1-3), without waiting the 30 seconds of offline mode. If it still does not answer after 10 seconds, it goes back to retrying every 30 seconds. During this time the OpenAI light is orange (`Wi-Fi is back - reconnecting`), and red when the board is offline (`offline - retrying every 30 s`).
 8. Computes the assistant's state and reports it to the control center if it changed, and prints `@@ALIVE` every 5 seconds.
 
 `setup()` does not wait forever for anything: Wi-Fi up to 20 seconds, the clock up to 15. Without them the board continues in offline mode, and the commands, the timer and the controls work.
@@ -153,7 +153,7 @@ stateDiagram-v2
 | `speaking` | Playing the answer. The details are `greeting`, `timer` or `typed` when it answers without a recording, also between the request for such an answer and the start of its audio. During this time Talk is rejected |
 | `saving` | Finishing saving the answer to the SD card |
 | `reconnecting` | The connection to OpenAI dropped and it is reconnecting |
-| `offline` | No Wi-Fi or no OpenAI (also when there is Wi-Fi without internet, and then the OpenAI light is red). It keeps retrying every 30 seconds, and immediately when the Wi-Fi comes back (every second for 10 seconds); the timer and the controls work. The details say `no Wi-Fi` or `OpenAI unreachable` |
+| `offline` | No Wi-Fi or no OpenAI (also when there is Wi-Fi without internet, and then the OpenAI light is red). It keeps retrying every 30 seconds; with no Wi-Fi it does not try OpenAI at all, and reconnects immediately when the Wi-Fi comes back (every second for 10 seconds); the timer and the controls work. The details say `no Wi-Fi` or `OpenAI unreachable` |
 | `halted` | Stopped: the microphone task did not start (out of memory at boot). The only state that requires a Reset |
 
 ### How the state is computed (the state machine)
