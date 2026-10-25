@@ -1,281 +1,124 @@
-<div dir="rtl">
-
 # Voice Assistant on ESP32
-**Project by:** Solomon Mekhiln, Tomer Gilan, Itamar Cohen
+**Project by:** Solomon Makhlin, Tomer Gilan, Itamar Cohen
 
-פרויקט בקורס IoT ‏(236333), טכניון, סמסטר קיץ 2026, קבוצה A2.
+A project in the IoT course (236333), Technion, Summer semester 2026, group A2.
 
-## על הפרויקט
+## About the project
 
-בנינו עוזר קולי קטן על ESP32. מדברים איתו, הוא עונה בקול, והוא שולט בלוח: מדליק, מכבה ומעמעם את ה-LED, משנה את עוצמת הרמקול, מפעיל טיימר ותזכורת, אומר מה השעה, ואומר איזה חלק של היום עכשיו לפי חיישן אור (הערך מדומה ממרכז הבקרה).
+We built a small voice assistant on an ESP32. You talk to it, it answers out loud, and it controls the board: it turns the LED on and off and can dim it, changes the speaker volume, runs a timer and a reminder, tells the time, and says what part of the day it is according to a light sensor (the value is simulated from the control center).
 
-הבנת הדיבור קורית בענן (OpenAI Realtime API). ה-ESP32 מקליט מהמיקרופון, מזרים את הקול ב-Wi-Fi, מנגן את התשובה, ומבצע את הפקודות. גלאי הקול (Hands-free), הטיימר, השעון, ההקלטות וההגדרות רצים על הבקר עצמו. מרכז בקרה בדפדפן (דרך כבל USB) מראה מה הלוח עושה ומאפשר לשנות כל הגדרה בלי לקמפל.
+Speech understanding happens in the cloud (OpenAI Realtime API). The ESP32 records from the microphone, streams the voice over Wi-Fi, plays the answer, and carries out the commands. The voice detector (Hands-free), the timer, the clock, the recordings and the settings run on the microcontroller itself. A control center in the browser (over a USB cable) shows what the board is doing and lets you change every setting without compiling.
 
-![מרכז הבקרה באמצע שיחה](Documentation/images/control-center.png)
+![The control center in the middle of a conversation](Documentation/images/control-center.png)
 
-<sub>מרכז הבקרה. הצילום נוצר משורות סטטוס של הלוח שהזנו לדף, עם משפטים מהלוגים שלנו.</sub>
+<sub>The control center. The screenshot was made from board status lines that we fed into the page, with sentences from our logs.</sub>
 
-## מה המערכת יודעת לעשות
+## What the system can do
 
-- **שיחה בלחיצה:** Talk במרכז הבקרה, רווח, או **כפתור BOOT על הלוח** (אופציה). מדברים 3 שניות.
-- **Hands-free:** בלי כפתור. גלאי קול (VAD) על ה-ESP32 מתחיל להקליט כשמתחילים לדבר ועוצר כשמפסיקים, ולא נדלק מדפיקות, מחיאות כפיים וצעדים. מדליקים ומכבים אותו במתג או בקול (`Switch to hands-free mode`, `Go back to the button`), רק בבקשה מפורשת. בזמן שמרכז הבקרה מנגן הקלטה מה-SD המיקרופון לא מקשיב, כדי שההקלטה לא תיחשב לשאלה.
-- **שליטה בלוח בקול:** `Turn on the light`, `Dim the light to 30 percent`, `Set the volume to 30 percent`, `A bit louder`.
-- **טיימר, תזכורת ושעון:** `Set a timer for 30 seconds`, `Remind me in 30 seconds to check the oven`, `Turn off the light in 20 seconds`, `What time is it?`.
-- **חלק היום:** `Is it day or night?` נענית לפי חיישן האור (ערך מדומה ממרכז הבקרה).
-- **מצב הלוח:** `How are you doing?`: עוצמת ה-Wi-Fi, כמה זמן הוא דלוק וכמה זיכרון פנוי.
-- **זיכרון שיחה:** זוכר מה נאמר קודם, למשל את השם שלך.
-- **אנגלית ועברית:** הכי טוב באנגלית. בעברית הוא מבין ועונה, אבל באיכות נמוכה יותר, והתמלול במסך משתבש לעתים.
-- **עובד גם בלי המחשב:** Hands-free, כפתור BOOT וצלילי מצב נשמרים בלוח, ו-power bank מספיק (מחברים אותו רק אחרי שמנתקים את ה-USB מהמחשב).
-- **רובסטיות:** בלי Wi-Fi או בלי OpenAI (גם כש-Wi-Fi דלוק בלי אינטרנט) הלוח עובר למצב **Offline**, נורית OpenAI אדומה, וממשיך לנסות כל 30 שניות (הטיימר והפקדים עובדים). כש-Wi-Fi או ה-hotspot חוזרים, או שעוברים רשת, החיבור ל-OpenAI נפתח מחדש תוך שניות, ואם הוא עדיין לא עונה אחרי 10 שניות הלוח חוזר לנסות כל 30 שניות. חיבור "תקוע" מתגלה לבד: פעימת לב (ping כל 15 שניות), ושרת ששותק 15 שניות בזמן שאלה נסגר ונפתח מחדש (השיחה מתחילה מחדש). רשת שנשמרה ממרכז הבקרה ונכשלת פעמיים ברצף (למשל סיסמה שגויה) מוחלפת זמנית ברשת מ-`SECRETS.h`, ומפתח API שנשמר ו-OpenAI דוחים פעמיים ברצף מוחלף זמנית במפתח מ-`SECRETS.h` (הנורית אומרת `API key refused`). בלי כרטיס SD הוא עובד בלי הקלטות. את רשת ה-Wi-Fi ואת מפתח ה-API מחליפים ממרכז הבקרה, בלי קימפול. הפירוט ב-[מקרי הקצה](Documentation/edge-cases.md) וב[רשימה המורחבת](Documentation/edge-cases-extended.md).
-- **מרכז בקרה בדפדפן:** נורות תקינות לכל רכיב ו-Self-test, השיחה כבועות עם זמן תגובה, כל ההגדרות (נשמרות ב-flash), סטטיסטיקה וגרף זמני תגובה עם ייצוא CSV (עם תאריך ומספר הפעלה של הלוח), ההקלטות מה-SD עם נגן ו-waveform, שאלה בכתב לחדר רועש, ו-Replay של לוג שמור (עובד בלי לוח, גם על לוגים של `tools/serial_logger.ps1`, ולא מתערבב בסטטיסטיקה החיה ובלוג השמור).
+- **Push to talk:** Talk button in the control center, the space bar, or the **BOOT button on the board** - You speak for 3 seconds.
+- **Hands-free:** no button. A voice activity detector (VAD) on the ESP32 starts recording when you start speaking and stops when you stop, and is not set off by non speech voices like knocks, claps or footsteps. You turn it on and off with a switch in the Web control center or by a voice command (`Switch to hands-free mode`, `Go back to the button`).
+- **Controlling the board by voice:** `Turn on the light`, `Dim the light to 30 percent`, `Set the volume to 30 percent`, `A bit louder`.
+- **Timer, reminder and clock:** `Set a timer for 30 seconds`, `Remind me in 30 seconds to check the oven`, `Turn off the light in 20 seconds`, `What time is it?`.
+- **Part of the day:** `Is it day or night?` is answered according to the light sensor (a value simulated from the control center).
+- **Conversation memory:** it remembers what was said earlier, for example your name.
+- **English and Hebrew:** Supports multiple languages but the best accuracy by far is in English.
+- **Works without the computer too:** The Web control center is there just to display all the information in a GUI and allow additional configurations (such as setting the WiFi and openai API key configurations, playing back up to 5 recording of your voice commands or the API's replies, etc).
+- **Robustness:** Integrates automatic recovery mechanism - for example, if the WiFi or openai API connections stop, it will try and reconnect both of them automatically and notify the user upon success or failure using rising and falling beep sounds.
+- **Control center in the browser:** health lights for each component and a Self-test, the conversation as bubbles with response times, all the settings (saved in flash on the ESP32 iteslf), statistics and a response-time graph with CSV export (with the date and the board's boot number), the recordings from the SD card with a player and a waveform, a typed question for a noisy room, and a display of raw serial logs including the ability to save them for debugging.
 
-![ארבע פקודות קוליות במרכז הבקרה](Documentation/images/demo.gif)
+![Four voice commands in the control center](Documentation/images/demo.gif)
 
-## תיקיות הריפו
+## Repository folders
 
-| תיקייה | מה יש בה |
+| Folder | What is in it |
 |---|---|
-| `ESP32/` | הקושחה: `ESP32.ino` (הדגלים, `setup()` ו-`loop()`) והלשוניות שלו: `state_machine.ino` (מכונת המצבים), `listen_turn.ino`, `server_events.ino`, `serial_commands.ino` ו-`verdicts.ino`, המודולים `*_utils.cpp/.h`, `parameters.h` (כל הפרמטרים הקבועים), ו-`SECRETS.example.h` (תבנית לסודות) |
-| `control_center/` | מרכז הבקרה: `control_center.html` ו-`control_center.js` (שני הקבצים חייבים להישאר באותה תיקייה), שרץ ב-Chrome או Edge |
-| `Unit Tests/` | בדיקות יחידה לכל רכיב חומרה (רמקול, מיקרופון, Wi-Fi, SD, LED, כפתור, ו-LDR לכשיחובר) ו[הדוח שלהן](Unit%20Tests/README.md) |
-| `Parameters/` | [רשימת כל הפרמטרים](Parameters/parameters.md): מה משנים ממרכז הבקרה, מה ב-`parameters.h`, ומה ב-`SECRETS.h` |
-| `Documentation/` | כל התיעוד (רשימה למטה), תמונות, הלוג של המדידות, ו-`development_steps/` עם כל השלבים שבנינו בדרך |
-| `tools/` | כלים במחשב: סיכום מדידות מלוג, בדיקת גלאי הקול על קבצי WAV, לוגר ל-Serial, ואבחון של ה-API |
+| `ESP32/` | The firmware: `ESP32.ino` (the flags, `setup()` and `loop()`) and its tabs: `state_machine.ino` (the state machine), `listen_turn.ino`, `server_events.ino`, `serial_commands.ino` and `verdicts.ino`, the `*_utils.cpp/.h` modules, `parameters.h` (all the fixed parameters), and `SECRETS.example.h` (a template for the secrets) |
+| `control_center/` | The control center web GUI: `control_center.html` and `control_center.js` (the two files must stay in the same folder), which runs in Chrome or Edge |
+| `Unit Tests/` | Unit tests for each hardware component (speaker, microphone, Wi-Fi, SD, LED, button, and the LDR once it is connected) and [their report](Unit%20Tests/README.md) |
+| `Parameters/` | [The list of all the parameters](Parameters/parameters.md): what is changed from the control center, what is in `parameters.h`, and what is in `SECRETS.h` |
+| `Documentation/` | All the documentation (list below), images, the measurement log, and `development_steps/` with all the steps we built along the way |
+| `tools/` | Tools for the computer: a measurement summary from a log, a test of the voice detector on WAV files, a Serial logger, and an API diagnostic |
 
-### התיעוד
+### The documentation
 
-| מסמך | מה בו |
+| Document                                                                                                                           | What is in it                                                                                                                                |
+| ---------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
+| [Quick start guide](Documentation/quick-start.md)                                                                                  | One page: how to start it and what to try                                                                                                    |
+| [System states and error messages](Documentation/system-states-and-errors.md)                                                      | What each state and each light means, and what to do                                                                                         |
+| [Calibration instructions](Documentation/calibration.md)                                                                           | The light sensor, the Hands-free sensitivity, the microphone level                                                                           |
+| [How the code is built and system's architecture](Documentation/architecture.md)                                                   | The modules, the state machine, the usage flow, and the protocol between the board and the control center                                    |
+| [Performance analysis and 'hands-free' VAD (Voice activity detection) testing](Documentation/measurements/latency-vad-analysis.md) | Analysis of start-up latency, response latency and the robustness of the hands-free VAD algorithm (recorded experiment)                      |
+| [Significant decisions](decisions.md)                                                                                              | What we decided, why, and what it rests on (a measurement, an experiment or documentation)                                                   |
+| [User stories](Documentation/user-stories.md) ([PDF](Documentation/user-stories.pdf))                                              | In the order of the demo                                                                                                                     |
+| [Edge cases](Documentation/edge-cases.md) ([PDF](Documentation/edge-cases.pdf))                                                    | The original list of edge cases we tested                                                                                                    |
+| [Edge cases - extended](Documentation/edge-cases-extended.md) ([PDF](Documentation/edge-cases-extended.pdf))                       | In the course format (indication and recovery), with the cases of the submission version. **To print: `edge-cases-extended.pdf` (2 copies)** |
+| [Board test report](Documentation/board-tests-toSubmit.md)                                                                         | The tests of the submission version on the board (robustness, Wi-Fi, BOOT, status sounds), all passed                                        |
+
+## Hardware
+
+![The hardware](Documentation/images/hardware.png)
+
+| Component                                        | Quantity              | Notes                                                                                                                                                                                     |
+| ------------------------------------------------ | --------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| ESP32-WROOM-32 DevKit                            | 1                     | 520KB SRAM, no PSRAM. The LED (GPIO 2) and the BOOT button (GPIO 0) on the board                                                                                                          |
+| INMP441 microphone (I2S)                         | 1                     |                                                                                                                                                                                           |
+| MAX98357A amplifier (I2S)                        | 1                     |                                                                                                                                                                                           |
+| 4Ω 3W speaker                                    | 1                     |                                                                                                                                                                                           |
+| MicroSD module (SPI) with a MicroSD card (FAT32) | 1                     | The recordings. Optional: without it the board works without recordings                                                                                                                   |
+| LDR (light-dependent resistor)                   | 1                     | The light sensor. **Not connected:** the value is simulated from the control center - the code and the calibration for a real LDR are ready ([calibration](Documentation/calibration.md)) |
+| Breadboard                                       | 1                     |                                                                                                                                                                                           |
+| Jumper wires                                     | A set, about 20 wires | Microphone 6 (including L/R to GND), amplifier 5, speaker 2, SD module 6                                                                                                                  |
+| USB cable                                        | 1                     | Power and connection to the computer (control center, flashing)                                                                                                                           |
+
+### Wiring diagram
+
+The microphone and the amplifier share the same I2S clock lines (one port, full duplex). The pins are defined in `ESP32/parameters.h`.
+
+![Wiring diagram](Documentation/images/wiring.png)
+
+| Signal | ESP32 pin |
 |---|---|
-| [מדריך מהיר](Documentation/quick-start.md) | דף אחד: איך מפעילים ומה לנסות |
-| [מצבי המערכת והודעות שגיאה](Documentation/system-states-and-errors.md) | מה כל מצב וכל נורית אומרים, ומה עושים |
-| [הוראות כיול](Documentation/calibration.md) | חיישן האור, הרגישות של Hands-free, עוצמת המיקרופון |
-| [איך הקוד בנוי](Documentation/architecture.md) | המודולים, מכונת המצבים, זרימת השימוש, והפרוטוקול בין הלוח למרכז הבקרה |
-| [החלטות משמעותיות](Documentation/decisions.md) | מה החלטנו, למה, ועל מה זה נשען (מדידה, ניסוי או תיעוד) |
-| [סיפורי משתמש](Documentation/user-stories.md) ([PDF](Documentation/user-stories.pdf)) | לפי סדר ההדגמה |
-| [מקרי קצה](Documentation/edge-cases.md) ([PDF](Documentation/edge-cases.pdf)) | הרשימה המקורית של מקרי הקצה שבדקנו |
-| [מקרי קצה - מורחב](Documentation/edge-cases-extended.md) ([PDF](Documentation/edge-cases-extended.pdf)) | בפורמט של הקורס (חיווי והתאוששות), עם המקרים של גרסת ההגשה. **להדפסה: `edge-cases-extended.pdf` (2 עותקים)** |
-| [תוכנית ההדגמה](Documentation/demo-plan.md) ו[שאלות צפויות](Documentation/questions.md) | הכנה להגשה |
-| [דוח בדיקות על הלוח](Documentation/board-tests-toSubmit.md) | הבדיקות של גרסת ההגשה על הלוח (רובסטיות, Wi-Fi, BOOT, צלילי מצב), כולן עברו |
-| [גרסאות הפרויקט](Documentation/versions.md) | כל השלבים, מהצליל הראשון ועד הגרסה הנוכחית |
-
-## חומרה
-
-![החומרה](Documentation/images/hardware.png)
-
-| רכיב | כמות | הערות |
-|---|---|---|
-| ESP32-WROOM-32 DevKit | 1 | 520KB SRAM, בלי PSRAM. ה-LED (‏GPIO 2) וכפתור BOOT (‏GPIO 0) שעל הלוח |
-| מיקרופון INMP441 (I2S) | 1 | |
-| מגבר MAX98357A (I2S) | 1 | |
-| רמקול 4Ω 3W | 1 | |
-| מודול MicroSD (SPI) וכרטיס MicroSD (FAT32) | 1 + 1 | ההקלטות. לא חובה: בלעדיו הלוח עובד בלי הקלטות |
-| LDR (נגד תלוי אור) ונגד 10kΩ | 1 + 1 | חיישן האור. **לא מחובר:** הערך מדומה ממרכז הבקרה, לפי הנחיית מדריך הקורס. נשאר ברשימה כי הקוד והכיול ל-LDR אמיתי מוכנים ([כיול](Documentation/calibration.md)) |
-| מטריצה (breadboard) | 1 | |
-| חוטי חיבור (jumper) | סט, כ-20 חוטים | המיקרופון 6 (כולל L/R ל-GND), המגבר 5, הרמקול 2, מודול ה-SD 6 |
-| כבל USB | 1 | הזנה וחיבור למחשב (מרכז הבקרה, צריבה) |
-| power bank | 1 | לא חובה: הלוח עובד גם על power bank בלי מחשב. לא מחברים אותו יחד עם USB למחשב (בטיחות, הנחיית הקורס) |
-
-### דיאגרמת חיבורים
-
-המיקרופון והמגבר חולקים את אותם קווי שעון של I2S (פורט אחד, full duplex). הפינים מוגדרים ב-`ESP32/parameters.h`.
-
-![דיאגרמת חיבורים](Documentation/images/wiring.png)
-
-| אות | פין ב-ESP32 |
-|---|---|
-| שעון ביטים של I2S (SCK של המיקרופון + BCLK של המגבר) | 26 |
-| בחירת ערוץ של I2S (WS של המיקרופון + LRC של המגבר) | 25 |
-| נתונים מהמיקרופון (SD) | 21 |
-| נתונים למגבר (DIN) | 22 |
+| I2S bit clock (microphone SCK + amplifier BCLK) | 26 |
+| I2S word select (microphone WS + amplifier LRC) | 25 |
+| Data from the microphone (SD) | 21 |
+| Data to the amplifier (DIN) | 22 |
 | SD: CS / SCK / MISO / MOSI | 5 / 18 / 19 / 23 |
-| בחירת ערוץ של המיקרופון (L/R) | ל-GND (ערוץ שמאל), בלי פין ב-ESP32 |
-| המגבר: הכניסות SD ו-GAIN | לא מחוברות (כמו בדיאגרמה) |
-| הרמקול | ‏+ ו-‏- למוצא של המגבר |
-| LED | 2 (על הלוח) |
-| כפתור Talk | 0 (BOOT, על הלוח) |
-| LDR (לא מחובר, מדומה ממרכז הבקרה) | 34 (ADC1), לכשיחובר |
-| הזנה | המיקרופון וה-SD ל-3.3V, המגבר ל-5V, הכל ל-GND משותף |
+| Microphone channel select (L/R) | To GND (left channel), no ESP32 pin |
+| Amplifier: the SD and GAIN inputs | Not connected (as in the diagram) |
+| Speaker | + and - to the amplifier output |
+| LED | 2 (on the board) |
+| Talk button | 0 (BOOT, on the board) |
+| LDR (not connected, simulated from the control center) | 34 (ADC1), once connected |
+| Power | The microphone and the SD module to 3.3V, the amplifier to 5V, all to a common GND |
 
-<details>
-<summary>אותו דבר בטקסט</summary>
 
-<div dir="ltr">
+## Software and versions
 
-```
-                 ESP32-WROOM-32
-              +------------------+
- INMP441 SCK -| GPIO 26 (BCLK)   |- BCLK    MAX98357A
- INMP441 WS  -| GPIO 25 (LRC)    |- LRC     MAX98357A
- INMP441 SD  -| GPIO 21 (DIN)    |
-              | GPIO 22 (DOUT)   |- DIN     MAX98357A --> speaker
-              |                  |
-   SD CS     -| GPIO 5           |
-   SD SCK    -| GPIO 18          |
-   SD MISO   -| GPIO 19          |
-   SD MOSI   -| GPIO 23          |
-              |                  |
-              | GPIO 2           |- onboard LED
-              | GPIO 0           |- onboard BOOT button
-  LDR divider-| GPIO 34 (ADC1)   |  (not wired: simulated from the control center)
-              +------------------+
- VCC -> 3.3V (MAX98357A -> 5V), GND -> GND
-```
+| What                                                 | Version                                                                                                         |
+| ---------------------------------------------------- | --------------------------------------------------------------------------------------------------------------- |
+| ESP32 SDK: ESP32 Arduino core (Espressif)            | 2.0.17 (ESP-IDF 4.4)                                                                                            |
+| Arduino IDE                                          | 2.3.10                                                                                                          |
+| WebSockets by Markus Sattler (Links2004)             | 2.7.2                                                                                                           |
+| ArduinoJson by Benoit Blanchon                       | 7.4.3                                                                                                           |
+| OpenAI model                                         | `gpt-realtime-2.1-mini` (voice to voice), and `gpt-4o-mini-transcribe` for the text shown in the control center |
+| Control center                                       | Chrome or Edge (needs Web Serial)                                                                               |
 
-</div>
 
-</details>
+## Installation and running
 
-## תוכנה וגרסאות
+1. In the Arduino IDE, in the **Boards Manager**, install **esp32 by Espressif Systems** version **2.0.17**. Then install the two libraries from the **Library Manager**, at the versions in the table.
+2. Copy `ESP32/SECRETS.example.h` to `ESP32/SECRETS.h` and fill in the Wi-Fi name and password (2.4GHz) and an OpenAI key. Without it, compilation stops with an explanation.
+3. Open `ESP32/ESP32.ino` in the Arduino IDE, select **DOIT ESP32 DEVKIT V1** and upload.
+4. Open `control_center/control_center.html` in Chrome, click **Connect board** and select the board's COM port (115200) - in the GUI you can set your desired Wi-Fi and openai API key configurations as needed.
+5. Wait for the green lights and the opening greeting, then click **Talk** (or the physical BOOT button on board) or turn on **Hands-free** (can be done by a voice command as well).
 
-| מה | גרסה |
-|---|---|
-| ESP32 SDK: ESP32 Arduino core (Espressif) | 2.0.17 (ESP-IDF 4.4) |
-| Arduino IDE | 2.3.10 |
-| WebSockets של Markus Sattler (Links2004) | 2.7.2 |
-| ArduinoJson של Benoit Blanchon | 7.4.3 |
-| מודל OpenAI | `gpt-realtime-2.1-mini` (קול לקול), ו-`gpt-4o-mini-transcribe` לטקסט שמוצג במרכז הבקרה |
-| מרכז הבקרה | Chrome או Edge (צריך Web Serial) |
-| Python, לכלים `tools/measurements_report.py` ו-`tools/realtime_audio_diagnostic.py` | 3.6 ומעלה (הכלים משתמשים ב-f-strings). נבדק עם 3.11.2. `measurements_report.py` משתמש בספרייה הסטנדרטית בלבד |
-| `websocket-client` (רק ל-`realtime_audio_diagnostic.py`) | `pip install websocket-client`. נבדק עם 1.8.0 |
-| מהדר C++11, לכלי `tools/vad_replay.cpp` | `g++` מכל גרסה שתומכת ב-C++11 (ב-Windows: MSYS2/MinGW) |
-| PowerShell, ללוגר `tools/serial_logger.ps1` | Windows PowerShell 5.1 (נבדק) |
 
-כל השאר מגיע עם ה-ESP32 core: `WiFi.h`, `SD.h`, `driver/i2s.h`, `Preferences` (NVS), mbedTLS ו-FreeRTOS. ישירות מ-ESP-IDF ו-FreeRTOS, ולא דרך wrapper של Arduino, השתמשנו ב: מנהל ה-I2S הישן `driver/i2s.h` במצב full duplex, `xTaskCreatePinnedToCore` (משימת המיקרופון, מוצמדת לליבה 1 בעדיפות 3), `esp_timer` (דגימת כפתור BOOT), `heap_caps_*` (אבחון זיכרון והקצאות שנכשלו), `esp_random`, ו-mbedTLS ל-base64. דרך ה-wrappers של Arduino: NVS (`Preferences`, לא ישירות), PWM (`ledc`), SNTP (`configTime`), SD ו-Wi-Fi.
+## Known limitations
 
-## התקנה והרצה
+- The LDR is not connected: the value is simulated from the control center.
+- In Hands-free mode, a TV or other people talking count as speech - there is no way to distinguish between the user's speech to speech from other sources given similar volume.
+- Without internet the assistant does not answer questions (Offline). The timer, the controls and the recordings keep working.
 
-1. ב-Arduino IDE, ב-**Boards Manager**, מתקינים **esp32 by Espressif Systems** גרסה **2.0.17**. אחר כך מתקינים את שתי הספריות מה-**Library Manager**, בגרסאות שבטבלה.
-2. מעתיקים את `ESP32/SECRETS.example.h` ל-`ESP32/SECRETS.h` וממלאים שם ו-סיסמה של Wi-Fi (‏2.4GHz) ומפתח OpenAI. הקובץ ב-`.gitignore`. בלעדיו הקומפילציה נעצרת עם הסבר.
-3. פותחים את `ESP32/ESP32.ino` ב-Arduino IDE, בוחרים **ESP32 Dev Module** וצורבים. אפשר גם משורת הפקודה: `arduino-cli compile --fqbn esp32:esp32:esp32 ESP32`.
-4. פותחים את `control_center/control_center.html` ב-Chrome, לוחצים **Connect board** ובוחרים את ה-COM של הלוח (115200).
-5. מחכים לנורות הירוקות ולברכת הפתיחה, ואז לוחצים **Talk** או מדליקים **Hands-free**.
 
-**בטיחות:** לוח שמחובר ב-USB למחשב לא מחברים לאף מקור מתח נוסף (כולל power bank ופין 5V). לשימוש בלי מחשב מנתקים קודם את ה-USB, ורק אז מחברים power bank.
-
-**רשת אחרת?** בכרטיס **Wi-Fi network** במרכז הבקרה, בלי לקמפל. הרשת של הטכניון לא עבדה עם הלוח. הסיבה לא נבדקה (ההערכה: התחברות ארגונית WPA2-Enterprise או דף כניסה), ולכן מדגימים על hotspot מהטלפון.
-
-**אין לוח ביד?** פותחים את מרכז הבקרה, לוחצים **Replay a log** ובוחרים `Documentation/measurements/esp32_log_2026-10-15.txt`. הלוג של 26 השאלות מתנגן כאילו הלוח מחובר.
-
-**קובץ מקומפל:** לא צירפנו `compiled_program.bin`, כי הסיסמה ומפתח ה-API מקומפלים לתוכו. כדי לייצא: ב-Arduino IDE, Sketch ← Export Compiled Binary.
-
-## איך זה עובד
-
-![המסלול של משפט אחד](Documentation/images/sentence-path.png)
-
-1. משימה נפרדת (FreeRTOS) קוראת את המיקרופון ב-24kHz כל 20ms, גם כשהלולאה הראשית עסוקה.
-2. כל 100ms של אודיו נשלחים מיד בחיבור WebSocket מוצפן אחד ל-OpenAI. לא מחכים לסוף ההקלטה, כי 3 שניות של אודיו גולמי בכלל לא נכנסות בזיכרון הפנוי.
-3. המודל עונה באודיו mu-law ב-8kHz (פי 6 קטן מ-PCM ב-24kHz). ה-ESP32 מפענח ומנגן.
-4. כשהמודל רוצה לעשות משהו בלוח, הוא קורא ל"כלי" עם סכמת JSON. ה-ESP32 מבצע, מחזיר תשובה, והמודל אומר מה נעשה.
-5. הלוח מדפיס כל הזמן שורות `@@...` ל-Serial, ומרכז הבקרה קורא אותן ([הפרוטוקול](Documentation/architecture.md)).
-
-### הכלים שהמודל יכול להפעיל
-
-| כלי | מה הוא עושה | דוגמה |
-|---|---|---|
-| `set_board_state` | מדליק או מכבה את ה-LED, ואפשר גם לקבוע בהירות | `Turn on the light`, `Dim the light to 30 percent` |
-| `get_time_of_day` | קורא את חיישן האור (מדומה ממרכז הבקרה) ומחזיר יום, ערב או לילה | `Is it day or night?` |
-| `set_volume` | קובע עוצמה באחוזים (‏10-100), או מגביר / מנמיך ב-20% | `Set the volume to 30 percent`, `Louder` |
-| `get_current_time` | התאריך והשעה מהשעון של הלוח (מסונכרן מהאינטרנט, לפי שעון ישראל כולל שעון קיץ), וכמה נשאר לטיימר | `What time is it?` |
-| `get_board_status` | עוצמת ה-Wi-Fi, כמה דקות הלוח דלוק וכמה זיכרון פנוי | `How are you doing?` |
-| `set_hands_free` | מדליק או מכבה את Hands-free, בדיוק כמו המתג במרכז הבקרה. רק כשהשאלה הנוכחית מבקשת את זה במפורש: שאלה על המצב, או אזכור אגבי של כפתור, לא משנים כלום | `Switch to hands-free mode`, `I want to talk without pressing a button`, `Disable VAD` |
-| `set_timer` | טיימר של 1 עד 3600 שניות (בהדגמה 20 עד 60 שניות), או ביטול (0). מעל שעה נקבעת שעה והעוזר אומר זאת. ערך שלילי או קצר משנייה נדחה, והעוזר מבקש שוב בלי לגעת בטיימר שרץ. בסוף העוזר אומר את זה בקול (גם על מה התזכורת), ואפשר להדליק או לכבות את האור | `Remind me in 30 seconds to check the oven`, `Turn off the light in 20 seconds` |
-
-![מה קורה כשמבקשים להדליק את האור](Documentation/images/led-sequence.png)
-
-## מדידות ביצועים
-
-### איך מדדנו
-
-הוספנו לקושחה נקודות מדידה (`measurement_utils`). כל שאלה מדפיסה שורת `@@TIMING`, וכל הדלקה שורת `@@BOOT_TIMING`, עם זמנים מ-`millis()`, גדלים, רמות מיקרופון וזיכרון פנוי. שמרנו את הלוג ממרכז הבקרה והרצנו עליו את `tools/measurements_report.py`.
-
-תנאי הבדיקה (15.10.2026): hotspot מטלפון, RSSI בהדלקה בין ‎-37 ל-‎-45 dBm ובזמן השאלות חציון ‎-48 (טווח ‎-38 עד ‎-62), חדר שקט, 26 שאלות ו-3 הדלקות. שאלות 1-19 דיבור רגיל מכחצי מטר, 20-22 שקט, 23-24 מרחוק (כ-2 מטר), 25 קרוב, 26 לחישה. מצב לחיצה (3 שניות). כל הזמנים בשאלה נמדדים מסוף ההקלטה. **הקושחה במדידה הזאת היא של שלב 29, לפני משימת המיקרופון של שלב 30.** הלוג המלא: `Documentation/measurements/esp32_log_2026-10-15.txt`.
-
-### תוצאות
-
-![זמן תגובה](Documentation/images/response-time.png)
-
-| מה | תוצאה |
-|---|---|
-| שאלות שהסתיימו בהצלחה | 26 מתוך 26 |
-| מסוף ההקלטה עד ההודעה הראשונה מהשרת (חציון) | כ-0.3 שניות |
-| מסוף ההקלטה עד הצליל הראשון של התשובה (חציון) | כ-1.1 שניות |
-| שאלות שבהן התשובה התחילה תוך פחות מ-2 שניות | 23 מתוך 26 (האיטיות, כ-5 שניות, היו בשקט ובדיבור מרחוק) |
-| מהבקשה `Turn on the light` עד שה-LED נדלק | 0.97 שניות (האישור הקולי התחיל אחרי 1.9 שניות) |
-| הדלקה מלאה (עד שמוכן לשיחה) | 6.8 / 9.1 / 10.8 שניות |
-| השלב הארוך בהדלקה | החיבור המוצפן ל-OpenAI, ‏3.9 עד 5.1 שניות |
-
-![חלונית הסטטיסטיקה](Documentation/images/statistics.png)
-
-![הדלקה וזיכרון](Documentation/images/boot-and-memory.png)
-
-| זיכרון (heap) | |
-|---|---|
-| פנוי בהדלקה | 215KB |
-| פנוי כשהסשן מוכן | 38KB |
-| פנוי בזמן שיחה | כ-45KB, יציב לאורך 26 שאלות (אין דליפה) |
-| הכי מעט פנוי בזמן שיחה | 27KB |
-| הצרכן הגדול ביותר | החיבור המוצפן וה-WebSocket, כ-51KB |
-| גודל הקושחה (הגרסה הנוכחית) | 1.08MB, ‏82% מה-flash |
-| RAM קבוע (משתנים גלובליים) | 75KB מתוך 320KB |
-
-| שמע | |
-|---|---|
-| רמת מיקרופון, דיבור רגיל (חציון) | ‎-19 dBFS |
-| קרוב / רחוק / לחישה | ‎-17 / ‎-30 / ‎-32 dBFS |
-| קיטום | בשאלה אחת מתוך 26 |
-| נשלח לענן בכל שאלה | כ-193KB (PCM ב-24kHz, ‏384 kbps) |
-| אודיו התשובה | mu-law ב-8kHz, ‏64 kbps |
-
-### בעיה שמצאנו במדידות ותיקנו
-
-ב-21 מתוך 26 השאלות הקושחה התריעה שדגימות מהמיקרופון אבדו. הסיבה: מאגר ה-DMA של המיקרופון מחזיק רק 150ms, ולפעמים שליחה אחת ב-Wi-Fi נתקעה עד 465ms, וקול ישן נדרס. בממוצע אבדו 0.14 שניות מתוך 3 (במקרה הגרוע 0.54). כמות הקול שאבדה התאימה לשליחה האיטית ביותר באותה שאלה (מקדם מתאם 0.93).
-
-התיקון (שלב 30): משימת FreeRTOS נפרדת קוראת את המיקרופון כל 20ms, והאודיו מחכה בתור (בתוך מאגר הניגון, שפנוי בזמן הקלטה) עד שהוא נשלח. שליחה איטית רק מעכבת את האודיו ולא מאבדת אותו. התור מחזיק כ-1.36 שניות. הקושחה מדווחת בכל שאלה כמה אודיו אבד (`dropped_ms`), כך שמדידה חוזרת עם הקושחה הנוכחית תראה את התוצאה.
-
-**המדידה אחרי התיקון עוד לא רצה**, ולכן הטבלאות למעלה הן של קושחת שלב 29 בלבד. היא תיווצר כך: מריצים כמה שאלות ברצף על הקושחה הנוכחית כש-`tools/serial_logger.ps1` שומר את הלוג, ואז `python tools/measurements_report.py <קובץ הלוג>` כותב `timing.csv` ו-`summary.md` (בתיקיית `measurements` ליד הלוג). השורה של `dropped_ms` (חציון ומקסימום) תתווסף לטבלת התוצאות למעלה, לצד מדידת שלב 29.
-
-### גלאי הקול של מצב Hands-free
-
-גלאי הקול (`vad_utils`) בודק את העוצמה בתחום התדרים של דיבור לעומת רעש החדר, וגם אם הקול "קולי" ואם יש בו קצב של הברות. בדקנו אותו במחשב עם `tools/vad_replay.cpp` על הקלטות ציבוריות: 112 קטעי רעש ו-100 קטעי דיבור עם רעשי בית ברקע.
-
-| בדיקה | קטעים | תוצאה | שיעור |
-|---|---|---|---|
-| דיבור רגיל: ההקלטה התחילה, והמילה הראשונה לא נחתכה | 100 | בכולם | 100/100 = **100%** |
-| דיבור שקט מאוד מול רעש רקע: 20 עד 200ms מההתחלה נחתכו | 27 | ב-7 | 7/27 = **26%** נחתכו (74% בלי חיתוך) |
-| קטעי רעש שנשלחו ל-OpenAI (הפעלת שווא) | 112 | ב-20 | 20/112 = **17.9%** (82.1% נדחו) |
-| דפיקות, מחיאות כפיים, צעדים, גשם, שואב אבק | מתוך 112 | אף פעם לא התחילו הקלטה | 0% |
-
-ההפעלות השגויות היו בשיעול, צחוק, דלת חורקת, פעמונים ומים זורמים.
-
-**איך בדקנו:**
-- **הכלי:** `tools/vad_replay.cpp` מקמפל את אותו קובץ `ESP32/vad_utils.cpp` שרץ על הלוח, ומריץ אותו על קבצים במחשב. הוא מדמה את הלולאה של Hands-free: מחכה לדיבור, מקליט החל מ-500ms לפני שההתחלה אושרה, מסיים אחרי שקט, או זורק קטע שלא נשמע כמו דיבור, וחוזר לחכות. כך יודעים לכל קטע אם הוא היה נשלח ל-OpenAI, ואיפה ההקלטה הייתה מתחילה.
-- **בנייה והרצה:** `g++ -std=c++11 -O2 -I ESP32 tools/vad_replay.cpp ESP32/vad_utils.cpp -o vad_replay`, ואז `vad_replay [--sensitivity 1-5] [--hangover <ms>] <קבצים>`. לדוגמה: `vad_replay --sensitivity 3 --hangover 1000 clips/*.wav`.
-- **פרמטרים:** ברירות המחדל של הקושחה (`ESP32/parameters.h`: `kDefaultVadSensitivity`, `kDefaultVadHangoverMs`): רגישות 3 (מתוך 1 עד 5) ושקט של 1000ms שמסיים משפט (טווח 600 עד 1500ms).
-- **הקלטות:** קבצי WAV של 16 ביט, מונו או סטריאו, בכל קצב דגימה. הכלי מערבב לערוץ אחד ומשנה את הקצב ל-24kHz (אינטרפולציה לינארית), הקצב שהמיקרופון בלוח מקליט בו.
-- **קבוצות הקטעים:** 112 קטעי רעש (שיעול, צחוק, דלת חורקת, פעמונים, מים זורמים, דפיקות, מחיאות כפיים, צעדים, גשם, שואב אבק), ו-100 קטעי דיבור עם רעשי בית ברקע. הבדיקה של דיבור שקט מאוד מול רעש רקע (חיתוך תחילת המשפט) נעשתה על 27 קטעים.
-- **על הלוח:** אותו גלאי רץ גם בלוח, ובדיקה על הלוח עברה: 5 שאלות ברצף בקול, ודפיקות על השולחן שלא הפעילו הקלטה (`HANDS-FREE PASSED`, ראו [הדוח](Documentation/board-tests-toSubmit.md)).
-
-המספרים בטבלה הם מהקלטות במחשב, לא מהמיקרופון שלנו בחדר. זמני התגובה והזיכרון שלמעלה נמדדו על קושחת שלב 29, לפני משימת המיקרופון של שלב 30 (ראו "איך מדדנו").
-
-## מגבלות ידועות
-
-- ה-LDR לא מחובר: הערך מדומה ממרכז הבקרה, לפי הנחיית מדריך הקורס. החיבור והכיול למקרה שיחובר ב-[calibration.md](Documentation/calibration.md).
-- **עברית:** אפשר לדבר בעברית, והעוזר עונה בעברית, אבל פחות טוב מאשר באנגלית. התמלול שמוצג במרכז הבקרה (מה שהמשתמש אמר) משתבש הרבה פעמים בעברית. באנגלית שני הצדדים עובדים הכי טוב ([decisions.md](Documentation/decisions.md)).
-- במצב Hands-free, טלוויזיה או אנשים אחרים שמדברים נחשבים לדיבור.
-- מי שמתחיל לדבר בכ-0.9 השניות הראשונות אחרי סוף תשובה עלול לאבד את תחילת המשפט (המיקרופון סגור 0.6 שניות כדי שהלוח לא ישמע את עצמו).
-- בלי אינטרנט העוזר לא עונה לשאלות (Offline). הטיימר, הפקדים וההקלטות ממשיכים לעבוד.
-- מפתח ה-API שמור בקושחה (ואם הוחלף ממרכז הבקרה, גם ב-flash). בלוג הוא לא מופיע, אבל מי שמחזיק את הלוח יכול לקרוא אותו. בפרויקט אמיתי הלוח היה מקבל מפתח זמני משרת.
-
-## חלוקת העבודה
-
-| מי | מה |
-|---|---|
-| Tomer Gilan | *(להשלים)* לפי הגיט: שלבים 2-22 (החומרה, Gemini, המעבר ל-OpenAI, הכלי הראשון, הלוגים והמודולים) |
-| Solomon Mekhiln | *(להשלים)* לפי הגיט: חיישן האור, ההקלטות ב-SD, ומרכז הבקרה הראשון (שלבים 23-27) |
-| Itamar Cohen | *(להשלים)* לפי הגיט: מרכז הבקרה (שלב 28), המדידות (29), גלאי הקול ו-Hands-free (30) |
-
----
 
 This project is part of ICST - The Interdisciplinary Center for Smart Technologies, Taub Faculty of Computer Science, Technion. https://icst.cs.technion.ac.il/
-
-</div>

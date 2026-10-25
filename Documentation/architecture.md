@@ -1,12 +1,33 @@
-<div dir="rtl">
+## How it works
 
-# איך הקוד בנוי - עוזר קולי על ESP32
+![The path of one sentence](Documentation/images/sentence-path.png)
 
-קבוצה A2, קורס IoT, קיץ 2026. המסמך הזה מסביר את הקוד: מה כל חלק עושה, איך הלוח עובר בין מצבים, ואיך מרכז הבקרה יודע מה קורה בלוח. איך זה עובד מבחוץ מוסבר ב-[README](../README.md).
+1. A separate task (FreeRTOS) reads the microphone at 24kHz every 20ms, even when the main loop is busy.
+2. Every 100ms of audio is sent right away over a single encrypted WebSocket connection to OpenAI. We do not wait for the end of the recording, because 3 seconds of raw audio do not even fit in the free memory.
+3. The model answers with mu-law audio at 8kHz (6 times smaller than PCM at 24kHz). The ESP32 decodes and plays it.
+4. When the model wants to do something on the board, it calls a "tool" with a JSON schema. The ESP32 carries it out and returns a result, and the model says what was done.
+5. The board constantly prints `@@...` lines to Serial, and the control center reads them ([the protocol](Documentation/architecture.md)).
 
-## התמונה הגדולה
+### The tools the model can call
 
-<div dir="ltr">
+| Tool | What it does | Example |
+|---|---|---|
+| `set_board_state` | Turns the LED on or off, and can also set the brightness | `Turn on the light`, `Dim the light to 30 percent` |
+| `get_time_of_day` | Reads the light sensor (simulated from the control center) and returns day, evening or night | `Is it day or night?` |
+| `set_volume` | Sets the volume in percent (10-100), or raises / lowers it by 20% | `Set the volume to 30 percent`, `Louder` |
+| `get_current_time` | The date and time from the board's clock (synchronized from the internet, in Israel time including daylight saving time), and how much time is left on the timer | `What time is it?` |
+| `get_board_status` | The Wi-Fi signal strength, how many minutes the board has been on and how much memory is free | `How are you doing?` |
+| `set_hands_free` | Turns Hands-free on or off, exactly like the switch in the control center. Only when the current question explicitly asks for it: a question about the mode, or a passing mention of a button, changes nothing | `Switch to hands-free mode`, `I want to talk without pressing a button`, `Disable VAD` |
+| `set_timer` | A timer of 1 to 3600 seconds (20 to 60 seconds in the demo), or a cancel (0). Above an hour, it sets one hour and the assistant says so. A negative value or one shorter than a second is rejected, and the assistant asks again without touching the running timer. At the end the assistant says so out loud (including what the reminder is about), and it can turn the light on or off | `Remind me in 30 seconds to check the oven`, `Turn off the light in 20 seconds` |
+
+![What happens when you ask to turn on the light](Documentation/images/led-sequence.png)
+
+
+# How the Code Is Built - Voice Assistant on ESP32
+
+Group A2, IoT course, Summer 2026. This document explains the code: what each part does, how the board moves between states, and how the control center knows what is happening on the board. How it works from the outside is explained in the [README](../README.md).
+
+## The big picture
 
 ```mermaid
 flowchart LR
@@ -20,83 +41,79 @@ flowchart LR
   LDR["LDR light sensor<br/>(not wired: simulated<br/>from the control center)"] -- "ADC1" --> ESP
 ```
 
-</div>
+The ESP32 does not understand speech by itself. It records, sends, plays and carries out actions. All the understanding happens at OpenAI, which returns audio and sometimes also a request to run a "tool" on the board.
 
-ה-ESP32 לא מבין דיבור בעצמו. הוא מקליט, שולח, מנגן ומבצע. כל ההבנה קורית אצל OpenAI, שמחזיר אודיו ולפעמים גם בקשה להפעיל "כלי" בלוח.
+## The modules
 
-## המודולים
+Each module is a pair of files `xxx_utils.h/.cpp` in the `ESP32/` folder, with its own namespace (`esp32va_...`). The sketch `ESP32.ino` connects them all: it holds the conversation state and decides what to do at each moment. It is split into Arduino tabs, which the Arduino IDE joins into one file when compiling. Access to each hardware component is concentrated in one module: I2S only in `i2s_audio_utils`, the LED only in `board_state_utils`, the SD card only in the SD modules, the button only in `button_utils`.
 
-כל מודול הוא זוג קבצים `xxx_utils.h/.cpp` בתיקייה `ESP32/`, עם namespace משלו (`esp32va_...`). ה-sketch `ESP32.ino` מחבר את כולם: הוא מחזיק את מצב השיחה ומחליט מה לעשות בכל רגע. הוא מחולק ללשוניות (tabs) של Arduino, ש-Arduino IDE מחבר לקובץ אחד בקימפול. הגישה לכל רכיב חומרה מרוכזת במודול אחד: I2S רק ב-`i2s_audio_utils`, ה-LED רק ב-`board_state_utils`, ה-SD רק במודולי ה-SD, הכפתור רק ב-`button_utils`.
+Each module is a single object: its internal state is in the `.cpp` file (private), and the `.h` file is the interface. Why a namespace and not a class is explained in [decisions.md](decisions.md). Which hardware component belongs to which module:
 
-כל מודול הוא אובייקט יחיד: המצב הפנימי שלו בקובץ ה-`.cpp` (פרטי), וקובץ ה-`.h` הוא הממשק. למה namespace ולא class מוסבר ב-[decisions.md](decisions.md). איזה רכיב חומרה שייך לאיזה מודול:
-
-| חומרה | המודול | ה-namespace |
+| Hardware | The module | The namespace |
 |---|---|---|
-| ה-LED שעל הלוח (GPIO 2, בהירות ב-PWM) | `board_state_utils` | `esp32va_board` |
-| רמקול + מגבר MAX98357A ומיקרופון INMP441 (פורט I2S אחד) | `i2s_audio_utils`. קריאת המיקרופון במשימה נפרדת: `mic_capture_utils`. גלאי הקול: `vad_utils` | `esp32va_audio`, `esp32va_mic_capture`, `esp32va_vad` |
-| עוצמה, השתקה וצפצוף | `device_controls_utils` | `esp32va_controls` |
-| כפתור BOOT (GPIO 0) | `button_utils` | `esp32va_button` |
-| חיישן אור LDR (מדומה ממרכז הבקרה; קריאת ה-ADC מוכנה) | `light_sensor_utils` | `esp32va_light_sensor` |
-| כרטיס SD (SPI) | `sd_card_utils`. שמירת ההקלטות והעברתן: `reply_recorder_utils`, `voice_command_recorder_utils`, `sd_file_transfer_utils` | `esp32va_sd_card`, `esp32va_reply_recorder`, `esp32va_command_recorder`, `esp32va_sd_transfer` |
-| Wi-Fi והשעון | `wifi_utils` | `esp32va_wifi` |
-| זיכרון קבוע (NVS) | `settings_store_utils` | `esp32va_settings` |
+| The LED on the board (GPIO 2, brightness via PWM) | `board_state_utils` | `esp32va_board` |
+| Speaker + MAX98357A amplifier and INMP441 microphone (one I2S port) | `i2s_audio_utils`. Reading the microphone in a separate task: `mic_capture_utils`. The voice detector: `vad_utils` | `esp32va_audio`, `esp32va_mic_capture`, `esp32va_vad` |
+| Volume, mute and beep | `device_controls_utils` | `esp32va_controls` |
+| BOOT button (GPIO 0) | `button_utils` | `esp32va_button` |
+| LDR light sensor (simulated from the control center; the ADC reading is ready) | `light_sensor_utils` | `esp32va_light_sensor` |
+| SD card (SPI) | `sd_card_utils`. Saving and transferring the recordings: `reply_recorder_utils`, `voice_command_recorder_utils`, `sd_file_transfer_utils` | `esp32va_sd_card`, `esp32va_reply_recorder`, `esp32va_command_recorder`, `esp32va_sd_transfer` |
+| Wi-Fi and the clock | `wifi_utils` | `esp32va_wifi` |
+| Non-volatile memory (NVS) | `settings_store_utils` | `esp32va_settings` |
 
-שלושה קבצים בלי קוד: `parameters.h` (כל הפרמטרים הקבועים - ראו [Parameters/parameters.md](../Parameters/parameters.md)), `realtime_session_config.h` (הודעת ההגדרות של הסשן: ההוראות למודל ורשימת הכלים) ו-`SECRETS.h` (רשת ה-Wi-Fi ומפתח ה-API של ברירת המחדל - את שניהם אפשר להחליף ממרכז הבקרה; לא בגיט, התבנית היא `SECRETS.example.h`).
+Three files without code: `parameters.h` (all the fixed parameters - see [Parameters/parameters.md](../Parameters/parameters.md)), `realtime_session_config.h` (the session configuration message: the instructions for the model and the list of tools) and `SECRETS.h` (the default Wi-Fi network and API key - both can be replaced from the control center; not in git, the template is `SECRETS.example.h`).
 
-| מודול | מה הוא עושה |
+| Module | What it does |
 |---|---|
-| `ESP32.ino` | ה-includes, הדגלים המשותפים של מצב השיחה, הצהרות של כל הפונקציות שבלשוניות, ו-`setup()`/`loop()` |
-| `listen_turn.ino` | שאלה (LISTEN): התחלה ידנית או בקול, שליחת המיקרופון ל-OpenAI, סיום, ביטול, ושאלה בכתב (`ASK`) |
-| `server_events.ino` | אירועי ה-WebSocket וכל הודעות השרת: הסשן, אודיו וטקסט של התשובה, קריאות לכלים (dispatch), סוף תשובה ושגיאות |
-| `serial_commands.ino` | הפקודות מה-Serial (ממרכז הבקרה) וכפתור BOOT: Talk, הצליל של סירוב ובדיקת הטכנאי |
-| `state_machine.ino` | מכונת המצבים: המעברים (פונקציות בשם לכל מעבר), `updatePipelineState()` שגוזרת את המצב (`@@STATE`), ובדיקות ה-timeout, ה-offline והחיבור |
-| `verdicts.ino` | PASSED/FAILED של כל שאלה ושל השלב, עצירה (halt), מדידות ההקלטה וההקלטות ב-SD |
-| `wifi_utils` | Wi-Fi ושעון: התחברות בלי להיתקע, הרשת השמורה ב-flash (או זו של `SECRETS.h`; אם הרשת השמורה נכשלת פעמיים ברצף עוברים לזו של `SECRETS.h`, ובחזרה באותו אופן), פקודות `WIFI_*`, וסנכרון השעה לפי שעון ישראל כולל שעון קיץ |
-| `openai_realtime_utils` | החיבור המאובטח ל-OpenAI, אימות, פעימת לב (ping כל 15 שניות; שני pong ברצף שלא חזרו תוך 10 שניות סוגרים את החיבור) שמגלה חיבור מת, התחברות מחדש עם המתנה שגדלה, ומצב offline (אף פעם לא מוותר). מפתח ה-API: השמור ב-flash (או זה של `SECRETS.h`; אם OpenAI דוחה את השמור פעמיים ברצף, HTTP 401/403, עוברים לזה של `SECRETS.h`, ובחזרה באותו אופן) ופקודות `OPENAI_KEY*`. גם שליחת התוצאה של כלי (`sendFunctionCallOutput`) |
-| `realtime_json_utils` | סריקה מהירה של הודעות גדולות מהשרת בלי לפענח את כל ה-JSON |
-| `i2s_audio_utils` | המיקרופון והרמקול (I2S), ה-ring buffer של הניגון ופענוח mu-law |
-| `mic_capture_utils` | משימה נפרדת (FreeRTOS) שקוראת את המיקרופון בלי הפסקה |
-| `vad_utils` | גלאי הקול: מחליט מתי מישהו התחיל ומתי סיים לדבר |
-| `hands_free_utils` | מצב Hands-free: מקשיב לבד כשהלוח פנוי ושולח רק דיבור אמיתי. גם הכלי `set_hands_free` (הדלקה וכיבוי בקול), ו-`LAPTOP_PLAYBACK`: לא מקשיב בזמן שמרכז הבקרה מנגן הקלטה ברמקולים של המחשב |
-| `board_state_utils` | ה-LED (כולל בהירות) והכלי `set_board_state` |
-| `light_sensor_utils` | חיישן האור (בגרסת ההגשה הערך מדומה ממרכז הבקרה, כי ה-LDR לא מחובר; LDR אמיתי נקרא כשמגדירים `LIGHT_SENSOR_PIN`) והכלי `get_time_of_day` |
-| `device_controls_utils` | פקודות עוצמה, השתקה, צפצוף ו-LED מהמחשב, צלילי המצב (`SOUNDS`), והכלי `set_volume` |
-| `button_utils` | כפתור BOOT ככפתור Talk פיזי (כבוי כברירת מחדל, `BUTTON on`), עם debounce. לחיצה ארוכה (2 שניות) מפעילה בדיקת טכנאי, ראו "כפתור BOOT: צלילים ובדיקת טכנאי" |
-| `clock_timer_utils` | הכלים `get_current_time` ו-`set_timer`, הצלצול של הטיימר, וההודעה בקול כשהוא נגמר |
-| `board_info_utils` | הכלי `get_board_status`: עוצמת ה-Wi-Fi, זמן מההדלקה וזיכרון פנוי |
-| `greeting_utils` | משפט פתיחה אקראי כשהחיבור מוכן |
-| `settings_store_utils` | שמירת הגדרות בזיכרון הקבוע (NVS), כך שהן נשארות אחרי כיבוי |
-| `sd_card_utils` | חיבור כרטיס ה-SD, בדיקה שהוא באמת כותב וקורא, וסימון אם יש כרטיס תקין (בלעדיו הלוח ממשיך בלי הקלטות). כרטיס שנשלף בזמן ריצה מתגלה כשפתיחה או כתיבה של הקלטה נכשלות: ברגע הפנוי הבא הלוח בודק אותו, ואם הוא לא עונה נורית ה-SD אדומה והלוח מתנהג כמו אחרי הדלקה בלי כרטיס, עד Reset |
-| `recording_folder_utils` | שמות הקבצים והתיקיות של ההקלטות |
-| `reply_recorder_utils` | שומר כל תשובה של העוזר ל-SD בזמן שהיא מגיעה |
-| `voice_command_recorder_utils` | שומר את מה שהמיקרופון שמע בכל פקודה |
-| `sd_file_transfer_utils` | פקודות LIST / GET / DELETE: מרכז הבקרה מוריד הקלטות מהלוח |
-| `status_report_utils` | שורות ה-`@@` למרכז הבקרה |
-| `measurement_utils` | מדידות זמן (עלייה ותגובה) לכל פקודה |
-| `heap_diagnostics_utils` | מדידות זיכרון בכל שלב |
-| `log_utils` | מאקרו לוג עם רמות (`LOG_INFO`, `LOG_ERROR`, ...) |
-| `command_parse_utils` | עזרים משותפים לפקודות Serial: הפרדת מילת הפקודה מהארגומנט (`commandArgument`) וקריאת on/off |
+| `ESP32.ino` | The includes, the shared conversation-state flags, declarations of all the functions in the tabs, and `setup()`/`loop()` |
+| `listen_turn.ino` | A question (LISTEN): a manual or voice start, sending the microphone to OpenAI, ending, canceling, and a typed question (`ASK`) |
+| `server_events.ino` | The WebSocket events and all the server messages: the session, the answer's audio and text, tool calls (dispatch), the end of an answer and errors |
+| `serial_commands.ino` | The commands from Serial (from the control center) and the BOOT button: Talk, the rejection tone and the technician check |
+| `state_machine.ino` | The state machine: the transitions (a named function for each transition), `updatePipelineState()` which derives the state (`@@STATE`), and the timeout, offline and connection checks |
+| `verdicts.ino` | PASSED/FAILED for each question and for the step, halting, the recording measurements and the recordings on the SD card |
+| `wifi_utils` | Wi-Fi and the clock: connecting without getting stuck, the network saved in flash (or the one from `SECRETS.h`; if the saved network fails twice in a row it switches to the one from `SECRETS.h`, and back the same way), the `WIFI_*` commands, and synchronizing the time to Israel time including daylight saving time |
+| `openai_realtime_utils` | The secure connection to OpenAI, authentication, a heartbeat (a ping every 15 seconds; two pongs in a row that did not come back within 10 seconds close the connection) that detects a dead connection, reconnecting with a growing wait, and offline mode (it never gives up). The API key: the one saved in flash (or the one from `SECRETS.h`; if OpenAI refuses the saved one twice in a row, HTTP 401/403, it switches to the one from `SECRETS.h`, and back the same way) and the `OPENAI_KEY*` commands. Also sending a tool's result (`sendFunctionCallOutput`) |
+| `realtime_json_utils` | Fast scanning of large messages from the server without parsing the whole JSON |
+| `i2s_audio_utils` | The microphone and the speaker (I2S), the playback ring buffer and mu-law decoding |
+| `mic_capture_utils` | A separate task (FreeRTOS) that reads the microphone without a break |
+| `vad_utils` | The voice detector: decides when someone started and when they finished speaking |
+| `hands_free_utils` | Hands-free mode: listens on its own when the board is free and sends only real speech. Also the `set_hands_free` tool (turning it on and off by voice), and `LAPTOP_PLAYBACK`: does not listen while the control center plays a recording on the computer's speakers |
+| `board_state_utils` | The LED (including brightness) and the `set_board_state` tool |
+| `light_sensor_utils` | The light sensor (in the submission version the value is simulated from the control center, because the LDR is not connected; a real LDR is read when `LIGHT_SENSOR_PIN` is defined) and the `get_time_of_day` tool |
+| `device_controls_utils` | The volume, mute, beep and LED commands from the computer, the status sounds (`SOUNDS`), and the `set_volume` tool |
+| `button_utils` | The BOOT button as a physical Talk button (off by default, `BUTTON on`), with debounce. A long press (2 seconds) runs a technician check, see "The BOOT button: sounds and technician check" |
+| `clock_timer_utils` | The `get_current_time` and `set_timer` tools, the timer's ring, and the spoken message when it ends |
+| `board_info_utils` | The `get_board_status` tool: the Wi-Fi signal strength, the time since boot and the free memory |
+| `greeting_utils` | A random opening sentence when the connection is ready |
+| `settings_store_utils` | Saving settings in non-volatile memory (NVS), so they stay after power off |
+| `sd_card_utils` | Mounting the SD card, checking that it really writes and reads, and marking whether there is a working card (without one the board continues without recordings). A card pulled out while running is detected when opening or writing a recording fails: at the next free moment the board checks it, and if it does not answer the SD light turns red and the board behaves as after a boot without a card, until a Reset |
+| `recording_folder_utils` | The file and folder names of the recordings |
+| `reply_recorder_utils` | Saves each of the assistant's answers to the SD card as it arrives |
+| `voice_command_recorder_utils` | Saves what the microphone heard in each command |
+| `sd_file_transfer_utils` | The LIST / GET / DELETE commands: the control center downloads recordings from the board |
+| `status_report_utils` | The `@@` lines for the control center |
+| `measurement_utils` | Time measurements (boot and response) for each command |
+| `heap_diagnostics_utils` | Memory measurements at each stage |
+| `log_utils` | Log macros with levels (`LOG_INFO`, `LOG_ERROR`, ...) |
+| `command_parse_utils` | Shared helpers for Serial commands: separating the command word from the argument (`commandArgument`) and reading on/off |
 
-## מה קורה בלולאה הראשית
+## What happens in the main loop
 
-הפונקציה `loop()` רצה כל הזמן ולא נתקעת באף שלב, חוץ מהורדת הקלטה (`GET`): היא מחזיקה את `loop()` לכל משך ההעברה בכוונה, כי שום דבר לא יכול להתערבב בין בייטי הקובץ (כ-3 שניות לתשובה, עד כ-40 שניות לפקודה קולית של 10 שניות ב-Hands-free). Hands-free מושהה לפני כן, ומרכז הבקרה נועל את Talk ו-Ask ומציג "Downloading…" בזמן הזה (ראו [decisions.md](decisions.md)). בכל סיבוב רגיל היא:
+The `loop()` function runs all the time and does not get stuck at any stage, except for downloading a recording (`GET`): it holds `loop()` for the whole transfer on purpose, because nothing may get mixed in between the file's bytes (about 3 seconds for an answer, up to about 40 seconds for a 10-second voice command in Hands-free). Hands-free is paused before that, and the control center locks Talk and Ask and shows "Downloading…" during that time (see [decisions.md](decisions.md)). In each normal iteration it:
 
-1. מקבלת הודעות מ-OpenAI (אלא אם ה-buffer של הרמקול כמעט מלא, ואז עוצרת קצת כדי שהניגון יתפוס).
-2. בודקת אם הוקלד משהו ב-Serial (מהמחשב או ממרכז הבקרה).
-3. שולחת ל-OpenAI את חתיכות המיקרופון שמוכנות.
-4. בודקת אם הניגון הסתיים, ואם עבר יותר מדי זמן בלי תשובה.
-5. נותנת ל-Hands-free להחליט אם להתחיל להקליט, ולטיימר אם לצלצל.
-6. בודקת את כפתור BOOT (אם הודלק) ומנגנת צליל מצב שמחכה (אם הודלקו), רק כשהלוח שקט.
-7. שומרת על ה-Wi-Fi (ומתחילה מחדש אם הוא למטה דקה אחרי הניסיון האחרון), ופותחת את החיבור ל-OpenAI ברגע שיש רשת ושעון. כש-Wi-Fi חוזר אחרי הפסקה (או שהרשת הוחלפה), ההמתנה בין הניסיונות מתאפסת וה-OpenAI מתחבר מחדש תוך שניות (בערך 1-3), בלי לחכות את ה-30 שניות של מצב offline. אם הוא עדיין לא עונה אחרי 10 שניות, חוזרים לנסות כל 30 שניות. בזמן הזה נורית OpenAI כתומה (`Wi-Fi is back - reconnecting`), ואדומה כשהלוח offline (`offline - retrying every 30 s`).
-8. מחשבת את המצב של העוזר ומדווחת למרכז הבקרה אם הוא השתנה, ומדפיסה `@@ALIVE` כל 5 שניות.
+1. Receives messages from OpenAI (unless the speaker buffer is almost full, and then it pauses a little so the playback catches up).
+2. Checks whether something was typed on Serial (from the computer or from the control center).
+3. Sends the microphone chunks that are ready to OpenAI.
+4. Checks whether the playback has finished, and whether too much time has passed without an answer.
+5. Lets Hands-free decide whether to start recording, and the timer whether to ring.
+6. Checks the BOOT button (if turned on) and plays a pending status sound (if turned on), only when the board is quiet.
+7. Keeps the Wi-Fi up (and starts over if it is down a minute after the last attempt), and opens the connection to OpenAI as soon as there is a network and a clock. When the Wi-Fi comes back after an outage (or the network was changed), the wait between attempts resets and OpenAI reconnects within seconds (about 1-3), without waiting the 30 seconds of offline mode. If it still does not answer after 10 seconds, it goes back to retrying every 30 seconds. During this time the OpenAI light is orange (`Wi-Fi is back - reconnecting`), and red when the board is offline (`offline - retrying every 30 s`).
+8. Computes the assistant's state and reports it to the control center if it changed, and prints `@@ALIVE` every 5 seconds.
 
-`setup()` לא מחכה לנצח לאף דבר: Wi-Fi עד 20 שניות, שעון עד 15. בלעדיהם הלוח ממשיך במצב offline, והפקודות, הטיימר והפקדים עובדים.
+`setup()` does not wait forever for anything: Wi-Fi up to 20 seconds, the clock up to 15. Without them the board continues in offline mode, and the commands, the timer and the controls work.
 
-## המצבים של העוזר
+## The assistant's states
 
-הלוח מדווח כל שינוי מצב בשורה `@@STATE`. מרכז הבקרה צובע לפיה את העיגול הגדול.
-
-<div dir="ltr">
+The board reports every state change in a `@@STATE` line. The control center colors the big circle according to it.
 
 ```mermaid
 stateDiagram-v2
@@ -125,46 +142,42 @@ stateDiagram-v2
   reconnecting --> offline: 5 failed attempts, or 30 s down
 ```
 
-</div>
-
-| מצב | מה הלוח עושה |
+| State | What the board is doing |
 |---|---|
-| `booting` | בודק את החומרה ומתחבר. כל בדיקה מדווחת בשורת `@@STAGE` |
-| `ready` | מחכה ל-Talk |
-| `armed` | Hands-free דלוק: מקשיב לרעש ומחכה לדיבור |
-| `listening` | מקליט ושולח ל-OpenAI |
-| `processing` | ההקלטה נגמרה, מחכה לתשובה |
-| `tool` | מבצע כלי (למשל מדליק LED). הפרטים אומרים איזה. המצב נגמר גם כשהשאלה נכשלה או שהחיבור נפל, ולא נשאר תקוע |
-| `speaking` | מנגן את התשובה. הפרטים `greeting`, `timer` או `typed` כשהוא עונה בלי הקלטה, וגם בין הבקשה לתשובה כזו לבין תחילת הקול שלה. בזמן הזה Talk נדחה |
-| `saving` | מסיים לשמור את התשובה ל-SD |
-| `reconnecting` | החיבור ל-OpenAI נפל ומתחבר מחדש |
-| `offline` | אין Wi-Fi או אין OpenAI (גם כשיש Wi-Fi בלי אינטרנט, ואז נורית OpenAI אדומה). ממשיך לנסות כל 30 שניות, ומיד כש-Wi-Fi חוזר (כל שנייה במשך 10 שניות); הטיימר והפקדים עובדים. הפרטים אומרים `no Wi-Fi` או `OpenAI unreachable` |
-| `halted` | נעצר: משימת המיקרופון לא עלתה (חוסר זיכרון בהדלקה). המצב היחיד שדורש Reset |
+| `booting` | Checking the hardware and connecting. Each check is reported in a `@@STAGE` line |
+| `ready` | Waiting for Talk |
+| `armed` | Hands-free is on: listening to the noise and waiting for speech |
+| `listening` | Recording and sending to OpenAI |
+| `processing` | The recording has ended, waiting for the answer |
+| `tool` | Running a tool (for example turning on the LED). The details say which one. The state also ends when the question failed or the connection dropped, and does not get stuck |
+| `speaking` | Playing the answer. The details are `greeting`, `timer` or `typed` when it answers without a recording, also between the request for such an answer and the start of its audio. During this time Talk is rejected |
+| `saving` | Finishing saving the answer to the SD card |
+| `reconnecting` | The connection to OpenAI dropped and it is reconnecting |
+| `offline` | No Wi-Fi or no OpenAI (also when there is Wi-Fi without internet, and then the OpenAI light is red). It keeps retrying every 30 seconds, and immediately when the Wi-Fi comes back (every second for 10 seconds); the timer and the controls work. The details say `no Wi-Fi` or `OpenAI unreachable` |
+| `halted` | Stopped: the microphone task did not start (out of memory at boot). The only state that requires a Reset |
 
-### איך המצב מחושב (מכונת המצבים)
+### How the state is computed (the state machine)
 
-הלוגיקה של השיחה מחזיקה דגלים, אחד לכל מקור של אירועים: ההקלטה (`is_capturing`), השאלה שמחכה לתשובה (`awaiting_reply`), תשובה שעוד לא הסתיימה בשרת (`response_in_flight`), ניגון (`speech_in_progress`), וכלי (`function_call_turn_pending`). הפונקציה `updatePipelineState()` ב-`state_machine.ino` היא המקום היחיד שמחליט מה המצב, בסדר עדיפויות קבוע:
+The conversation logic keeps flags, one for each source of events: the recording (`is_capturing`), the question waiting for an answer (`awaiting_reply`), an answer that has not finished on the server yet (`response_in_flight`), playback (`speech_in_progress`), and a tool (`function_call_turn_pending`). The `updatePipelineState()` function in `state_machine.ino` is the only place that decides what the state is, by a fixed order of priority:
 
-| עדיפות | תנאי | מצב |
+| Priority | Condition | State |
 |---|---|---|
-| 1 | נעצר | `halted` |
-| 2 | אין סשן, ו-(אין Wi-Fi, או 5 ניסיונות, או 30 שניות בלי חיבור) | `offline` |
-| 3 | אין סשן, עוד לא היה חיבור | `booting` |
-| 4 | אין סשן, היה חיבור | `reconnecting` |
-| 5 | כלי באמצע | `tool` |
-| 6 | מנגן | `speaking` |
-| 7 | מקליט | `listening` |
-| 8 | מחכה לתשובה | `processing` |
-| 9 | ביקש ברכה, הודעת טיימר או תשובה לשאלה בכתב, והקול שלה עוד לא התחיל | `speaking` |
-| 10 | שומר תשובה ל-SD | `saving` |
-| 11 | Hands-free מחכה לדיבור | `armed` |
-| 12 | אחרת | `ready` |
+| 1 | Halted | `halted` |
+| 2 | No session, and (no Wi-Fi, or 5 attempts, or 30 seconds without a connection) | `offline` |
+| 3 | No session, there has not been a connection yet | `booting` |
+| 4 | No session, there was a connection | `reconnecting` |
+| 5 | A tool in progress | `tool` |
+| 6 | Playing | `speaking` |
+| 7 | Recording | `listening` |
+| 8 | Waiting for an answer | `processing` |
+| 9 | Requested a greeting, a timer message or an answer to a typed question, and its audio has not started yet | `speaking` |
+| 10 | Saving an answer to the SD card | `saving` |
+| 11 | Hands-free waiting for speech | `armed` |
+| 12 | Otherwise | `ready` |
 
-הסיבה לדגלים ולא ל-enum עם מעברים מתועדת ב-[decisions.md](decisions.md).
+The reason for flags rather than an enum with transitions is documented in [decisions.md](decisions.md).
 
-## זרימת השימוש
-
-<div dir="ltr">
+## The usage flow
 
 ```mermaid
 flowchart TD
@@ -189,99 +202,95 @@ flowchart TD
   RECON -- "5 attempts" --> OFF
 ```
 
-</div>
+There is no "stuck" state: every state that waits for the server ends after 15 seconds of silence (and the connection is closed, so it reconnects or goes offline), the heartbeat detects a dead connection even with no open question, and Cancel (or the BOOT button) cancels a recording or an answer at any moment. Talk, LISTEN and BOOT are rejected as long as the assistant is answering (for example a greeting, a timer message or an answer to a typed question), so as not to disrupt it, and the state at that time is `speaking`. An error from the server sends Hands-free back to listening immediately, without waiting 15 seconds, and a connection drop in the middle of a question fails only that question (`LISTEN #N FAILED`), with no `HANDS-FREE FAILED` verdict.
 
-אין מצב "תקוע": כל מצב שמחכה לשרת נגמר אחרי 15 שניות של שקט (והחיבור נסגר, כדי שיתחבר מחדש או יעבור ל-offline), פעימת הלב מגלה חיבור מת גם בלי שאלה פתוחה, ו-Cancel (או כפתור BOOT) מבטל הקלטה או תשובה בכל רגע. Talk, LISTEN ו-BOOT נדחים כל עוד העוזר עונה (למשל ברכה, הודעת טיימר או תשובה לשאלה בכתב), כדי לא לשבש אותה, וה-state באותו זמן הוא `speaking`. שגיאה מהשרת מחזירה את Hands-free להקשיב מיד, בלי לחכות 15 שניות, וניתוק החיבור באמצע שאלה נכשל רק אותה (`LISTEN #N FAILED`), בלי כרוז `HANDS-FREE FAILED`.
+## The protocol between the board and the control center
 
-## הפרוטוקול בין הלוח למרכז הבקרה
+The board prints two kinds of lines to Serial: a regular log for humans, and lines that start with `@@` for the control center. That way the control center does not need to guess from the log. Each line is a word after `@@` and then the details, separated by spaces. The `STATUS` command prints the whole state again, so the control center gets up to date even if it connected in the middle. Replay plays the same lines: the control center reads a saved log (also one from `tools/serial_logger.ps1`) as if the board were connected, and such lines do not go into the live statistics or into the saved log. The board works only at 115200 baud.
 
-הלוח מדפיס ל-Serial שני סוגי שורות: לוג רגיל לבני אדם, ושורות שמתחילות ב-`@@` בשביל מרכז הבקרה. כך מרכז הבקרה לא צריך לנחש מתוך הלוג. כל שורה היא מילה אחרי `@@` ואז הפרטים, מופרדים ברווחים. הפקודה `STATUS` מדפיסה מחדש את כל המצב, וכך מרכז הבקרה מתעדכן גם אם התחבר באמצע. אותן שורות מנגן גם Replay: מרכז הבקרה קורא לוג שמור (גם של `tools/serial_logger.ps1`) כאילו הלוח מחובר, ושורות כאלה לא נכנסות לסטטיסטיקה החיה ולא ללוג שנשמר. הלוח עובד רק ב-115200 baud.
+### Status lines (from the board)
 
-### שורות סטטוס (מהלוח)
-
-| שורה | דוגמה | מה היא אומרת |
+| Line | Example | What it says |
 |---|---|---|
-| `@@STAGE` | `@@STAGE wifi ok <board-ip>` | תוצאה של בדיקת עלייה: sd, mic, speaker, wifi, time, openai |
-| `@@STATE` | `@@STATE tool set_volume` | המצב של העוזר (הטבלה למעלה) |
-| `@@HEARD` | `@@HEARD Turn on the light.` | מה שהמשתמש אמר, בטקסט |
-| `@@SAID` | `@@SAID Done, the light is on.` | מה שהעוזר ענה, בטקסט |
-| `@@RESULT` | `@@RESULT pass 4` | האם הפקודה ה-4 הצליחה, ואם לא, למה |
-| `@@MIC_LEVEL` | `@@MIC_LEVEL -32` | עוצמת המיקרופון בזמן הקלטה (dBFS), 10 פעמים בשנייה |
-| `@@WIFI` | `@@WIFI -58` | עוצמת ה-Wi-Fi |
-| `@@LED` | `@@LED on 100 voice` | מצב ה-LED, הבהירות, ומי שינה אותו: `voice` (קול), `gui` (מרכז הבקרה) או `status` (הדפסה מחדש בתשובה ל-`STATUS`) |
-| `@@VOLUME` | `@@VOLUME 30 unmuted` | עוצמת הרמקול והאם מושתק |
-| `@@BEEP` | `@@BEEP played` | צפצוף הבדיקה נוגן, או `busy` |
-| `@@LIGHT` | `@@LIGHT 4000 day 1000 3000` | קריאת חיישן האור, חלק היום והספים |
-| `@@TIMER` | `@@TIMER 45 60 check the oven` | 45 מתוך 60 שניות נשארו, ועל מה התזכורת (אם יש). גם `off`, ו-`done` כשהוא מצלצל |
-| `@@CLOCK` | `@@CLOCK 14:05 1792235100` | השעה המקומית של הלוח (ו-Unix time). `unset` אם השעון לא סונכרן. ה-Self-test משווה אותה לשעה במחשב |
-| `@@VAD` | `@@VAD on 3 900` | Hands-free דלוק או כבוי, רגישות (1-5) וכמה מילישניות שקט מסיימות משפט |
-| `@@VAD_LEVEL` | `@@VAD_LEVEL -48 -55 -40` | הרעש עכשיו, רעש הרקע והסף, בזמן ש-Hands-free מקשיב |
-| `@@VAD_EVENT` | `@@VAD_EVENT discarded short 180` | דיבור התחיל (`started`), נשלח (`sent`), נזרק כי לא נשמע כמו דיבור (`discarded short\|unvoiced\|steady`), או השהיה אחרי הרבה רעש (`paused`) |
-| `@@TIMING` | `@@TIMING n=4 result=pass ...` | הזמנים של פקודה אחת, לגרף ולטבלת המדידות. `n` מתחיל מ-1 אחרי כל הפעלה מחדש של הלוח, ולכן ה-CSV של מרכז הבקרה מכיל `board_session` ו-`board_command` (בגרף: `#2.7`, הפקודה ה-7 של ההפעלה השנייה) |
-| `@@BOOT_TIMING` | `@@BOOT_TIMING ... total_ms=6120` | כמה זמן לקח כל שלב בעלייה |
-| `@@HEAP` | `@@HEAP free=139900 largest=110580 ...` | הזיכרון הפנוי אחרי כל שלב |
-| `@@WIFI_NET` | `@@WIFI_NET saved <hotspot>` | איזו רשת הלוח משתמש בה: `saved` (נשמרה ממרכז הבקרה) או `default` (מ-`SECRETS.h`, גם כשהלוח עבר אליה כי הרשת השמורה נכשלה פעמיים). אף פעם לא הסיסמה |
-| `@@OPENAI_KEY` | `@@OPENAI_KEY saved sk-...AbCd` | באיזה מפתח API הלוח משתמש: `saved` (נשמר ממרכז הבקרה) או `default` (מ-`SECRETS.h`, גם כשהלוח עבר אליו כי OpenAI דחו את השמור פעמיים). רק 3 התווים הראשונים ו-4 האחרונים, אף פעם לא המפתח המלא |
-| `@@BUTTON` | `@@BUTTON off` | האם כפתור BOOT משמש ככפתור Talk |
-| `@@SOUNDS` | `@@SOUNDS on` | האם צלילי המצב מודלקים |
-| `@@ALIVE` | `@@ALIVE 125` | פעימת חיים: זמן מההדלקה בשניות, כל 5 שניות מתוך `loop()`. אחרי ה-`@@ALIVE` הראשון, 15 שניות בלי אף שורה מהלוח מאפרות את הסטטוס במרכז הבקרה ("Board not responding"), והשורה הבאה מחזירה אותו. לא מודפסת בזמן ההמתנות ב-`setup()` ובזמן הורדת הקלטה, ושם גם אין בדיקה (כמו ב-Replay). לוח עם קושחה ישנה, שלא שולח אותה, אף פעם לא מסומן |
-| `@@LIMITS` | `@@LIMITS max_ask_bytes=200 max_ssid_bytes=32 min_password_bytes=8 max_password_bytes=64 min_api_key_bytes=20 max_api_key_bytes=200 max_kept_recordings=5 mic_gain=2 light_max=6142 max_utterance_ms=10000 vad_sensitivity_min=1 vad_sensitivity_max=5 vad_hangover_min_ms=600 vad_hangover_max_ms=1500` | הגבולות שהלוח עובד איתם, ישר מהקבועים בקושחה: אורך `ASK`, אורך שם וסיסמת Wi-Fi, אורך מפתח ה-API, כמה הקלטות נשמרות, ההגברה, הערך המרבי של חיישן האור, אורך הפקודה הקולית הארוכה ביותר וטווחי ה-Hands-free. מודפסת בהדלקה ובתשובה ל-`STATUS`. מרכז הבקרה משתמש בהם לבדיקת הקלט, ואם הם לא הגיעו (קושחה ישנה) נשארות ברירות המחדל שבדף |
+| `@@STAGE` | `@@STAGE wifi ok <board-ip>` | The result of a startup check: sd, mic, speaker, wifi, time, openai |
+| `@@STATE` | `@@STATE tool set_volume` | The assistant's state (the table above) |
+| `@@HEARD` | `@@HEARD Turn on the light.` | What the user said, as text |
+| `@@SAID` | `@@SAID Done, the light is on.` | What the assistant answered, as text |
+| `@@RESULT` | `@@RESULT pass 4` | Whether command 4 succeeded, and if not, why |
+| `@@MIC_LEVEL` | `@@MIC_LEVEL -32` | The microphone level while recording (dBFS), 10 times a second |
+| `@@WIFI` | `@@WIFI -58` | The Wi-Fi signal strength |
+| `@@LED` | `@@LED on 100 voice` | The LED state, the brightness, and who changed it: `voice`, `gui` (the control center) or `status` (reprinted in answer to `STATUS`) |
+| `@@VOLUME` | `@@VOLUME 30 unmuted` | The speaker volume and whether it is muted |
+| `@@BEEP` | `@@BEEP played` | The test beep was played, or `busy` |
+| `@@LIGHT` | `@@LIGHT 4000 day 1000 3000` | The light sensor reading, the part of the day and the thresholds |
+| `@@TIMER` | `@@TIMER 45 60 check the oven` | 45 of 60 seconds are left, and what the reminder is about (if any). Also `off`, and `done` when it rings |
+| `@@CLOCK` | `@@CLOCK 14:05 1792235100` | The board's local time (and Unix time). `unset` if the clock was not synchronized. The Self-test compares it with the time on the computer |
+| `@@VAD` | `@@VAD on 3 900` | Hands-free on or off, the sensitivity (1-5) and how many milliseconds of silence end a sentence |
+| `@@VAD_LEVEL` | `@@VAD_LEVEL -48 -55 -40` | The current noise, the background noise and the threshold, while Hands-free is listening |
+| `@@VAD_EVENT` | `@@VAD_EVENT discarded short 180` | Speech started (`started`), was sent (`sent`), was discarded because it did not sound like speech (`discarded short\|unvoiced\|steady`), or a pause after a lot of noise (`paused`) |
+| `@@TIMING` | `@@TIMING n=4 result=pass ...` | The times of one command, for the graph and the measurement table. `n` starts from 1 after every restart of the board, so the control center's CSV contains `board_session` and `board_command` (in the graph: `#2.7`, the 7th command of the second session) |
+| `@@BOOT_TIMING` | `@@BOOT_TIMING ... total_ms=6120` | How long each stage of the boot took |
+| `@@HEAP` | `@@HEAP free=139900 largest=110580 ...` | The free memory after each stage |
+| `@@WIFI_NET` | `@@WIFI_NET saved <hotspot>` | Which network the board is using: `saved` (saved from the control center) or `default` (from `SECRETS.h`, also when the board switched to it because the saved network failed twice). Never the password |
+| `@@OPENAI_KEY` | `@@OPENAI_KEY saved sk-...AbCd` | Which API key the board is using: `saved` (saved from the control center) or `default` (from `SECRETS.h`, also when the board switched to it because OpenAI refused the saved one twice). Only the first 3 and the last 4 characters, never the full key |
+| `@@BUTTON` | `@@BUTTON off` | Whether the BOOT button works as the Talk button |
+| `@@SOUNDS` | `@@SOUNDS on` | Whether the status sounds are turned on |
+| `@@ALIVE` | `@@ALIVE 125` | A heartbeat: the time since boot in seconds, every 5 seconds from `loop()`. After the first `@@ALIVE`, 15 seconds without any line from the board gray out the status in the control center ("Board not responding"), and the next line restores it. It is not printed during the waits in `setup()` or while a recording is downloading, and there is no check there either (as in Replay). A board with old firmware, which does not send it, is never marked |
+| `@@LIMITS` | `@@LIMITS max_ask_bytes=200 max_ssid_bytes=32 min_password_bytes=8 max_password_bytes=64 min_api_key_bytes=20 max_api_key_bytes=200 max_kept_recordings=5 mic_gain=2 light_max=6142 max_utterance_ms=10000 vad_sensitivity_min=1 vad_sensitivity_max=5 vad_hangover_min_ms=600 vad_hangover_max_ms=1500` | The limits the board works with, straight from the constants in the firmware: the `ASK` length, the Wi-Fi name and password length, the API key length, how many recordings are kept, the gain, the maximum light sensor value, the length of the longest voice command and the Hands-free ranges. Printed at boot and in answer to `STATUS`. The control center uses them to check input, and if they did not arrive (old firmware) the page's defaults stay |
 
-### שורות של העברת קבצים (מהלוח)
+### File transfer lines (from the board)
 
-`@@LIST_BEGIN`, `@@FILE <name> <size>`, `@@LIST_END <count>` עונות ל-`LIST`. ‏`@@GET_BEGIN <name> <size>`, ואחריה הבייטים עצמם, ואז `@@GET_END <name> <crc32>` עונות ל-`GET`. מרכז הבקרה בודק את ה-CRC כדי לדעת שהקובץ הגיע שלם. ‏`@@SAVED` ו-`@@DELETED` אומרות שהקלטה נוספה או נמחקה. ‏`@@BUSY` אומרת שהלוח באמצע שיחה ולא יכול לשלוח קובץ עכשיו. ‏`@@GET_ERROR`, `@@DELETE_ERROR` ו-`@@DELETE_ALL_ERROR` אומרות שהפקודה נכשלה (למשל אין קובץ כזה), ו-`@@DELETE_ALL_DONE` שהמחיקה של תיקייה שלמה הסתיימה.
+`@@LIST_BEGIN`, `@@FILE <name> <size>`, `@@LIST_END <count>` answer `LIST`. `@@GET_BEGIN <name> <size>`, followed by the bytes themselves, and then `@@GET_END <name> <crc32>` answer `GET`. The control center checks the CRC to know that the file arrived complete. `@@SAVED` and `@@DELETED` say that a recording was added or deleted. `@@BUSY` says that the board is in the middle of a conversation and cannot send a file now. `@@GET_ERROR`, `@@DELETE_ERROR` and `@@DELETE_ALL_ERROR` say that the command failed (for example there is no such file), and `@@DELETE_ALL_DONE` that deleting a whole folder finished.
 
-### פקודות (מהמחשב ללוח)
+### Commands (from the computer to the board)
 
-אפשר להקליד אותן גם ב-Serial Monitor של Arduino. מרכז הבקרה שולח את אותן פקודות.
+You can also type them in the Arduino Serial Monitor. The control center sends the same commands.
 
-| פקודה | מה היא עושה |
+| Command | What it does |
 |---|---|
-| `LISTEN` | מקליט 3 שניות ושולח (כמו הכפתור Talk). נדחה, עם הודעה, בזמן הקלטה, תשובה, ברכה, הודעת טיימר או תשובה לשאלה בכתב |
-| `CANCEL` | מבטל את ההקלטה או התשובה שבאמצע |
-| `ASK <text>` | שולח שאלה כתובה, עד 200 בייטים (כ-100 אותיות בעברית, או 200 באנגלית; מה שארוך יותר נחתך). התשובה נאמרת בקול כרגיל, בלי הקלטה ובלי `@@TIMING`. הלוח מחזיר את הטקסט כ-`@@HEARD` |
-| `STATUS` | מדפיס מחדש את כל שורות הסטטוס |
-| `CLOCK` | מדפיס רק את `@@CLOCK` |
-| `VOLUME <0-100>`, `MUTE on\|off`, `BEEP` | הרמקול |
-| `SOUNDS on\|off` | צלילי מצב |
-| `BUTTON on\|off` | כפתור BOOT ככפתור Talk (ולחיצה ארוכה: בדיקת טכנאי) |
-| `WIFI`, `WIFI_SSID <name>`, `WIFI_PASSWORD [<password>]`, `WIFI_FORGET` | הרשת: מה בשימוש, שמירת רשת חדשה (השם, ואז הסיסמה, שמירה והתחברות), חזרה לברירת המחדל. הסיסמה היא כל מה שאחרי המילה ורווח אחד, כולל רווחים בקצוות (8-64 בתים; רווחים בלבד או כלום = רשת פתוחה) |
-| `OPENAI_KEY [<key>]`, `OPENAI_KEY_FORGET` | מפתח ה-API: מה בשימוש (בלי מפתח), שמירת מפתח חדש והתחברות מחדש מיד, חזרה למפתח של `SECRETS.h`. מפתח הוא `sk-` ואחריו רק אותיות, ספרות, `-` ו-`_`, באורך 20-200; אחר נדחה (`OPENAI_KEY ignored`) בלי שהמפתח מודפס |
-| `LAPTOP_PLAYBACK on [<ms>]`, `LAPTOP_PLAYBACK off` | מרכז הבקרה מנגן הקלטה ברמקולים של המחשב, עוד כ-ms מילישניות: Hands-free לא מקשיב עד `off` או עד שהזמן נגמר (5 דקות לכל היותר), ומשפט של Hands-free שכבר הוקלט מבוטל. לא נשמר ואין לו שורת `@@` |
-| `LED on\|off`, `LED_BRIGHTNESS <0-100>` | ה-LED |
-| `LIGHT <0-6142>`, `LIGHT_BANDS <evening> <day>` | חיישן האור המדומה והספים שלו |
-| `VAD on\|off`, `VAD_SENSITIVITY <1-5>`, `VAD_HANGOVER <600-1500>` | Hands-free (את `VAD on\|off` אפשר גם בקול: הכלי `set_hands_free` עושה בדיוק אותו דבר) |
-| `LIST`, `GET <name>`, `DELETE <name>`, `DELETE_ALL [replies\|commands]` | ההקלטות ב-SD |
+| `LISTEN` | Records for 3 seconds and sends (like the Talk button). Rejected, with a message, during a recording, an answer, a greeting, a timer message or an answer to a typed question |
+| `CANCEL` | Cancels the recording or the answer in progress |
+| `ASK <text>` | Sends a typed question, up to 200 bytes (about 100 letters in Hebrew, or 200 in English; anything longer is cut off). The answer is spoken as usual, without a recording and without `@@TIMING`. The board echoes the text back as `@@HEARD` |
+| `STATUS` | Prints all the status lines again |
+| `CLOCK` | Prints only `@@CLOCK` |
+| `VOLUME <0-100>`, `MUTE on\|off`, `BEEP` | The speaker |
+| `SOUNDS on\|off` | Status sounds |
+| `BUTTON on\|off` | The BOOT button as the Talk button (and a long press: the technician check) |
+| `WIFI`, `WIFI_SSID <name>`, `WIFI_PASSWORD [<password>]`, `WIFI_FORGET` | The network: what is in use, saving a new network (the name, then the password, saving and connecting), going back to the default. The password is everything after the word and one space, including spaces at the ends (8-64 bytes; only spaces or nothing = an open network) |
+| `OPENAI_KEY [<key>]`, `OPENAI_KEY_FORGET` | The API key: what is in use (without the key), saving a new key and reconnecting right away, going back to the key from `SECRETS.h`. A key is `sk-` followed only by letters, digits, `-` and `_`, 20-200 long; anything else is rejected (`OPENAI_KEY ignored`) without the key being printed |
+| `LAPTOP_PLAYBACK on [<ms>]`, `LAPTOP_PLAYBACK off` | The control center is playing a recording on the computer's speakers for about ms more milliseconds: Hands-free does not listen until `off` or until the time runs out (5 minutes at most), and a Hands-free sentence that was already recorded is canceled. Not saved, and it has no `@@` line |
+| `LED on\|off`, `LED_BRIGHTNESS <0-100>` | The LED |
+| `LIGHT <0-6142>`, `LIGHT_BANDS <evening> <day>` | The simulated light sensor and its thresholds |
+| `VAD on\|off`, `VAD_SENSITIVITY <1-5>`, `VAD_HANGOVER <600-1500>` | Hands-free (`VAD on\|off` also works by voice: the `set_hands_free` tool does exactly the same thing) |
+| `LIST`, `GET <name>`, `DELETE <name>`, `DELETE_ALL [replies\|commands]` | The recordings on the SD card |
 
-### כפתור BOOT: צלילים ובדיקת טכנאי
+### The BOOT button: sounds and technician check
 
-הצלילים של הכפתור תמיד דלוקים, לא תלויים ב-Status sounds (שנשאר כבוי כברירת מחדל), והם נשמעים לפי העוצמה, כלומר שותקים כשהרמקול מושתק.
+The button's sounds are always on, independent of Status sounds (which stays off by default), and they play at the current volume, meaning they are silent when the speaker is muted.
 
-- **צליל התחלה:** תקתוק קצר וגבוה (1320Hz, 60ms) לפני כל הקלטה ידנית: BOOT, Talk או `LISTEN`. בהקלטה של Hands-free אין צליל, כי הדיבור כבר התחיל.
-- **צליל סירוב:** צליל נמוך (220Hz, 120ms) כשלחיצה על BOOT לא יכולה להתחיל הקלטה (אין חיבור, הלוח לא מוכן, העוזר עונה, שומר את התשובה האחרונה או שהמיקרופון תפוס).
-- **בדיקת טכנאי, בלי מחשב ובלי רשת:** כשכפתור BOOT מודלק, החזקה של 2 שניות מנגנת 4 צפצופים לפי הסדר Wi-Fi, OpenAI, כרטיס SD, מיקרופון. צליל גבוה (880Hz) אומר שהבדיקה עברה, ונמוך (220Hz) שהיא נכשלה. עבור המיקרופון, "תקין" הוא שבדיקת האות בהדלקה עברה. הלחיצה הארוכה מבטלת את ההקלטה שאותה לחיצה התחילה.
+- **Start tone:** a short high tick (1320Hz, 60ms) before every manual recording: BOOT, Talk or `LISTEN`. A Hands-free recording has no tone, because the speech has already started.
+- **Rejection tone:** a low tone (220Hz, 120ms) when a BOOT press cannot start a recording (no connection, the board is not ready, the assistant is answering, it is saving the last answer or the microphone is in use).
+- **Technician check, without a computer or a network:** when the BOOT button is turned on, holding it for 2 seconds plays 4 beeps in the order Wi-Fi, OpenAI, SD card, microphone. A high tone (880Hz) says the check passed, and a low one (220Hz) that it failed. For the microphone, "OK" means that the signal check at boot passed. The long press cancels the recording that the same press started.
 
-## מצבי דמה (mocks)
+## Mocks
 
-כמה חלקים בפרויקט מוחלפים בדמה, כדי לבדוק ולהדגים בלי הרכיב האמיתי או בלי הלוח:
+Some parts of the project are replaced by a mock, to test and demo without the real component or without the board:
 
-| דמה | מחליף את | איך משתמשים |
+| Mock | Replaces | How to use it |
 |---|---|---|
-| חיישן אור מדומה | LDR אמיתי (לא מחובר) | במרכז הבקרה: סליידר ידני, או Auto day-cycle שסורק יום מדומה (לילה, זריחה, יום, שקיעה) בשתי דקות עם רעש דמוי ADC, ושולח `LIGHT <ערך>` כל 1.5 שניות. נגיעה בסליידר מחזירה למצב ידני. הנתיב האמיתי: `#define LIGHT_SENSOR_PIN` ב-`parameters.h` (ואז הלוח קורא את ה-ADC ומתעלם מ-`LIGHT`) |
-| Replay של לוג שמור | הלוח כולו, בלי שום חומרה | **Replay a log** במרכז הבקרה קורא לוג של הלוח, למשל `Documentation/measurements/esp32_log_2026-10-15.txt`, ומנגן את אותן שורות `@@` כאילו הלוח מחובר |
-| `tools/vad_replay` | המיקרופון וגלאי הקול, על מחשב | מקמפל את `ESP32/vad_utils.cpp` שרץ על הלוח ומריץ אותו על קבצי WAV מוקלטים ([הקוד](../tools/vad_replay.cpp)) |
-| שאלה בכתב (`ASK`) | המיקרופון והדיבור | השדה Or type a question… או הפקודה `ASK <text>` במקום לדבר: התשובה נאמרת בקול כרגיל |
+| A simulated light sensor | A real LDR (not connected) | In the control center: a manual slider, or Auto day-cycle, which sweeps a simulated day (night, sunrise, day, sunset) in two minutes with ADC-like noise, and sends `LIGHT <value>` every 1.5 seconds. Touching the slider returns to manual mode. The real path: `#define LIGHT_SENSOR_PIN` in `parameters.h` (and then the board reads the ADC and ignores `LIGHT`) |
+| Replay of a saved log | The whole board, with no hardware at all | **Replay a log** in the control center reads a board log, for example `Documentation/measurements/esp32_log_2026-10-15.txt`, and plays the same `@@` lines as if the board were connected |
+| `tools/vad_replay` | The microphone and the voice detector, on a computer | Compiles `ESP32/vad_utils.cpp`, which runs on the board, and runs it on recorded WAV files ([the code](../tools/vad_replay.cpp)) |
+| A typed question (`ASK`) | The microphone and speech | The Or type a question… field or the `ASK <text>` command instead of speaking: the answer is spoken as usual |
 
-## כלי חדש בשלושה צעדים
+## A new tool in three steps
 
-ככה הוספנו את `set_volume`, `get_current_time`, `set_timer`, `get_board_status` ו-`set_hands_free`:
+This is how we added `set_volume`, `get_current_time`, `set_timer`, `get_board_status` and `set_hands_free`:
 
-1. מוסיפים את הכלי לרשימת הכלים בהודעת ההגדרות של הסשן (`kSessionUpdateMessage` ב-`realtime_session_config.h`): שם, תיאור באנגלית למודל, וסכמת JSON של הפרמטרים.
-2. כותבים פונקציה במודול המתאים שקוראת את הפרמטרים, מבצעת, מדפיסה שורת `@@` ושולחת ל-OpenAI את התוצאה (`function_call_output`) עם `esp32va_openai::sendFunctionCallOutput()`. את הבקשה לענות (`response.create`) שולח `server_events.ino` פעם אחת, כשהתשובה עם הכלים נגמרת.
-3. מוסיפים את שם הכלי ל-dispatch ב-`server_events.ino`. אם צריך, מלמדים את מרכז הבקרה את שורת ה-`@@` החדשה.
+1. Add the tool to the list of tools in the session configuration message (`kSessionUpdateMessage` in `realtime_session_config.h`): a name, a description in English for the model, and a JSON schema of the parameters.
+2. Write a function in the right module that reads the parameters, carries out the action, prints an `@@` line and sends the result to OpenAI (`function_call_output`) with `esp32va_openai::sendFunctionCallOutput()`. The request to answer (`response.create`) is sent by `server_events.ino` once, when the answer with the tools ends.
+3. Add the tool's name to the dispatch in `server_events.ino`. If needed, teach the control center the new `@@` line.
 
-## זיכרון
+## Memory
 
-ל-ESP32-WROOM-32 שלנו אין PSRAM. בהדלקה פנויים כ-215KB, וכשהסשן מוכן נשארים רק כ-38KB, כי החיבור המוצפן וה-WebSocket לבדם לוקחים כ-51KB. לכן לא שומרים הקלטה שלמה בזיכרון אלא שולחים כל 100ms מיד, מבקשים מ-OpenAI תשובה ב-mu-law ‏8kHz (קטנה פי 6), ומודדים את הזיכרון אחרי כל שלב (`@@HEAP`). הפירוט והמספרים ב-[README](../README.md), בחלק של המדידות.
-
-</div>
+Our ESP32-WROOM-32 has no PSRAM. At boot about 215KB are free, and when the session is ready only about 38KB are left, because the encrypted connection and the WebSocket alone take about 51KB. So we do not keep a whole recording in memory but send every 100ms right away, ask OpenAI for an answer in 8kHz mu-law (6 times smaller), and measure the memory after each stage (`@@HEAP`). The details and the numbers are in the [README](../README.md), in the measurements section.
