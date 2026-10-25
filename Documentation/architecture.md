@@ -47,7 +47,7 @@ The ESP32 does not understand speech by itself. It records, sends, plays and car
 
 Each module is a pair of files `xxx_utils.h/.cpp` in the `ESP32/` folder, with its own namespace (`esp32va_...`). The sketch `ESP32.ino` connects them all: it holds the conversation state and decides what to do at each moment. It is split into Arduino tabs, which the Arduino IDE joins into one file when compiling. Access to each hardware component is concentrated in one module: I2S only in `i2s_audio_utils`, the LED only in `board_state_utils`, the SD card only in the SD modules, the button only in `button_utils`.
 
-Each module is a single object: its internal state is in the `.cpp` file (private), and the `.h` file is the interface. Why a namespace and not a class is explained in [decisions.md](development_steps/decisions.md). Which hardware component belongs to which module:
+Each module is a single object: its internal state is in the `.cpp` file (private), and the `.h` file is the interface. Which hardware component belongs to which module:
 
 | Hardware | The module | The namespace |
 |---|---|---|
@@ -98,7 +98,7 @@ Three files without code: `parameters.h` (all the fixed parameters - see [Parame
 
 ## What happens in the main loop
 
-The `loop()` function runs all the time and does not get stuck at any stage, except for downloading a recording (`GET`): it holds `loop()` for the whole transfer on purpose, because nothing may get mixed in between the file's bytes (about 3 seconds for an answer, up to about 40 seconds for a 10-second voice command in Hands-free). Hands-free is paused before that, and the control center locks Talk and Ask and shows "Downloading…" during that time (see [decisions.md](development_steps/decisions.md)). In each normal iteration it:
+The `loop()` function runs all the time and does not get stuck at any stage, except for downloading a recording (`GET`): it holds `loop()` for the whole transfer on purpose, because nothing may get mixed in between the file's bytes (about 3 seconds for an answer, up to about 40 seconds for a 10-second voice command in Hands-free). Hands-free is paused before that, and the control center locks Talk and Ask and shows "Downloading…" during that time. In each normal iteration it:
 
 1. Receives messages from OpenAI (unless the speaker buffer is almost full, and then it pauses a little so the playback catches up).
 2. Checks whether something was typed on Serial (from the computer or from the control center).
@@ -174,8 +174,6 @@ The conversation logic keeps flags, one for each source of events: the recording
 | 10 | Saving an answer to the SD card | `saving` |
 | 11 | Hands-free waiting for speech | `armed` |
 | 12 | Otherwise | `ready` |
-
-The reason for flags rather than an enum with transitions is documented in [decisions.md](development_steps/decisions.md).
 
 ## The usage flow
 
@@ -293,4 +291,4 @@ This is how we added `set_volume`, `get_current_time`, `set_timer`, `get_board_s
 
 ## Memory
 
-Our ESP32-WROOM-32 has no PSRAM. At boot about 215KB are free, and when the session is ready only about 38KB are left, because the encrypted connection and the WebSocket alone take about 51KB. So we do not keep a whole recording in memory but send every 100ms right away, ask OpenAI for an answer in 8kHz mu-law (6 times smaller), and measure the memory after each stage (`@@HEAP`). The details and the numbers are in the [README](../README.md), in the measurements section.
+Our ESP32-WROOM-32 has no PSRAM. At boot about 215KB are free, and when the session is ready only about 38KB are left, because the encrypted connection and the WebSocket alone take about 51KB. So we do not keep a whole recording in memory but send every 100ms right away, ask OpenAI for an answer in 8kHz mu-law (6 times smaller), and measure the memory after each stage (`@@HEAP`). The details and the numbers are in the in the [measurements section](measurements/latency-vad-analysis.md).
