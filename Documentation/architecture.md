@@ -1,12 +1,12 @@
 ## How it works
 
-![The path of one sentence](Documentation/images/sentence-path.png)
+![The path of one sentence](images/sentence-path.png)
 
 1. A separate task (FreeRTOS) reads the microphone at 24kHz every 20ms, even when the main loop is busy.
 2. Every 100ms of audio is sent right away over a single encrypted WebSocket connection to OpenAI. We do not wait for the end of the recording, because 3 seconds of raw audio do not even fit in the free memory.
 3. The model answers with mu-law audio at 8kHz (6 times smaller than PCM at 24kHz). The ESP32 decodes and plays it.
 4. When the model wants to do something on the board, it calls a "tool" with a JSON schema. The ESP32 carries it out and returns a result, and the model says what was done.
-5. The board constantly prints `@@...` lines to Serial, and the control center reads them ([the protocol](Documentation/architecture.md)).
+5. The board constantly prints `@@...` lines to Serial, and the control center reads them ([the protocol](#the-protocol-between-the-board-and-the-control-center)).
 
 ### The tools the model can call
 
@@ -20,7 +20,7 @@
 | `set_hands_free` | Turns Hands-free on or off, exactly like the switch in the control center. Only when the current question explicitly asks for it: a question about the mode, or a passing mention of a button, changes nothing | `Switch to hands-free mode`, `I want to talk without pressing a button`, `Disable VAD` |
 | `set_timer` | A timer of 1 to 3600 seconds (20 to 60 seconds in the demo), or a cancel (0). Above an hour, it sets one hour and the assistant says so. A negative value or one shorter than a second is rejected, and the assistant asks again without touching the running timer. At the end the assistant says so out loud (including what the reminder is about), and it can turn the light on or off | `Remind me in 30 seconds to check the oven`, `Turn off the light in 20 seconds` |
 
-![What happens when you ask to turn on the light](Documentation/images/led-sequence.png)
+![What happens when you ask to turn on the light](images/led-sequence.png)
 
 
 # How the Code Is Built - Voice Assistant on ESP32
@@ -47,7 +47,7 @@ The ESP32 does not understand speech by itself. It records, sends, plays and car
 
 Each module is a pair of files `xxx_utils.h/.cpp` in the `ESP32/` folder, with its own namespace (`esp32va_...`). The sketch `ESP32.ino` connects them all: it holds the conversation state and decides what to do at each moment. It is split into Arduino tabs, which the Arduino IDE joins into one file when compiling. Access to each hardware component is concentrated in one module: I2S only in `i2s_audio_utils`, the LED only in `board_state_utils`, the SD card only in the SD modules, the button only in `button_utils`.
 
-Each module is a single object: its internal state is in the `.cpp` file (private), and the `.h` file is the interface. Why a namespace and not a class is explained in [decisions.md](decisions.md). Which hardware component belongs to which module:
+Each module is a single object: its internal state is in the `.cpp` file (private), and the `.h` file is the interface. Why a namespace and not a class is explained in [decisions.md](development_steps/decisions.md). Which hardware component belongs to which module:
 
 | Hardware | The module | The namespace |
 |---|---|---|
@@ -98,7 +98,7 @@ Three files without code: `parameters.h` (all the fixed parameters - see [Parame
 
 ## What happens in the main loop
 
-The `loop()` function runs all the time and does not get stuck at any stage, except for downloading a recording (`GET`): it holds `loop()` for the whole transfer on purpose, because nothing may get mixed in between the file's bytes (about 3 seconds for an answer, up to about 40 seconds for a 10-second voice command in Hands-free). Hands-free is paused before that, and the control center locks Talk and Ask and shows "Downloading…" during that time (see [decisions.md](decisions.md)). In each normal iteration it:
+The `loop()` function runs all the time and does not get stuck at any stage, except for downloading a recording (`GET`): it holds `loop()` for the whole transfer on purpose, because nothing may get mixed in between the file's bytes (about 3 seconds for an answer, up to about 40 seconds for a 10-second voice command in Hands-free). Hands-free is paused before that, and the control center locks Talk and Ask and shows "Downloading…" during that time (see [decisions.md](development_steps/decisions.md)). In each normal iteration it:
 
 1. Receives messages from OpenAI (unless the speaker buffer is almost full, and then it pauses a little so the playback catches up).
 2. Checks whether something was typed on Serial (from the computer or from the control center).
@@ -175,7 +175,7 @@ The conversation logic keeps flags, one for each source of events: the recording
 | 11 | Hands-free waiting for speech | `armed` |
 | 12 | Otherwise | `ready` |
 
-The reason for flags rather than an enum with transitions is documented in [decisions.md](decisions.md).
+The reason for flags rather than an enum with transitions is documented in [decisions.md](development_steps/decisions.md).
 
 ## The usage flow
 
