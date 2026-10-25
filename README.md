@@ -15,6 +15,8 @@ Speech understanding happens in the cloud (OpenAI Realtime API). The ESP32 recor
 
 ## What the system can do
 
+**Video demonstration of the project and its features:** https://drive.google.com/file/d/18b7o9JYI_UnBhdHhpz3ga1AraWUzJNcB/view?usp=sharing
+
 - **Push to talk:** Talk button in the control center, the space bar, or the **BOOT button on the board** - You speak for 3 seconds.
 - **Hands-free:** no button. A voice activity detector (VAD) on the ESP32 starts recording when you start speaking and stops when you stop, and is not set off by non speech voices like knocks, claps or footsteps. You turn it on and off with a switch in the Web control center or by a voice command (`Switch to hands-free mode`, `Go back to the button`).
 - **Controlling the board by voice:** `Turn on the light`, `Dim the light to 30 percent`, `Set the volume to 30 percent`, `A bit louder`.
